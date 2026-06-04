@@ -3,10 +3,10 @@
  * Autonomous learning pipeline — no prompts. Runs phases sequentially.
  * Override cycles via env (defaults tuned for cloud VM).
  */
-import { spawnSync } from "node:child_process";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runNpm } from "./lib/run-npm.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const logDir = join(root, "apps/one-agent/data/learning");
@@ -45,8 +45,8 @@ console.log("[pipeline] ZAMBAHOLA autonomous dev — starting\n");
 
 for (const [phase, args] of phases) {
   const t0 = Date.now();
-  const r = spawnSync("npm", args, { cwd: root, env, stdio: "inherit" });
-  const ok = r.status === 0;
+  const r = runNpm(args, { cwd: root, env });
+  const ok = r.ok;
   log({
     phase,
     status: ok ? "ok" : "fail",
@@ -55,7 +55,7 @@ for (const [phase, args] of phases) {
   });
   if (!ok) {
     console.error(`[pipeline] Stopped at ${phase}`);
-    process.exit(r.status ?? 1);
+    process.exit(r.status);
   }
 }
 

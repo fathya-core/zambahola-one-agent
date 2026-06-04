@@ -2,28 +2,27 @@
 /**
  * Full repo verification — run in CI / cloud VM
  */
-import { spawnSync } from "node:child_process";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { runNpm } from "./lib/run-npm.mjs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const report = { ok: true, checks: [], ts: new Date().toISOString() };
 
-function run(name, cmd, args, env = {}) {
-  const r = spawnSync(cmd, args, {
+function run(name, npmArgs, env = {}) {
+  const r = runNpm(npmArgs, {
     cwd: root,
     env: { ...process.env, ...env },
-    encoding: "utf8",
-    timeout: 120_000,
+    stdio: "pipe",
   });
-  const pass = r.status === 0;
+  const pass = r.ok;
   if (!pass) report.ok = false;
   report.checks.push({
     name,
     pass,
     exit: r.status,
-    out: (r.stdout || r.stderr || "").slice(-800),
+    out: "",
   });
   console.log(pass ? `✓ ${name}` : `✗ ${name}`);
   return pass;
@@ -31,7 +30,7 @@ function run(name, cmd, args, env = {}) {
 
 console.log("[verify] ZAMBAHOLA full verification\n");
 
-run("setup", "npm", ["run", "setup"]);
+run("setup", ["run", "setup"]);
 {
   const stratDir = join(root, "apps/one-agent/src/prediction-engine/strategies");
   const files = readdirSync(stratDir).filter(
@@ -43,11 +42,11 @@ run("setup", "npm", ["run", "setup"]);
   console.log(pass ? `✓ strategy_count (${files.length})` : `✗ strategy_count (${files.length})`);
 }
 
-run("test_run", "npm", ["run", "agent:test-run"], { ZAMBAHOLA_FEED: "mock" });
-run("mega_backtest", "npm", ["run", "agent:mega-backtest"], {
+run("test_run", ["run", "agent:test-run"], { ZAMBAHOLA_FEED: "mock" });
+run("mega_backtest", ["run", "agent:mega-backtest"], {
   ZAMBAHOLA_KLINES: "400",
 });
-run("mega_train", "npm", ["run", "agent:mega-train"], {
+run("mega_train", ["run", "agent:mega-train"], {
   ZAMBAHOLA_KLINES: "300",
 });
 

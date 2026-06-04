@@ -2,10 +2,10 @@
 /**
  * Local machine — maximum prediction accuracy profile.
  */
-import { spawnSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runNpm } from "./lib/run-npm.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const envFile = join(root, "config", "max-accuracy.env");
@@ -23,28 +23,47 @@ function loadEnvFile(path) {
 }
 
 const fileEnv = loadEnvFile(envFile);
-const env = { ...process.env, ...fileEnv };
+const baseEnv = { ...process.env, ...fileEnv };
 const cmd = process.argv[2] ?? "train";
+const quick = process.argv.includes("--quick");
 
-console.log("[max-accuracy] mode=max\n");
+if (quick) {
+  baseEnv.ZAMBAHOLA_LEARN_CYCLES = "2";
+  baseEnv.ZAMBAHOLA_DEEP_CYCLES = "2";
+  baseEnv.ZAMBAHOLA_ULTRA_CYCLES = "2";
+  baseEnv.ZAMBAHOLA_ULTRA_KLINES = "400";
+  baseEnv.ZAMBAHOLA_KLINES = "300";
+}
+
+console.log("[max-accuracy] mode=max", quick ? "(quick test)" : "", "\n");
 console.log(
   "  feed:",
-  env.ZAMBAHOLA_FEED,
+  baseEnv.ZAMBAHOLA_FEED,
   "| fast:",
-  env.ZAMBAHOLA_FAST,
+  baseEnv.ZAMBAHOLA_FAST,
   "| horizon:",
-  env.ZAMBAHOLA_HORIZON_SEC,
-  "s\n",
+  baseEnv.ZAMBAHOLA_HORIZON_SEC,
+  "s",
+);
+console.log(
+  "  learn cycles:",
+  baseEnv.ZAMBAHOLA_LEARN_CYCLES,
+  "(each ~65s — do not close this window)\n",
 );
 
 if (cmd === "start") {
-  const r = spawnSync("npm", ["run", "agent:start"], {
+  const r = runNpm(["run", "agent:start"], {
     cwd: root,
-    env: { ...env, ZAMBAHOLA_LIVE_FILTER: "1" },
-    stdio: "inherit",
+    env: { ...baseEnv, ZAMBAHOLA_LIVE_FILTER: "1" },
   });
-  process.exit(r.status ?? 0);
+  process.exit(r.status);
 }
+
+const trainEnv = {
+  ...baseEnv,
+  ZAMBAHOLA_FEED: "mock",
+  ZAMBAHOLA_ACCURACY_FILTER: "off",
+};
 
 const phases = [
   ["learn", ["run", "agent:learn"]],
@@ -57,12 +76,8 @@ const phases = [
 
 for (const [name, args] of phases) {
   console.log(`\n[max-accuracy] === ${name} ===\n`);
-  const r = spawnSync("npm", args, {
-    cwd: root,
-    env: { ...env, ZAMBAHOLA_FEED: "mock", ZAMBAHOLA_ACCURACY_FILTER: "off" },
-    stdio: "inherit",
-  });
-  if (r.status !== 0) process.exit(r.status ?? 1);
+  const r = runNpm(args, { cwd: root, env: trainEnv });
+  if (!r.ok) process.exit(r.status);
 }
 
 console.log("\n[max-accuracy] Done. Live: npm run agent:max-accuracy:start\n");
