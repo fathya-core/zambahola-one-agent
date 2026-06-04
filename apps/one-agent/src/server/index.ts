@@ -10,6 +10,7 @@ import { DASHBOARD_PORT } from "../storage/paths.js";
 import { loadKnowledgeIndex } from "../../knowledge/loader.js";
 import { getSentiment } from "../sentiment/index.js";
 import { getOrderBook } from "../market-feed/orderbook.js";
+import { getMarketSignals } from "../market-signals/index.js";
 
 const dashboardDir = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -74,6 +75,9 @@ async function route(
   }
   if (path === "/api/evaluations") {
     return sendJson(res, 200, agent.evaluator.getEvaluations());
+  }
+  if (path === "/api/signals") {
+    return sendJson(res, 200, getMarketSignals());
   }
   if (path === "/api/orderbook") {
     return sendJson(res, 200, getOrderBook() ?? {});

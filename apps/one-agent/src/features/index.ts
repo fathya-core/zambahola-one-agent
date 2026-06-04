@@ -1,5 +1,6 @@
 import type { PredictionDirection } from "../types.js";
 import { getOrderBook } from "../market-feed/orderbook.js";
+import { getMarketSignals, signalsToFeatures } from "../market-signals/index.js";
 
 export interface FeatureVector {
   ret1: number;
@@ -14,12 +15,20 @@ export interface FeatureVector {
   bookImbalance: number;
   spreadBps: number;
   macdHistNorm: number;
+  fundingNorm: number;
+  premiumNorm: number;
+  longShortNorm: number;
+  volumeNorm: number;
+  timeSin: number;
+  timeCos: number;
 }
 
 export function extractFeatures(
   prices: number[],
+  volumes: number[],
   sentiment = 0,
   agreement = 0,
+  timestamp = Date.now(),
 ): FeatureVector | null {
   if (prices.length < 12) return null;
 
@@ -57,6 +66,16 @@ export function extractFeatures(
   const spreadBps = book ? book.spreadBps / 100 : 0;
 
   const macdHistNorm = computeMacdHistNorm(prices);
+  const sig = signalsToFeatures(getMarketSignals());
+
+  const volSlice = volumes.slice(-10);
+  const avgVol = volSlice.length ? volSlice.reduce((a, b) => a + b, 0) / volSlice.length : 1;
+  const lastVol = volumes[volumes.length - 1] ?? avgVol;
+  const volumeNorm = Math.max(-1, Math.min(1, (lastVol - avgVol) / (avgVol || 1)));
+
+  const hour = new Date(timestamp).getUTCHours() + new Date(timestamp).getUTCMinutes() / 60;
+  const timeSin = Math.sin((hour / 24) * Math.PI * 2);
+  const timeCos = Math.cos((hour / 24) * Math.PI * 2);
 
   return {
     ret1: ret(1),
@@ -71,6 +90,12 @@ export function extractFeatures(
     bookImbalance: Math.max(-1, Math.min(1, bookImbalance)),
     spreadBps: Math.min(1, spreadBps),
     macdHistNorm,
+    fundingNorm: sig.fundingNorm,
+    premiumNorm: sig.premiumNorm,
+    longShortNorm: sig.longShortNorm,
+    volumeNorm,
+    timeSin,
+    timeCos,
   };
 }
 
@@ -103,13 +128,19 @@ export function featuresToArray(f: FeatureVector): number[] {
     f.bookImbalance,
     f.spreadBps,
     f.macdHistNorm,
+    f.fundingNorm,
+    f.premiumNorm,
+    f.longShortNorm,
+    f.volumeNorm,
+    f.timeSin,
+    f.timeCos,
   ];
 }
 
-export const FEATURE_DIM = 13;
+export const FEATURE_DIM = 18;
 
 export function directionFromScore(score: number): PredictionDirection {
-  if (score > 0.15) return "up";
-  if (score < -0.15) return "down";
+  if (score > 0.12) return "up";
+  if (score < -0.12) return "down";
   return "range";
 }

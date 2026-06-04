@@ -17,7 +17,7 @@ const LR = 0.1;
 const L2 = 0.001;
 
 const DEFAULT_WEIGHTS = [
-  0, 0.45, 0.28, 0.18, -0.12, -0.22, 0.38, -0.14, 0.22, 0.3, 0.42, -0.08, 0.35,
+  0, 0.4, 0.25, 0.15, -0.1, -0.2, 0.35, -0.12, 0.2, 0.28, 0.38, -0.06, 0.3, 0.25, 0.2, 0.15, 0.1, 0.05,
 ];
 
 export class OnlineMLModel {
@@ -115,6 +115,12 @@ function normalizeFeatures(
     bookImbalance: f.bookImbalance ?? 0,
     spreadBps: f.spreadBps ?? 0,
     macdHistNorm: f.macdHistNorm ?? 0,
+    fundingNorm: f.fundingNorm ?? 0,
+    premiumNorm: f.premiumNorm ?? 0,
+    longShortNorm: f.longShortNorm ?? 0,
+    volumeNorm: f.volumeNorm ?? 0,
+    timeSin: f.timeSin ?? 0,
+    timeCos: f.timeCos ?? 0,
   };
 }
 

@@ -9,6 +9,7 @@ export interface StrategySignal {
 
 export interface StrategyContext {
   prices: number[];
+  volumes: number[];
   currentPrice: number;
 }
 

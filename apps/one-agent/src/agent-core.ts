@@ -1,6 +1,7 @@
 import type { MarketFeed } from "./market-feed/index.js";
 import { createMarketFeed } from "./market-feed/index.js";
 import { startSentimentLoop } from "./sentiment/index.js";
+import { startMarketSignalsLoop } from "./market-signals/index.js";
 import { PredictionEngine } from "./prediction-engine/index.js";
 import { strategyHitsFromVotes } from "./prediction-engine/ensemble.js";
 import {
@@ -59,6 +60,7 @@ export class AgentCore {
   private lastTick: MarketTick | null = null;
   private strategyHits: Record<string, { hits: number; total: number }> = {};
   private stopSentiment: (() => void) | null = null;
+  private stopMarketSignals: (() => void) | null = null;
   private listeners = new Set<TickHandler>();
   private boundOnTick = (tick: MarketTick) => void this.handleTick(tick);
 
@@ -87,6 +89,7 @@ export class AgentCore {
     this.startedAt = Date.now();
     await this.predictionEngine.init();
     this.stopSentiment = startSentimentLoop(90_000);
+    this.stopMarketSignals = startMarketSignalsLoop(45_000);
     await writeReceipt("agent-start", {
       symbol: this.feed.symbol,
       feed: this.feed.name,
@@ -103,6 +106,10 @@ export class AgentCore {
     if (this.stopSentiment) {
       this.stopSentiment();
       this.stopSentiment = null;
+    }
+    if (this.stopMarketSignals) {
+      this.stopMarketSignals();
+      this.stopMarketSignals = null;
     }
     this.running = false;
     await writeReceipt("agent-stop", { tickCount: this.tickCount });
@@ -269,6 +276,7 @@ export class AgentCore {
       regime: this.lastPrediction?.meta?.regime,
       sentimentScore: this.lastPrediction?.meta?.sentiment,
       mlSamples: this.lastPrediction?.meta?.mlSamples,
+      mlpSamples: this.lastPrediction?.meta?.mlpSamples,
       updatedAt: Date.now(),
     };
   }
