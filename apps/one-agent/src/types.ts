@@ -32,6 +32,11 @@ export interface PredictionMeta {
   mlpScore?: number;
   mlpProb?: number;
   mlpSamples?: number;
+  gbmScore?: number;
+  gbmProb?: number;
+  gbmSamples?: number;
+  lobScore?: number;
+  lobReady?: boolean;
   sentiment?: number;
   sentimentLabel?: string;
   features?: Record<string, number>;
@@ -112,6 +117,7 @@ export interface AgentMetrics {
   sentimentScore?: number;
   mlSamples?: number;
   mlpSamples?: number;
+  gbmSamples?: number;
   updatedAt: number;
 }
 

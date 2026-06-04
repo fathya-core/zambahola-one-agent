@@ -277,6 +277,7 @@ export class AgentCore {
       sentimentScore: this.lastPrediction?.meta?.sentiment,
       mlSamples: this.lastPrediction?.meta?.mlSamples,
       mlpSamples: this.lastPrediction?.meta?.mlpSamples,
+      gbmSamples: this.lastPrediction?.meta?.gbmSamples,
       updatedAt: Date.now(),
     };
   }

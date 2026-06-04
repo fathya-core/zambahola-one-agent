@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const CACHE_FILE = join(pkgRoot, "data", "klines", "btcusdt-1m.json");
+const MEGA_CACHE = join(pkgRoot, "data", "klines", "btcusdt-1m-mega.json");
 
 export interface KlineBar {
   open: number;
@@ -15,9 +16,18 @@ export interface KlineBar {
   openTime: number;
 }
 
-export async function fetchKlines(limit = 500): Promise<KlineBar[]> {
-  const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${Math.min(1000, limit)}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+export async function fetchKlinesBatch(
+  limit: number,
+  endTime?: number,
+): Promise<KlineBar[]> {
+  const batch = Math.min(1000, limit);
+  const url = new URL("https://api.binance.com/api/v3/klines");
+  url.searchParams.set("symbol", "BTCUSDT");
+  url.searchParams.set("interval", "1m");
+  url.searchParams.set("limit", String(batch));
+  if (endTime) url.searchParams.set("endTime", String(endTime));
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
   const raw = (await res.json()) as number[][];
   return raw.map((c) => ({
     openTime: c[0]!,
@@ -29,33 +39,62 @@ export async function fetchKlines(limit = 500): Promise<KlineBar[]> {
   }));
 }
 
+/** Paginate up to 1500 1m candles */
+export async function fetchKlinesMega(target = 1500): Promise<KlineBar[]> {
+  const all: KlineBar[] = [];
+  let endTime: number | undefined;
+
+  while (all.length < target) {
+    const need = Math.min(1000, target - all.length);
+    const batch = await fetchKlinesBatch(need, endTime);
+    if (batch.length === 0) break;
+    const merged = [...batch, ...all].sort((a, b) => a.openTime - b.openTime);
+    const dedup = dedupeBars(merged);
+    all.length = 0;
+    all.push(...dedup);
+    endTime = batch[0]!.openTime - 1;
+    if (batch.length < need) break;
+  }
+
+  return all.slice(-target);
+}
+
+function dedupeBars(bars: KlineBar[]): KlineBar[] {
+  const m = new Map<number, KlineBar>();
+  for (const b of bars) m.set(b.openTime, b);
+  return [...m.values()].sort((a, b) => a.openTime - b.openTime);
+}
+
 export async function loadOrFetchKlines(limit = 500): Promise<{
   bars: KlineBar[];
   source: string;
 }> {
-  await mkdir(dirname(CACHE_FILE), { recursive: true });
-  if (existsSync(CACHE_FILE)) {
+  const file = limit > 800 ? MEGA_CACHE : CACHE_FILE;
+  await mkdir(dirname(file), { recursive: true });
+
+  if (existsSync(file)) {
     try {
-      const cached = JSON.parse(await readFile(CACHE_FILE, "utf8")) as {
+      const cached = JSON.parse(await readFile(file, "utf8")) as {
         bars: KlineBar[];
         fetchedAt: number;
       };
-      if (Date.now() - cached.fetchedAt < 3600_000 && cached.bars.length >= limit * 0.8) {
+      if (Date.now() - cached.fetchedAt < 7200_000 && cached.bars.length >= limit * 0.85) {
         return { bars: cached.bars.slice(-limit), source: "cache" };
       }
     } catch {
-      /* refetch */
+      /* */
     }
   }
 
   try {
-    const bars = await fetchKlines(limit);
+    const bars =
+      limit > 800 ? await fetchKlinesMega(limit) : await fetchKlinesBatch(limit);
     await writeFile(
-      CACHE_FILE,
+      file,
       JSON.stringify({ bars, fetchedAt: Date.now() }, null, 0),
       "utf8",
     );
-    return { bars, source: "binance_api" };
+    return { bars, source: limit > 800 ? "binance_mega" : "binance_api" };
   } catch {
     return { bars: syntheticBars(limit), source: "synthetic" };
   }

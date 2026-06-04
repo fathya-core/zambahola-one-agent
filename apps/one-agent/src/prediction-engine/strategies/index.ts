@@ -8,6 +8,7 @@ import { macdStrategy } from "./macd.js";
 import { orderImbalanceStrategy } from "./order-imbalance.js";
 import { fundingFadeStrategy } from "./funding-fade.js";
 import { volumeBreakoutStrategy } from "./volume-breakout.js";
+import { longShortExtremeStrategy } from "./long-short-extreme.js";
 import type { PredictionStrategy } from "./types.js";
 
 export const ALL_STRATEGIES: PredictionStrategy[] = [
@@ -21,6 +22,7 @@ export const ALL_STRATEGIES: PredictionStrategy[] = [
   orderImbalanceStrategy,
   fundingFadeStrategy,
   volumeBreakoutStrategy,
+  longShortExtremeStrategy,
 ];
 
 export type { PredictionStrategy, StrategySignal, StrategyContext } from "./types.js";

@@ -11,6 +11,8 @@ function renderMetrics(m) {
       ["Regime", m.regime ?? "—"],
       ["Sentiment", m.sentimentScore ?? "—"],
       ["ML samples", m.mlSamples ?? 0],
+      ["MLP samples", m.mlpSamples ?? 0],
+      ["GBM trees", m.gbmSamples ?? 0],
       ["Ticks", m.tickCount],
       ["Predictions", m.predictionCount],
       ["Hit rate", (m.hitRate * 100).toFixed(1) + "%"],

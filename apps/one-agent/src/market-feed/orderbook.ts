@@ -1,3 +1,5 @@
+import { recordLobSnapshot } from "./lob-history.js";
+
 export interface OrderBookSnapshot {
   symbol: string;
   bidVolume: number;
@@ -13,6 +15,7 @@ let snapshot: OrderBookSnapshot | null = null;
 
 export function setOrderBook(s: OrderBookSnapshot): void {
   snapshot = s;
+  recordLobSnapshot(s.imbalance, s.spreadBps);
 }
 
 export function getOrderBook(): OrderBookSnapshot | null {
