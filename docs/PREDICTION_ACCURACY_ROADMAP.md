@@ -1,29 +1,33 @@
 # Prediction accuracy roadmap
 
-## Implemented (v0.1)
+## Implemented (through v0.6 ULTRA)
 
 | Method | Module | Effect |
 |--------|--------|--------|
-| 6-strategy ensemble | `prediction-engine/ensemble.ts` | Reduces single-indicator noise |
+| 17-strategy ensemble | `prediction-engine/ensemble.ts` | Multi-signal consensus |
+| ML + MLP + GBM + LOB-CNN | `prediction-engine/*` | `hybrid_v6_ultra` blend |
 | Adaptive weights | `learning/adaptive-weights.ts` | Up-weights strategies that hit |
-| Agreement score | `Prediction.meta.agreement` | Filters low-consensus signals |
-| Per-strategy hit stats | `AgentMetrics.strategyStats` | Observability |
-| Research log | `knowledge/research-log.jsonl` | Audit trail |
+| Regime gate + calibration | `learning/` | Phase-aware decisions |
+| Live feeds | `market-feed/universal`, `coingecko` | Binance/Bybit/CoinGecko failover |
+| Sentiment + FAPI signals | `sentiment/`, `market-signals/` | Fear/greed, funding, OI |
+| Research log | `knowledge/research-log.jsonl` | Audit trail (gitignored) |
 
-## Next (highest impact)
+## Next (v0.7 — highest impact)
 
-1. **Live Binance/Bybit feed** — real microstructure
-2. **Feature store** — returns, vol, order-book proxy (when live)
-3. **ML classifier** — logistic / small GBDT on features (López de Prado labeling)
-4. **Regime gating** — only trade momentum in trend, reversion in range
-5. **Confidence calibration** — isotonic regression on `confidence` vs hit rate
-6. **Sentiment** — headline features from public RSS/API (no keys in repo)
+1. **Sub-second default ticks** — `ZAMBAHOLA_FAST=1` as default when stable
+2. **10k kline cache** — longer train windows
+3. **ONNX / model export** — deployable inference artifact
+4. **Bybit-primary mode** when Binance geo-blocked
+5. **Deeper LOB** — more depth history for LOB-CNN
 
 ## Research loop
 
+See **`docs/LEARNING_DEVELOPMENT_PATH.md`** — phases 0→4.
+
 ```bash
-npm run agent:learn   # multi-cycle paper run + weight updates
-npm run agent:test-run
+npm run agent:path-resume   # live + 5 learn cycles
+npm run agent:learn         # full 25 cycles
+npm run agent:ultra-learn   # mega pipeline
 ```
 
 Weights persist in `apps/one-agent/data/learning/strategy-weights.json`.
