@@ -63,6 +63,24 @@ async function refresh() {
       null,
       2,
     );
+
+    const strat = await fetchJson("/api/strategies");
+    $("strategies").textContent = JSON.stringify(strat, null, 2);
+
+    if (!$("knowledge").dataset.loaded) {
+      const know = await fetchJson("/api/knowledge");
+      $("knowledge").textContent = JSON.stringify(
+        {
+          books: know.books?.length,
+          strategies: know.strategies?.length,
+          news: know.news?.length,
+          accuracyMethods: know.accuracyMethods,
+        },
+        null,
+        2,
+      );
+      $("knowledge").dataset.loaded = "1";
+    }
   } catch {
     $("status-pill").textContent = "offline";
   }

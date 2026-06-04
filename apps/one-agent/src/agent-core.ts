@@ -1,6 +1,11 @@
 import type { MarketFeed } from "./market-feed/index.js";
 import { MockMarketFeed } from "./market-feed/index.js";
 import { PredictionEngine } from "./prediction-engine/index.js";
+import { strategyHitsFromVotes } from "./prediction-engine/ensemble.js";
+import {
+  recordStrategyOutcome,
+  appendResearchLog,
+} from "./learning/adaptive-weights.js";
 import { DecisionEngine } from "./decision-engine/index.js";
 import { PaperBroker } from "./paper-broker/index.js";
 import { Evaluator } from "./evaluator/index.js";
@@ -18,6 +23,7 @@ import type {
   MarketTick,
   Prediction,
   Decision,
+  StrategyHitStats,
 } from "./types.js";
 
 export interface AgentCoreOptions {
@@ -50,6 +56,7 @@ export class AgentCore {
   private lastPrediction: Prediction | null = null;
   private lastDecision: Decision | null = null;
   private lastTick: MarketTick | null = null;
+  private strategyHits: Record<string, { hits: number; total: number }> = {};
   private listeners = new Set<TickHandler>();
   private boundOnTick = (tick: MarketTick) => void this.handleTick(tick);
 
@@ -76,6 +83,7 @@ export class AgentCore {
     }
     this.running = true;
     this.startedAt = Date.now();
+    await this.predictionEngine.init();
     await writeReceipt("agent-start", {
       symbol: this.feed.symbol,
       feed: this.feed.name,
@@ -158,14 +166,39 @@ export class AgentCore {
     }
 
     this.broker.markToMarket(tick.price);
-    const evaluations = this.evaluator.onPrice(tick.price, tick.timestamp);
-    for (const evaluation of evaluations) {
+    const completed = this.evaluator.onPrice(tick.price, tick.timestamp);
+    for (const { evaluation, prediction: evaluatedPred } of completed) {
       await appendRun({
         type: "evaluation",
         payload: evaluation,
         timestamp: evaluation.evaluatedAt,
       });
       await writeReceipt(`eval-${evaluation.predictionId.slice(0, 8)}`, evaluation);
+
+      if (evaluatedPred.meta?.strategyVotes) {
+        const change = evaluation.priceAtHorizon - evaluation.priceAtPrediction;
+        const band = evaluation.priceAtPrediction * 0.0008;
+        const hits = strategyHitsFromVotes(
+          evaluatedPred.meta.strategyVotes,
+          evaluation.direction,
+          change,
+          band,
+        );
+        const weights = await recordStrategyOutcome(hits);
+        this.predictionEngine.setWeights(weights);
+        for (const [sid, hit] of Object.entries(hits)) {
+          if (!this.strategyHits[sid]) this.strategyHits[sid] = { hits: 0, total: 0 };
+          this.strategyHits[sid].total += 1;
+          if (hit) this.strategyHits[sid].hits += 1;
+        }
+        await appendResearchLog({
+          event: "strategy_feedback",
+          predictionId: evaluation.predictionId,
+          ensembleHit: evaluation.predictionHit,
+          hits,
+          weights,
+        });
+      }
     }
 
     await this.persistMetrics();
@@ -189,6 +222,17 @@ export class AgentCore {
         ? losses.reduce((s, t) => s + (t.pnl ?? 0), 0) / losses.length
         : 0;
 
+    const weights = this.predictionEngine.getWeights();
+    const strategyStats: StrategyHitStats[] = Object.entries(this.strategyHits).map(
+      ([strategyId, s]) => ({
+        strategyId,
+        hits: s.hits,
+        total: s.total,
+        hitRate: s.total > 0 ? Number((s.hits / s.total).toFixed(4)) : 0,
+        weight: weights[strategyId] ?? 1,
+      }),
+    );
+
     return {
       tickCount: this.tickCount,
       predictionCount: this.predictionCount,
@@ -203,6 +247,8 @@ export class AgentCore {
       lastPrice: this.lastPrice,
       lastPrediction: this.lastPrediction,
       lastDecision: this.lastDecision,
+      strategyStats,
+      ensembleAgreement: this.lastPrediction?.meta?.agreement,
       updatedAt: Date.now(),
     };
   }

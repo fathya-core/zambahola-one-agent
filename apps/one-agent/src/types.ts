@@ -12,6 +12,20 @@ export interface MarketTick {
   timestamp: number;
 }
 
+export interface StrategyVoteMeta {
+  strategyId: string;
+  direction: PredictionDirection;
+  confidence: number;
+  reason: string;
+}
+
+export interface PredictionMeta {
+  engine: string;
+  agreement: number;
+  strategyVotes: StrategyVoteMeta[];
+  weights: Record<string, number>;
+}
+
 export interface Prediction {
   predictionId: string;
   tickId: string;
@@ -21,6 +35,7 @@ export interface Prediction {
   horizonSec: number;
   priceAtPrediction: number;
   timestamp: number;
+  meta?: PredictionMeta;
 }
 
 export interface Decision {
@@ -57,6 +72,14 @@ export interface PredictionEvaluation {
   evaluatedAt: number;
 }
 
+export interface StrategyHitStats {
+  strategyId: string;
+  hits: number;
+  total: number;
+  hitRate: number;
+  weight: number;
+}
+
 export interface AgentMetrics {
   tickCount: number;
   predictionCount: number;
@@ -71,6 +94,8 @@ export interface AgentMetrics {
   lastPrice: number;
   lastPrediction: Prediction | null;
   lastDecision: Decision | null;
+  strategyStats?: StrategyHitStats[];
+  ensembleAgreement?: number;
   updatedAt: number;
 }
 

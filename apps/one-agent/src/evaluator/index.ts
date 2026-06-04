@@ -23,15 +23,19 @@ export class Evaluator {
     });
   }
 
-  onPrice(price: number, now = Date.now()): PredictionEvaluation[] {
-    const done: PredictionEvaluation[] = [];
+  onPrice(
+    price: number,
+    now = Date.now(),
+  ): Array<{ evaluation: PredictionEvaluation; prediction: Prediction }> {
+    const done: Array<{ evaluation: PredictionEvaluation; prediction: Prediction }> =
+      [];
     const stillPending: PendingEval[] = [];
 
     for (const item of this.pending) {
       if (now >= item.evaluateAt) {
         const evaluation = this.evaluate(item.prediction, price, now);
         this.evaluations.push(evaluation);
-        done.push(evaluation);
+        done.push({ evaluation, prediction: item.prediction });
       } else {
         stillPending.push(item);
       }

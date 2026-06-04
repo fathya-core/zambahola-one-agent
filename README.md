@@ -39,6 +39,7 @@ Other commands:
 | `npm run agent:status` | JSON status (pid, ticks, port) |
 | `npm run agent:stop` | Stop background agent |
 | `npm run agent:test-run` | Headless 65s run; requires ≥60 predictions |
+| `npm run agent:learn` | 3 learning cycles — updates strategy weights |
 
 ## What v0 does
 

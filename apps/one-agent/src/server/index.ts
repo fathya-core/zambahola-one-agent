@@ -7,6 +7,7 @@ import type { AgentCore } from "../agent-core.js";
 import { readMetrics } from "../storage/index.js";
 import { CURRENT_METRICS_FILE, PAPER_LEDGER_FILE } from "../storage/paths.js";
 import { DASHBOARD_PORT } from "../storage/paths.js";
+import { loadKnowledgeIndex } from "../../knowledge/loader.js";
 
 const dashboardDir = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -71,6 +72,15 @@ async function route(
   }
   if (path === "/api/evaluations") {
     return sendJson(res, 200, agent.evaluator.getEvaluations());
+  }
+  if (path === "/api/knowledge") {
+    return sendJson(res, 200, await loadKnowledgeIndex());
+  }
+  if (path === "/api/strategies") {
+    const idx = (await loadKnowledgeIndex()) as { strategies: unknown[] };
+    const weights = agent.predictionEngine.getWeights();
+    const stats = agent.getRuntimeState().metrics.strategyStats ?? [];
+    return sendJson(res, 200, { strategies: idx.strategies, weights, stats });
   }
 
   if (path === "/" || path.startsWith("/dashboard")) {
