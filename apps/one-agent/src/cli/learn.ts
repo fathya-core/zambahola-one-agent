@@ -3,14 +3,16 @@ import { ensureDataDirs } from "../storage/index.js";
 import { readMetrics } from "../storage/index.js";
 import { appendResearchLog } from "../learning/adaptive-weights.js";
 
-const CYCLES = Number(process.env.ZAMBAHOLA_LEARN_CYCLES ?? 10);
-const CYCLE_MS = 65_000;
+import { CYCLES } from "../learning/cycle-config.js";
+
+const CYCLE_MS = CYCLES.cycleMs;
 
 async function main(): Promise<void> {
   await ensureDataDirs();
-  console.log(`[zambahola] learn: ${CYCLES} cycles × ${CYCLE_MS / 1000}s\n`);
+  const cycles = CYCLES.learn;
+  console.log(`[zambahola] learn: ${cycles} cycles × ${CYCLE_MS / 1000}s\n`);
 
-  for (let i = 1; i <= CYCLES; i++) {
+  for (let i = 1; i <= cycles; i++) {
     const agent = new AgentCore({ resetData: i === 1 });
     await agent.start();
     await new Promise((r) => setTimeout(r, CYCLE_MS));
@@ -26,7 +28,7 @@ async function main(): Promise<void> {
     });
 
     console.log(
-      `Cycle ${i}/${CYCLES} — predictions: ${metrics?.predictionCount} hitRate: ${metrics?.hitRate}`,
+      `Cycle ${i}/${cycles} — predictions: ${metrics?.predictionCount} hitRate: ${metrics?.hitRate}`,
     );
   }
 

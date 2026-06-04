@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const CACHE_FILE = join(pkgRoot, "data", "klines", "btcusdt-1m.json");
 const MEGA_CACHE = join(pkgRoot, "data", "klines", "btcusdt-1m-mega.json");
+const ULTRA_CACHE = join(pkgRoot, "data", "klines", "btcusdt-1m-ultra.json");
 
 export interface KlineBar {
   open: number;
@@ -39,12 +40,23 @@ export async function fetchKlinesBatch(
   }));
 }
 
+/** Paginate up to 5000 1m candles */
+export async function fetchKlinesUltra(target = 5000): Promise<KlineBar[]> {
+  return fetchKlinesPaginated(target, 12);
+}
+
 /** Paginate up to 1500 1m candles */
 export async function fetchKlinesMega(target = 1500): Promise<KlineBar[]> {
+  return fetchKlinesPaginated(target, 6);
+}
+
+async function fetchKlinesPaginated(target: number, maxRounds: number): Promise<KlineBar[]> {
   const all: KlineBar[] = [];
   let endTime: number | undefined;
 
-  while (all.length < target) {
+  let rounds = 0;
+  while (all.length < target && rounds < maxRounds) {
+    rounds += 1;
     const need = Math.min(1000, target - all.length);
     const batch = await fetchKlinesBatch(need, endTime);
     if (batch.length === 0) break;
@@ -54,6 +66,7 @@ export async function fetchKlinesMega(target = 1500): Promise<KlineBar[]> {
     all.push(...dedup);
     endTime = batch[0]!.openTime - 1;
     if (batch.length < need) break;
+    await new Promise((r) => setTimeout(r, 120));
   }
 
   return all.slice(-target);
@@ -69,7 +82,8 @@ export async function loadOrFetchKlines(limit = 500): Promise<{
   bars: KlineBar[];
   source: string;
 }> {
-  const file = limit > 800 ? MEGA_CACHE : CACHE_FILE;
+  const file =
+    limit > 2500 ? ULTRA_CACHE : limit > 800 ? MEGA_CACHE : CACHE_FILE;
   await mkdir(dirname(file), { recursive: true });
 
   if (existsSync(file)) {
@@ -88,13 +102,19 @@ export async function loadOrFetchKlines(limit = 500): Promise<{
 
   try {
     const bars =
-      limit > 800 ? await fetchKlinesMega(limit) : await fetchKlinesBatch(limit);
+      limit > 2500
+        ? await fetchKlinesUltra(limit)
+        : limit > 800
+          ? await fetchKlinesMega(limit)
+          : await fetchKlinesBatch(limit);
     await writeFile(
       file,
       JSON.stringify({ bars, fetchedAt: Date.now() }, null, 0),
       "utf8",
     );
-    return { bars, source: limit > 800 ? "binance_mega" : "binance_api" };
+    const source =
+      limit > 2500 ? "binance_ultra" : limit > 800 ? "binance_mega" : "binance_api";
+    return { bars, source };
   } catch {
     return { bars: syntheticBars(limit), source: "synthetic" };
   }

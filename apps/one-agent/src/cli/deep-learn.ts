@@ -3,18 +3,19 @@ import { runDeepBacktest } from "../backtest/deep-runner.js";
 import { ensureDataDirs, readMetrics } from "../storage/index.js";
 import { appendResearchLog } from "../learning/adaptive-weights.js";
 
-const CYCLES = Number(process.env.ZAMBAHOLA_DEEP_CYCLES ?? 15);
+import { CYCLES } from "../learning/cycle-config.js";
 const CYCLE_MS = 65_000;
 
 async function main(): Promise<void> {
   await ensureDataDirs();
-  console.log(`[zambahola] DEEP LEARN: ${CYCLES} live cycles + kline backtest\n`);
+  const cycles = CYCLES.deep;
+  console.log(`[zambahola] DEEP LEARN: ${cycles} live cycles + kline backtest\n`);
 
   const bt = await runDeepBacktest(500);
   await appendResearchLog({ event: "deep_backtest_preflight", ...bt });
   console.log("Preflight backtest:", bt.hitRate, bt.source);
 
-  for (let i = 1; i <= CYCLES; i++) {
+  for (let i = 1; i <= cycles; i++) {
     const agent = new AgentCore({ resetData: i === 1 });
     await agent.start();
     await new Promise((r) => setTimeout(r, CYCLE_MS));
@@ -29,7 +30,7 @@ async function main(): Promise<void> {
       mlSamples: metrics?.mlSamples,
     });
     console.log(
-      `Cycle ${i}/${CYCLES} hit=${metrics?.hitRate} mlp=${metrics?.lastPrediction?.meta?.mlpSamples}`,
+      `Cycle ${i}/${cycles} hit=${metrics?.hitRate} mlp=${metrics?.lastPrediction?.meta?.mlpSamples}`,
     );
   }
 

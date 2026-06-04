@@ -40,10 +40,16 @@ Other commands:
 | `npm run agent:status` | JSON status (pid, ticks, port) |
 | `npm run agent:stop` | Stop background agent |
 | `npm run agent:test-run` | Headless 65s run; requires ≥60 predictions |
-| `npm run agent:learn` | 5 learning cycles — ML + strategy weights |
+| `npm run agent:learn` | **25** learning cycles (65s each) |
 | `npm run agent:turbo-learn` | Fast learn on mock feed |
-| `npm run agent:power-learn` | 10-cycle intensive training |
+| `npm run agent:power-learn` | **20**-cycle intensive training |
 | `npm run agent:backtest` | Backtest on 120×1m candles |
+| `npm run agent:deep-learn` | **25** cycles + deep backtest |
+| `npm run agent:mega-train` | Batch train on **3000** bars |
+| `npm run agent:mega-backtest` | Backtest **1200** bars |
+| `npm run agent:ultra-learn` | **30** cycles + **5000**-bar train (full pipeline) |
+
+Fast ticks: `ZAMBAHOLA_FAST=1 npm run agent:start`
 
 ## What v0 does
 

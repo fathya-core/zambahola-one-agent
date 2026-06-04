@@ -12,7 +12,7 @@ export interface MegaTrainResult {
   gbmSamples: number;
 }
 
-export async function runMegaTrain(bars = 1200): Promise<MegaTrainResult> {
+export async function runMegaTrain(bars = 3000): Promise<MegaTrainResult> {
   await refreshMarketSignals();
   const { bars: klines, source } = await loadOrFetchKlines(bars);
   const engine = new PredictionEngine({ horizonSec: 60 });

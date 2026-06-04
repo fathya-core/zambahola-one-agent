@@ -21,6 +21,7 @@ export interface StrategyVoteMeta {
 
 export interface PredictionMeta {
   engine: string;
+  strategyCount?: number;
   agreement: number;
   strategyVotes: StrategyVoteMeta[];
   weights: Record<string, number>;

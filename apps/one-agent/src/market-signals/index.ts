@@ -8,6 +8,8 @@ export interface MarketSignals {
   indexPrice: number;
   premiumPct: number;
   longShortRatio: number;
+  openInterest?: number;
+  openInterestChange?: number;
   updatedAt: number;
 }
 
@@ -17,8 +19,12 @@ let signals: MarketSignals = {
   indexPrice: 0,
   premiumPct: 0,
   longShortRatio: 1,
+  openInterest: undefined,
+  openInterestChange: undefined,
   updatedAt: 0,
 };
+
+let lastOi: number | undefined;
 
 export function getMarketSignals(): MarketSignals {
   return signals;
@@ -61,12 +67,31 @@ export async function refreshMarketSignals(): Promise<MarketSignals> {
   const premiumPct =
     indexPrice > 0 ? ((markPrice - indexPrice) / indexPrice) * 100 : 0;
 
+  let openInterest: number | undefined;
+  let openInterestChange: number | undefined;
+  try {
+    const res = await fetch(
+      "https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT",
+      { signal: AbortSignal.timeout(8000) },
+    );
+    const data = (await res.json()) as { openInterest?: string };
+    openInterest = Number(data.openInterest);
+    if (lastOi && lastOi > 0) {
+      openInterestChange = (openInterest - lastOi) / lastOi;
+    }
+    lastOi = openInterest;
+  } catch {
+    /* */
+  }
+
   signals = {
     fundingRate,
     markPrice,
     indexPrice,
     premiumPct: Number(premiumPct.toFixed(6)),
     longShortRatio,
+    openInterest,
+    openInterestChange,
     updatedAt: Date.now(),
   };
   return signals;

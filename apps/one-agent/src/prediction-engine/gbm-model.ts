@@ -13,7 +13,7 @@ import type { PredictionDirection } from "../types.js";
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const GBM_FILE = join(pkgRoot, "data", "learning", "gbm-trees.json");
 
-const TREES = 16;
+const TREES = 32;
 const LR = 0.15;
 
 interface Stump {

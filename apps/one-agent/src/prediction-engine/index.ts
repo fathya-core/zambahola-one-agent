@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { MarketTick, Prediction, PredictionDirection } from "../types.js";
-import { ALL_STRATEGIES } from "./strategies/index.js";
+import { ALL_STRATEGIES, STRATEGY_COUNT } from "./strategies/index.js";
+import { loadOrchestratorWeights } from "../learning/strategy-orchestrator.js";
 import { ensemblePredict } from "./ensemble.js";
 import { loadStrategyWeights, type StrategyWeights } from "../learning/adaptive-weights.js";
 import { extractFeatures, type FeatureVector } from "../features/index.js";
@@ -37,6 +38,8 @@ export class PredictionEngine {
 
   async init(): Promise<void> {
     this.weights = await loadStrategyWeights(ALL_STRATEGIES.map((s) => s.id));
+    const orch = await loadOrchestratorWeights();
+    if (orch) this.weights = { ...this.weights, ...orch };
     await this.ml.load();
     await this.mlp.load();
     await this.gbm.load();
@@ -140,7 +143,8 @@ export class PredictionEngine {
       priceAtPrediction: tick.price,
       timestamp: tick.timestamp,
       meta: {
-        engine: "hybrid_v5_mega",
+        engine: "hybrid_v6_ultra",
+        strategyCount: STRATEGY_COUNT,
         agreement: ensemble.agreement,
         strategyVotes: ensemble.votes,
         weights: { ...this.weights },
