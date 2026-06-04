@@ -37,7 +37,13 @@ async function main(): Promise<void> {
     cwd: pkgRoot,
     detached: true,
     stdio: "ignore",
-    env: { ...process.env },
+    env: {
+      ...process.env,
+      ZAMBAHOLA_LIVE_FILTER:
+        process.env.ZAMBAHOLA_ACCURACY_MODE === "max"
+          ? "1"
+          : process.env.ZAMBAHOLA_LIVE_FILTER,
+    },
   });
 
   child.unref();

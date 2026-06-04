@@ -22,6 +22,15 @@ If you already use pnpm globally:
 pnpm install
 ```
 
+## Maximum accuracy (home PC — full Binance power)
+
+```bash
+npm run agent:max-accuracy        # full train (30+25+25 cycles, 10k bars)
+npm run agent:max-accuracy:start  # live paper + hybrid_v7_max
+```
+
+Arabic guide: `docs/ar/أقصى-دقة-على-جهازك.md` · Config: `config/max-accuracy.env`
+
 ## Run
 
 ```bash
@@ -48,6 +57,8 @@ Other commands:
 | `npm run agent:mega-train` | Batch train on **3000** bars |
 | `npm run agent:mega-backtest` | Backtest **1200** bars |
 | `npm run agent:ultra-learn` | **30** cycles + **5000**-bar train (full pipeline) |
+| `npm run agent:max-accuracy` | **Max hit-rate** train profile (see `config/max-accuracy.env`) |
+| `npm run agent:max-accuracy:start` | Live agent with max-accuracy env |
 
 Fast ticks: `ZAMBAHOLA_FAST=1 npm run agent:start`
 

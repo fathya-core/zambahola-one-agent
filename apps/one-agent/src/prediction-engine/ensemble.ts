@@ -1,6 +1,7 @@
 import type { PredictionDirection } from "../types.js";
 import type { StrategySignal } from "./strategies/types.js";
 import type { StrategyWeights } from "../learning/adaptive-weights.js";
+import { getAccuracyTuning } from "../config/accuracy-profile.js";
 
 const DIR_SCORE: Record<PredictionDirection, number> = {
   up: 1,
@@ -37,9 +38,10 @@ export function ensemblePredict(
           .length / signals.length
       : 0;
 
+  const normThr = getAccuracyTuning().ensembleNorm;
   let direction: PredictionDirection = "range";
-  if (normalized > 0.12) direction = "up";
-  else if (normalized < -0.12) direction = "down";
+  if (normalized > normThr) direction = "up";
+  else if (normalized < -normThr) direction = "down";
 
   const confidence = Number(
     Math.min(0.95, Math.max(0.42, 0.45 + Math.abs(normalized) * 0.9 + agreement * 0.15)).toFixed(4),
@@ -59,8 +61,9 @@ function pickDirection(
   weightSum: number,
 ): PredictionDirection {
   if (rangeVotes / weightSum > 0.55) return "range";
-  if (normalized > 0.12) return "up";
-  if (normalized < -0.12) return "down";
+  const normThr = getAccuracyTuning().ensembleNorm;
+  if (normalized > normThr) return "up";
+  if (normalized < -normThr) return "down";
   return "range";
 }
 

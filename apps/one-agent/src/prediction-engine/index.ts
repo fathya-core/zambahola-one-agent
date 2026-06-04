@@ -12,6 +12,8 @@ import { lobCnnPredict } from "./lob-cnn.js";
 import { applyRegimeGate, detectRegime } from "./regime-gate.js";
 import { ConfidenceCalibrator } from "../learning/calibration.js";
 import { getSentiment } from "../sentiment/index.js";
+import { getAccuracyTuning, isMaxAccuracy } from "../config/accuracy-profile.js";
+import { applyAccuracyFilter } from "./accuracy-filter.js";
 
 const DEFAULT_HORIZON_SEC = 30;
 const MAX_PRICES = 400;
@@ -33,7 +35,9 @@ export class PredictionEngine {
   private ready = false;
 
   constructor(options: PredictionEngineOptions = {}) {
-    this.horizonSec = options.horizonSec ?? DEFAULT_HORIZON_SEC;
+    this.horizonSec =
+      options.horizonSec ??
+      Number(process.env.ZAMBAHOLA_HORIZON_SEC ?? getAccuracyTuning().horizonSec);
   }
 
   async init(): Promise<void> {
@@ -93,6 +97,7 @@ export class PredictionEngine {
     let lobScore = lob.score;
     let regime = "range" as ReturnType<typeof detectRegime>;
     let gateReason = "n/a";
+    let qualityTier: "high" | "medium" | "abstain" = "medium";
 
     if (features) {
       const logit = this.ml.predict(features);
@@ -131,6 +136,23 @@ export class PredictionEngine {
       direction = gated.direction;
       confidence = this.calibrator.calibrate(gated.confidence);
       gateReason = gated.reason;
+
+      const filtered = applyAccuracyFilter({
+        direction,
+        confidence,
+        agreement: ensemble.agreement,
+        mlProb,
+        mlpProb,
+        gbmProb,
+        lobReady: lob.ready,
+        regime,
+        blocked: gated.blocked,
+        mlSamples: this.ml.getSampleCount(),
+      });
+      direction = filtered.direction;
+      confidence = filtered.confidence;
+      qualityTier = filtered.qualityTier;
+      gateReason = `${gateReason} | ${filtered.filterReason}`;
     }
 
     return {
@@ -143,7 +165,9 @@ export class PredictionEngine {
       priceAtPrediction: tick.price,
       timestamp: tick.timestamp,
       meta: {
-        engine: "hybrid_v7",
+        engine: isMaxAccuracy() ? "hybrid_v7_max" : "hybrid_v7",
+        accuracyMode: isMaxAccuracy() ? "max" : "normal",
+        qualityTier,
         strategyCount: STRATEGY_COUNT,
         agreement: ensemble.agreement,
         strategyVotes: ensemble.votes,
@@ -222,8 +246,9 @@ function blendMega(
     s(lobDir, lobConf) * 0.12;
 
   let direction: PredictionDirection = "range";
-  if (combined > 0.09) direction = "up";
-  else if (combined < -0.09) direction = "down";
+  const blendThr = getAccuracyTuning().blendCombined;
+  if (combined > blendThr) direction = "up";
+  else if (combined < -blendThr) direction = "down";
 
   const voters = [eDir, lDir, mDir, gDir, lobDir].filter(
     (d) => d === direction && d !== "range",

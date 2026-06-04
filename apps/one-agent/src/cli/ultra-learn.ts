@@ -5,6 +5,7 @@ import { ensureDataDirs, readMetrics } from "../storage/index.js";
 import { appendResearchLog } from "../learning/adaptive-weights.js";
 import { boostTopStrategies } from "../learning/strategy-orchestrator.js";
 import { CYCLES } from "../learning/cycle-config.js";
+import { getAccuracyTuning } from "../config/accuracy-profile.js";
 import { exportModelBundle } from "../learning/model-export.js";
 
 async function main(): Promise<void> {
@@ -30,7 +31,7 @@ async function main(): Promise<void> {
     await agent.stop();
 
     const metrics = await readMetrics();
-    await boostTopStrategies(metrics?.strategyStats, 8);
+    await boostTopStrategies(metrics?.strategyStats, getAccuracyTuning().orchestratorTopN);
 
     await appendResearchLog({
       event: "ultra_live_cycle",

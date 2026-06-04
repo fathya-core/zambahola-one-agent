@@ -1,5 +1,6 @@
 import type { PredictionDirection } from "../types.js";
 import type { FeatureVector } from "../features/index.js";
+import { getAccuracyTuning } from "../config/accuracy-profile.js";
 
 export type MarketRegime = "trend_up" | "trend_down" | "range" | "high_vol";
 
@@ -35,8 +36,9 @@ export function applyRegimeGate(
   let blocked = false;
   let reason = "passed";
 
+  const t = getAccuracyTuning();
   if (regime === "range" && direction !== "range") {
-    if (agreement < 0.55) {
+    if (agreement < t.rangeAgreementBlock) {
       d = "range";
       c = 0.48;
       blocked = true;
@@ -52,14 +54,14 @@ export function applyRegimeGate(
     reason = "high vol — capped confidence";
   }
 
-  if (regime === "trend_up" && direction === "down" && agreement < 0.6) {
+  if (regime === "trend_up" && direction === "down" && agreement < t.counterTrendAgreement) {
     d = "range";
     c = 0.5;
     blocked = true;
     reason = "uptrend regime blocks counter-trend short";
   }
 
-  if (regime === "trend_down" && direction === "up" && agreement < 0.6) {
+  if (regime === "trend_down" && direction === "up" && agreement < t.counterTrendAgreement) {
     d = "range";
     c = 0.5;
     blocked = true;

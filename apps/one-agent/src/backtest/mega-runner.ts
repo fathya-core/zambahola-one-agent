@@ -10,6 +10,10 @@ export interface MegaBacktestResult {
   predictions: number;
   evaluations: number;
   hitRate: number;
+  /** up/down only — excludes range abstains */
+  directionalHitRate: number;
+  directionalCount: number;
+  abstainRate: number;
   source: string;
 }
 
@@ -41,25 +45,38 @@ export async function runMegaBacktest(limit = 1200): Promise<MegaBacktestResult>
     evaluator.schedule(pred);
   }
 
-  const evaluations: boolean[] = [];
+  const allHits: boolean[] = [];
+  const dirHits: boolean[] = [];
+  let rangeCount = 0;
+
   for (let i = 0; i < bars.length; i++) {
     const completed = evaluator.onPrice(bars[i]!.close, bars[i]!.openTime + 60_000);
     for (const { evaluation } of completed) {
-      evaluations.push(evaluation.predictionHit);
+      allHits.push(evaluation.predictionHit);
+      if (evaluation.direction === "range") {
+        rangeCount += 1;
+      } else {
+        dirHits.push(evaluation.predictionHit);
+      }
     }
   }
 
   const hitRate =
-    evaluations.length > 0
-      ? evaluations.filter(Boolean).length / evaluations.length
-      : 0;
+    allHits.length > 0 ? allHits.filter(Boolean).length / allHits.length : 0;
+  const directionalHitRate =
+    dirHits.length > 0 ? dirHits.filter(Boolean).length / dirHits.length : 0;
+  const abstainRate =
+    allHits.length > 0 ? Number((rangeCount / allHits.length).toFixed(4)) : 0;
 
   return {
     ok: predictions >= Math.max(200, Math.floor(bars.length * 0.7)),
     bars: bars.length,
     predictions,
-    evaluations: evaluations.length,
+    evaluations: allHits.length,
     hitRate: Number(hitRate.toFixed(4)),
+    directionalHitRate: Number(directionalHitRate.toFixed(4)),
+    directionalCount: dirHits.length,
+    abstainRate,
     source,
   };
 }
