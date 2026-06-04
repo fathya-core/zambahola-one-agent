@@ -1,0 +1,35 @@
+{
+  "name": "zambahola-one-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ZAMBAHOLA ONE AGENT v0 — local paper-trading agent",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "verify": "node scripts/verify-all.mjs",
+    "agent:path-resume": "node scripts/path-resume.mjs",
+    "agent:start": "npm run start -w @zambahola/one-agent",
+    "agent:status": "npm run status -w @zambahola/one-agent",
+    "agent:stop": "npm run stop -w @zambahola/one-agent",
+    "agent:test-run": "npm run test-run -w @zambahola/one-agent",
+    "agent:learn": "npm run learn -w @zambahola/one-agent",
+    "agent:turbo-learn": "ZAMBAHOLA_FEED=mock npm run learn -w @zambahola/one-agent",
+    "agent:backtest": "npm run backtest -w @zambahola/one-agent",
+    "agent:power-learn": "npm run power-learn -w @zambahola/one-agent",
+    "agent:deep-backtest": "npm run deep-backtest -w @zambahola/one-agent",
+    "agent:deep-learn": "npm run deep-learn -w @zambahola/one-agent",
+    "agent:mega-train": "npm run mega-train -w @zambahola/one-agent",
+    "agent:mega-backtest": "npm run mega-backtest -w @zambahola/one-agent",
+    "agent:ultra-learn": "npm run ultra-learn -w @zambahola/one-agent",
+    "agent:start:pnpm": "pnpm --filter @zambahola/one-agent start",
+    "agent:status:pnpm": "pnpm --filter @zambahola/one-agent status",
+    "agent:stop:pnpm": "pnpm --filter @zambahola/one-agent stop",
+    "agent:test-run:pnpm": "pnpm --filter @zambahola/one-agent test-run"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.0"
+}

@@ -1,0 +1,73 @@
+import { randomUUID } from "node:crypto";
+import WebSocket from "ws";
+import type { MarketTick } from "../types.js";
+import type { MarketFeed } from "./types.js";
+
+const WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@aggTrade";
+
+/**
+ * Sub-second ticks — aggregates aggTrades to ZAMBAHOLA_TICK_MS (default 400ms).
+ */
+export class FastTickFeed implements MarketFeed {
+  readonly name = "fast_tick";
+  readonly symbol = "BTCUSDT";
+  private ws: WebSocket | null = null;
+  private handlers = new Set<(tick: MarketTick) => void>();
+  private pendingPrice = 0;
+  private lastEmit = 0;
+  private tickSeq = 0;
+  private readonly intervalMs: number;
+  private timer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(intervalMs = Number(process.env.ZAMBAHOLA_TICK_MS ?? 400)) {
+    this.intervalMs = Math.max(200, Math.min(2000, intervalMs));
+  }
+
+  start(): void {
+    this.ws = new WebSocket(WS_URL);
+    this.ws.on("message", (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString()) as { p?: string };
+        if (msg.p) this.pendingPrice = Number(msg.p);
+      } catch {
+        /* */
+      }
+    });
+    this.ws.on("close", () => {
+      this.ws = null;
+      setTimeout(() => this.start(), 3000);
+    });
+    this.timer = setInterval(() => this.emitTick(), this.intervalMs);
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.ws?.close();
+    this.ws = null;
+  }
+
+  onTick(handler: (tick: MarketTick) => void): void {
+    this.handlers.add(handler);
+  }
+
+  offTick(handler: (tick: MarketTick) => void): void {
+    this.handlers.delete(handler);
+  }
+
+  private emitTick(): void {
+    const price = this.pendingPrice;
+    if (!price) return;
+    const now = Date.now();
+    if (now - this.lastEmit < this.intervalMs * 0.85) return;
+    this.lastEmit = now;
+    this.tickSeq += 1;
+    const tick: MarketTick = {
+      tickId: `ft-${this.tickSeq}-${randomUUID().slice(0, 8)}`,
+      symbol: this.symbol,
+      price,
+      timestamp: now,
+    };
+    for (const h of this.handlers) h(tick);
+  }
+}

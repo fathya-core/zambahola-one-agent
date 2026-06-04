@@ -1,0 +1,197 @@
+{
+  "version": "2",
+  "strategyCount": 17,
+  "title": "ZAMBAHOLA Knowledge Index",
+  "titleAr": "فهرس معرفة زامباهولا",
+  "disclaimer": "Public references and summaries only. No copyrighted book text. Purchase books from official publishers.",
+  "books": [
+    {
+      "id": "murphy-technical-analysis",
+      "title": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "topics": ["charting", "indicators", "trends"],
+      "url": "https://www.investopedia.com/terms/t/technicalanalysis.asp"
+    },
+    {
+      "id": "pring-technical-explained",
+      "title": "Technical Analysis Explained",
+      "author": "Martin Pring",
+      "topics": ["momentum", "breadth", "cycles"],
+      "url": "https://www.pring.com/"
+    },
+    {
+      "id": "chan-algorithmic-trading",
+      "title": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "topics": ["mean reversion", "momentum", "backtest"],
+      "url": "https://www.wiley.com/en-us/Algorithmic+Trading"
+    },
+    {
+      "id": "lopez-de-prado-advances",
+      "title": "Advances in Financial Machine Learning",
+      "author": "Marcos López de Prado",
+      "topics": ["ML", "labeling", "cross-validation"],
+      "url": "https://www.wiley.com/en-us/Advances+in+Financial+Machine+Learning"
+    },
+    {
+      "id": "hull-options",
+      "title": "Options, Futures, and Other Derivatives",
+      "author": "John Hull",
+      "topics": ["derivatives", "risk", "hedging"],
+      "url": "https://www.pearson.com/en-us/subject-catalog/p/options-futures-and-other-derivatives/P200000003500"
+    }
+  ],
+  "strategies": [
+    {
+      "id": "momentum",
+      "name": "Momentum",
+      "nameAr": "الزخم",
+      "implemented": true,
+      "doc": "knowledge/strategies/momentum.md"
+    },
+    {
+      "id": "mean_reversion",
+      "name": "Mean reversion",
+      "nameAr": "العودة للمتوسط",
+      "implemented": true,
+      "doc": "knowledge/strategies/mean-reversion.md"
+    },
+    {
+      "id": "rsi",
+      "name": "RSI",
+      "nameAr": "مؤشر القوة النسبية",
+      "implemented": true,
+      "doc": "knowledge/strategies/rsi.md"
+    },
+    {
+      "id": "ema_cross",
+      "name": "EMA cross",
+      "nameAr": "تقاطع المتوسطات",
+      "implemented": true,
+      "doc": "knowledge/strategies/ema-cross.md"
+    },
+    {
+      "id": "volatility_regime",
+      "name": "Volatility regime",
+      "nameAr": "نظام التقلب",
+      "implemented": true,
+      "doc": "knowledge/strategies/volatility.md"
+    },
+    {
+      "id": "bollinger",
+      "name": "Bollinger bands",
+      "nameAr": "بولينجر",
+      "implemented": true,
+      "doc": "knowledge/strategies/bollinger.md"
+    }
+  ],
+  "news": [
+    {
+      "name": "CoinDesk",
+      "url": "https://www.coindesk.com/",
+      "focus": "crypto news"
+    },
+    {
+      "name": "The Block",
+      "url": "https://www.theblock.co/",
+      "focus": "crypto markets"
+    },
+    {
+      "name": "Reuters Markets",
+      "url": "https://www.reuters.com/markets/",
+      "focus": "macro markets"
+    },
+    {
+      "name": "Bloomberg Crypto",
+      "url": "https://www.bloomberg.com/crypto",
+      "focus": "crypto macro"
+    }
+  ],
+  "sites": [
+    {
+      "name": "Binance API Docs",
+      "url": "https://developers.binance.com/docs",
+      "use": "future live feed"
+    },
+    {
+      "name": "Bybit API Docs",
+      "url": "https://bybit-exchange.github.io/docs/",
+      "use": "future live feed"
+    },
+    {
+      "name": "TradingView",
+      "url": "https://www.tradingview.com/",
+      "use": "charting reference"
+    },
+    {
+      "name": "Investopedia",
+      "url": "https://www.investopedia.com/",
+      "use": "education"
+    }
+  ],
+  "accuracyMethods": [
+    {
+      "id": "ensemble",
+      "title": "Ensemble voting",
+      "titleAr": "تصويت مجمع",
+      "status": "implemented",
+      "impact": "high"
+    },
+    {
+      "id": "adaptive_weights",
+      "title": "Adaptive strategy weights",
+      "titleAr": "أوزان تكيفية",
+      "status": "implemented",
+      "impact": "high"
+    },
+    {
+      "id": "regime_filter",
+      "title": "Volatility regime filter",
+      "titleAr": "فلتر نظام التقلب",
+      "status": "implemented",
+      "impact": "medium"
+    },
+    {
+      "id": "live_feed",
+      "title": "Binance/Bybit websocket feed",
+      "titleAr": "بث مباشر",
+      "status": "implemented",
+      "impact": "high"
+    },
+    {
+      "id": "ml_model",
+      "title": "ML classifier on features",
+      "titleAr": "تعلم آلي",
+      "status": "implemented",
+      "impact": "high"
+    },
+    {
+      "id": "sentiment",
+      "title": "News/sentiment features",
+      "titleAr": "تحليل الأخبار",
+      "status": "implemented",
+      "impact": "medium"
+    },
+    {
+      "id": "calibration",
+      "title": "Confidence calibration (Platt/isotonic)",
+      "titleAr": "معايرة الثقة",
+      "status": "implemented",
+      "impact": "medium"
+    }
+  ],
+  "reports": [
+    {
+      "path": "docs/ZAMBAHOLA_ONE_AGENT_V0_REPORT.md",
+      "title": "v0 Technical Report"
+    },
+    {
+      "path": "docs/PREDICTION_ACCURACY_ROADMAP.md",
+      "title": "Accuracy Roadmap"
+    },
+    {
+      "path": "docs/ar/دليل-التحسين.md",
+      "title": "Arabic improvement guide"
+    }
+  ]
+}

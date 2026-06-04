@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ZAMBAHOLA ONE AGENT v0</title>
+    <link rel="stylesheet" href="/dashboard/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>ZAMBAHOLA ONE AGENT <span class="ver">v0</span></h1>
+      <p class="sub">Paper · BTCUSDT · hybrid v5 MEGA · Universal feed</p>
+      <div id="status-pill" class="pill">connecting…</div>
+    </header>
+
+    <main class="grid">
+      <section class="card">
+        <h2>Live price</h2>
+        <p id="price" class="big">—</p>
+        <p id="symbol" class="muted">BTCUSDT</p>
+      </section>
+
+      <section class="card">
+        <h2>Latest prediction</h2>
+        <p id="prediction" class="big">—</p>
+        <p id="confidence" class="muted">confidence —</p>
+        <p id="horizon" class="muted">horizon 30s</p>
+      </section>
+
+      <section class="card">
+        <h2>Latest decision</h2>
+        <p id="decision" class="big">—</p>
+        <p id="decision-reason" class="muted">—</p>
+      </section>
+
+      <section class="card wide">
+        <h2>Metrics</h2>
+        <dl class="metrics-dl" id="metrics"></dl>
+      </section>
+
+      <section class="card wide">
+        <h2>Paper position</h2>
+        <pre id="position">flat</pre>
+      </section>
+
+      <section class="card wide">
+        <h2>Strategy ensemble</h2>
+        <pre id="strategies">—</pre>
+      </section>
+
+      <section class="card wide">
+        <h2>Knowledge index</h2>
+        <p class="muted">Books · news · sites · accuracy methods</p>
+        <pre id="knowledge">—</pre>
+      </section>
+    </main>
+
+    <footer>
+      <p>Dashboard <code>http://localhost:8787</code> · no real trades</p>
+    </footer>
+    <script src="/dashboard/app.js"></script>
+  </body>
+</html>
