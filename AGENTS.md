@@ -35,29 +35,36 @@ No database, Docker, or external APIs in v0.
 npm run setup
 ```
 
+### Geo-blocked exchanges (common in cloud VMs)
+
+Binance/Bybit REST may return **restricted location**. Use:
+
+- `ZAMBAHOLA_FEED=coingecko` for live BTC price (no keys)
+- `ZAMBAHOLA_FEED=mock` for headless CI
+- Train/backtest still work via `synthetic_fallback` / Bybit when allowed
+
+Default `universal` is best on home networks without geo-block.
+
+### Full verification (preferred over manual checklist)
+
+```bash
+npm run verify
+```
+
+Writes `docs/VERIFICATION_REPORT.json` (setup, 17 strategies, test-run, mega-backtest, mega-train, required files).
+
 ### Start / stop
 
 ```bash
-npm run agent:start    # detached process; pid in apps/one-agent/data/agent.pid
+npm run agent:start
 npm run agent:status
 npm run agent:stop
 ```
 
-In headless VMs, browser open may fail — use `curl http://127.0.0.1:8787/api/status` or visit the Desktop pane.
+Headless: `curl http://127.0.0.1:8787/api/status`. Engine id in metrics: `hybrid_v6_ultra`.
 
-### Validation checklist
+### Git hygiene
 
-1. `npm run setup` succeeds
-2. `npm run agent:test-run` → `ok: true`, `predictionCount >= 60`
-3. `npm run agent:start` → dashboard responds on port 8787
-4. Confirm `apps/one-agent/data/metrics/current.json` updates
-5. Confirm `paper-ledger.jsonl` has decision/trade lines
-6. `npm run agent:stop`
+`apps/one-agent/knowledge/research-log.jsonl` is runtime-only (ignored after `!apps/one-agent/knowledge/**/*` negation — ignore rule must come **after** that line in `.gitignore`).
 
-### Architecture notes
-
-- **Market feed**: `MockMarketFeed` implements `MarketFeed` — replace with Binance/Bybit websocket adapter without changing engines.
-- **Trading**: paper only via `PaperBroker`.
-- **MCP**: scaffold in `apps/one-agent/src/mcp/` (tools delegate to CLI/files in v0).
-
-Do **not** put `npm run agent:start` in the VM update script.
+Do **not** put `npm run agent:start` or `npm run verify` in the VM update script.
