@@ -1,4 +1,5 @@
 import type { PredictionDirection } from "../types.js";
+import { getOrderBook } from "../market-feed/orderbook.js";
 
 export interface FeatureVector {
   ret1: number;
@@ -10,6 +11,9 @@ export interface FeatureVector {
   zScore: number;
   sentiment: number;
   agreement: number;
+  bookImbalance: number;
+  spreadBps: number;
+  macdHistNorm: number;
 }
 
 export function extractFeatures(
@@ -48,6 +52,12 @@ export function extractFeatures(
   const oldest = prices[prices.length - 8]!;
   const momentum = (p - oldest) / oldest;
 
+  const book = getOrderBook();
+  const bookImbalance = book?.imbalance ?? 0;
+  const spreadBps = book ? book.spreadBps / 100 : 0;
+
+  const macdHistNorm = computeMacdHistNorm(prices);
+
   return {
     ret1: ret(1),
     ret5: prices.length > 5 ? ret(5) : 0,
@@ -58,7 +68,24 @@ export function extractFeatures(
     zScore: Math.max(-2, Math.min(2, zScore)),
     sentiment: Math.max(-1, Math.min(1, sentiment)),
     agreement,
+    bookImbalance: Math.max(-1, Math.min(1, bookImbalance)),
+    spreadBps: Math.min(1, spreadBps),
+    macdHistNorm,
   };
+}
+
+function computeMacdHistNorm(prices: number[]): number {
+  if (prices.length < 26) return 0;
+  const ema = (arr: number[], p: number) => {
+    const k = 2 / (p + 1);
+    let v = arr[0]!;
+    for (const x of arr) v = x * k + v * (1 - k);
+    return v;
+  };
+  const e12 = ema(prices, 12);
+  const e26 = ema(prices, 26);
+  const hist = e12 - e26;
+  return Math.max(-1, Math.min(1, hist / (prices[prices.length - 1]! * 0.0005)));
 }
 
 export function featuresToArray(f: FeatureVector): number[] {
@@ -73,21 +100,13 @@ export function featuresToArray(f: FeatureVector): number[] {
     f.zScore,
     f.sentiment,
     f.agreement,
+    f.bookImbalance,
+    f.spreadBps,
+    f.macdHistNorm,
   ];
 }
 
-export const FEATURE_LABELS = [
-  "bias",
-  "ret1",
-  "ret5",
-  "ret10",
-  "vol",
-  "rsi",
-  "mom",
-  "z",
-  "sentiment",
-  "agreement",
-] as const;
+export const FEATURE_DIM = 13;
 
 export function directionFromScore(score: number): PredictionDirection {
   if (score > 0.15) return "up";

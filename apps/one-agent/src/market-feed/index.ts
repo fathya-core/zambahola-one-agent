@@ -3,4 +3,7 @@ export { MockMarketFeed } from "./mock-feed.js";
 export { BinanceWsFeed } from "./binance-ws.js";
 export { BinanceRestFeed } from "./binance-rest.js";
 export { HybridBinanceFeed } from "./hybrid-binance.js";
+export { UniversalFeed } from "./universal-feed.js";
+export { BybitRestFeed } from "./bybit-rest.js";
+export { getOrderBook, setOrderBook } from "./orderbook.js";
 export { createMarketFeed, resolveFeedKind } from "./factory.js";

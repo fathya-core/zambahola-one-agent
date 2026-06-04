@@ -9,6 +9,7 @@ import { CURRENT_METRICS_FILE, PAPER_LEDGER_FILE } from "../storage/paths.js";
 import { DASHBOARD_PORT } from "../storage/paths.js";
 import { loadKnowledgeIndex } from "../../knowledge/loader.js";
 import { getSentiment } from "../sentiment/index.js";
+import { getOrderBook } from "../market-feed/orderbook.js";
 
 const dashboardDir = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -73,6 +74,9 @@ async function route(
   }
   if (path === "/api/evaluations") {
     return sendJson(res, 200, agent.evaluator.getEvaluations());
+  }
+  if (path === "/api/orderbook") {
+    return sendJson(res, 200, getOrderBook() ?? {});
   }
   if (path === "/api/sentiment") {
     return sendJson(res, 200, getSentiment());

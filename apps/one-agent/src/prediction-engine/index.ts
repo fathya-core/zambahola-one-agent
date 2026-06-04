@@ -91,7 +91,7 @@ export class PredictionEngine {
       priceAtPrediction: tick.price,
       timestamp: tick.timestamp,
       meta: {
-        engine: "hybrid_v2",
+        engine: "hybrid_v3",
         agreement: ensemble.agreement,
         strategyVotes: ensemble.votes,
         weights: { ...this.weights },
@@ -102,19 +102,7 @@ export class PredictionEngine {
         mlSamples: this.ml.getSampleCount(),
         sentiment: sentiment.score,
         sentimentLabel: sentiment.label,
-        features: features
-          ? {
-              ret1: features.ret1,
-              ret5: features.ret5,
-              ret10: features.ret10,
-              volatility: features.volatility,
-              rsiNorm: features.rsiNorm,
-              momentumNorm: features.momentumNorm,
-              zScore: features.zScore,
-              sentiment: features.sentiment,
-              agreement: features.agreement,
-            }
-          : undefined,
+        features: features ? { ...features } : undefined,
       },
     };
   }

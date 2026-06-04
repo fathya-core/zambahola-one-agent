@@ -6,17 +6,22 @@ import {
   type FeatureVector,
   featuresToArray,
   directionFromScore,
+  FEATURE_DIM,
 } from "../features/index.js";
 import type { PredictionDirection } from "../types.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const MODEL_FILE = join(pkgRoot, "data", "learning", "ml-weights.json");
 
-const LR = 0.08;
+const LR = 0.1;
 const L2 = 0.001;
 
+const DEFAULT_WEIGHTS = [
+  0, 0.45, 0.28, 0.18, -0.12, -0.22, 0.38, -0.14, 0.22, 0.3, 0.42, -0.08, 0.35,
+];
+
 export class OnlineMLModel {
-  private weights: number[] = [0, 0.5, 0.3, 0.2, -0.1, -0.2, 0.4, -0.15, 0.25, 0.35];
+  private weights: number[] = [...DEFAULT_WEIGHTS];
   private samples = 0;
 
   async load(): Promise<void> {
@@ -26,12 +31,12 @@ export class OnlineMLModel {
         weights: number[];
         samples: number;
       };
-      if (Array.isArray(data.weights) && data.weights.length === this.weights.length) {
+      if (Array.isArray(data.weights) && data.weights.length === FEATURE_DIM) {
         this.weights = data.weights;
         this.samples = data.samples ?? 0;
       }
     } catch {
-      /* defaults */
+      /* */
     }
   }
 
@@ -39,7 +44,7 @@ export class OnlineMLModel {
     await mkdir(dirname(MODEL_FILE), { recursive: true });
     await writeFile(
       MODEL_FILE,
-      JSON.stringify({ weights: this.weights, samples: this.samples }, null, 2),
+      JSON.stringify({ weights: this.weights, samples: this.samples, dim: FEATURE_DIM }, null, 2),
       "utf8",
     );
   }
@@ -56,7 +61,6 @@ export class OnlineMLModel {
     };
   }
 
-  /** Train: label 1 = up hit, 0 = down hit, 0.5 = range */
   async train(
     features: FeatureVector | Record<string, number>,
     label: number,
@@ -71,7 +75,7 @@ export class OnlineMLModel {
         this.weights[i]! + LR * (err * x[i]! - L2 * this.weights[i]!);
     }
     this.samples += 1;
-    if (this.samples % 5 === 0) await this.save();
+    if (this.samples % 3 === 0) await this.save();
   }
 
   getWeights(): number[] {
@@ -108,16 +112,10 @@ function normalizeFeatures(
     zScore: f.zScore ?? 0,
     sentiment: f.sentiment ?? 0,
     agreement: f.agreement ?? 0,
+    bookImbalance: f.bookImbalance ?? 0,
+    spreadBps: f.spreadBps ?? 0,
+    macdHistNorm: f.macdHistNorm ?? 0,
   };
-}
-
-export function labelFromHit(
-  direction: PredictionDirection,
-  hit: boolean,
-): number {
-  if (direction === "up") return hit ? 1 : 0;
-  if (direction === "down") return hit ? 0 : 1;
-  return 0.5;
 }
 
 export { MODEL_FILE };

@@ -1,0 +1,47 @@
+export interface OrderBookSnapshot {
+  symbol: string;
+  bidVolume: number;
+  askVolume: number;
+  imbalance: number;
+  spreadBps: number;
+  midPrice: number;
+  updatedAt: number;
+  source: string;
+}
+
+let snapshot: OrderBookSnapshot | null = null;
+
+export function setOrderBook(s: OrderBookSnapshot): void {
+  snapshot = s;
+}
+
+export function getOrderBook(): OrderBookSnapshot | null {
+  return snapshot;
+}
+
+export function computeImbalance(
+  bids: Array<[string, string]>,
+  asks: Array<[string, string]>,
+  levels = 10,
+): { bidVol: number; askVol: number; imbalance: number; mid: number; spreadBps: number } {
+  let bidVol = 0;
+  let askVol = 0;
+  for (let i = 0; i < Math.min(levels, bids.length); i++) {
+    bidVol += Number(bids[i]![1]);
+  }
+  for (let i = 0; i < Math.min(levels, asks.length); i++) {
+    askVol += Number(asks[i]![1]);
+  }
+  const bestBid = Number(bids[0]?.[0] ?? 0);
+  const bestAsk = Number(asks[0]?.[0] ?? 0);
+  const mid = (bestBid + bestAsk) / 2;
+  const spreadBps = mid > 0 ? ((bestAsk - bestBid) / mid) * 10000 : 0;
+  const total = bidVol + askVol || 1;
+  return {
+    bidVol,
+    askVol,
+    imbalance: (bidVol - askVol) / total,
+    mid,
+    spreadBps,
+  };
+}
