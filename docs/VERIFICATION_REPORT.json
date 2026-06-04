@@ -5,7 +5,7 @@
       "name": "setup",
       "pass": true,
       "exit": 0,
-      "out": "\n> zambahola-one-agent@0.1.0 setup\n> node scripts/setup.mjs\n\n[zambahola] Setting up dependencies…\n\n[zambahola] Running pnpm install…\n\nScope: all 2 workspace projects\nLockfile is up to date, resolution step is skipped\nAlready up to date\n\nDone in 617ms\n\n[zambahola] Done. Run: npm run agent:start\n"
+      "out": "\n> zambahola-one-agent@0.1.0 setup\n> node scripts/setup.mjs\n\n[zambahola] Setting up dependencies…\n\n[zambahola] Running pnpm install…\n\nScope: all 2 workspace projects\nLockfile is up to date, resolution step is skipped\nAlready up to date\n\nDone in 557ms\n\n[zambahola] Done. Run: npm run agent:start\n"
     },
     {
       "name": "strategy_count",
@@ -16,19 +16,19 @@
       "name": "test_run",
       "pass": true,
       "exit": 0,
-      "out": "\n> zambahola-one-agent@0.1.0 agent:test-run\n> npm run test-run -w @zambahola/one-agent\n\n\n> @zambahola/one-agent@0.1.0 test-run\n> tsx src/cli/test-run.ts\n\n[zambahola] test-run: 65s headless run…\n{\n  \"ok\": true,\n  \"predictionCount\": 64,\n  \"minRequired\": 60,\n  \"runLines\": 292,\n  \"hitRate\": 0.2941,\n  \"paperPnl\": 0\n}\n"
+      "out": "\n> zambahola-one-agent@0.1.0 agent:test-run\n> npm run test-run -w @zambahola/one-agent\n\n\n> @zambahola/one-agent@0.1.0 test-run\n> tsx src/cli/test-run.ts\n\n[zambahola] test-run: 65s headless run…\n{\n  \"ok\": true,\n  \"predictionCount\": 64,\n  \"minRequired\": 60,\n  \"runLines\": 292,\n  \"hitRate\": 0.3235,\n  \"paperPnl\": 0\n}\n"
     },
     {
       "name": "mega_backtest",
       "pass": true,
       "exit": 0,
-      "out": "\n> zambahola-one-agent@0.1.0 agent:mega-backtest\n> npm run mega-backtest -w @zambahola/one-agent\n\n\n> @zambahola/one-agent@0.1.0 mega-backtest\n> tsx src/cli/mega-backtest.ts\n\n[zambahola] MEGA BACKTEST 400 bars…\n\n{\n  \"ok\": true,\n  \"bars\": 400,\n  \"predictions\": 371,\n  \"evaluations\": 371,\n  \"hitRate\": 0.2884,\n  \"source\": \"synthetic_fallback\"\n}\n"
+      "out": "\n> zambahola-one-agent@0.1.0 agent:mega-backtest\n> npm run mega-backtest -w @zambahola/one-agent\n\n\n> @zambahola/one-agent@0.1.0 mega-backtest\n> tsx src/cli/mega-backtest.ts\n\n[zambahola] MEGA BACKTEST 400 bars…\n\n{\n  \"ok\": true,\n  \"bars\": 400,\n  \"predictions\": 371,\n  \"evaluations\": 371,\n  \"hitRate\": 0.442,\n  \"source\": \"synthetic_fallback\"\n}\n"
     },
     {
       "name": "mega_train",
       "pass": true,
       "exit": 0,
-      "out": "\n> zambahola-one-agent@0.1.0 agent:mega-train\n> npm run mega-train -w @zambahola/one-agent\n\n\n> @zambahola/one-agent@0.1.0 mega-train\n> tsx src/cli/mega-train.ts\n\n[zambahola] MEGA TRAIN on 300 bars…\n\n{\n  \"bars\": 300,\n  \"trainSteps\": 268,\n  \"source\": \"synthetic_fallback\",\n  \"mlSamples\": 1594,\n  \"mlpSamples\": 1578,\n  \"gbmSamples\": 2996\n}\n"
+      "out": "\n> zambahola-one-agent@0.1.0 agent:mega-train\n> npm run mega-train -w @zambahola/one-agent\n\n\n> @zambahola/one-agent@0.1.0 mega-train\n> tsx src/cli/mega-train.ts\n\n[zambahola] MEGA TRAIN on 300 bars…\n\n{\n  \"bars\": 300,\n  \"trainSteps\": 268,\n  \"source\": \"synthetic_fallback\",\n  \"mlSamples\": 7252,\n  \"mlpSamples\": 7223,\n  \"gbmSamples\": 8620\n}\n"
     },
     {
       "name": "file:apps/one-agent/src/prediction-engine/index.ts",
@@ -47,5 +47,5 @@
       "pass": true
     }
   ],
-  "ts": "2026-06-04T20:02:01.010Z"
+  "ts": "2026-06-04T20:09:02.977Z"
 }
