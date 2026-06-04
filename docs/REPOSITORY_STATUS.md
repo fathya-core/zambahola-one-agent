@@ -9,7 +9,7 @@
 | Item | Status |
 |------|--------|
 | 17 strategies | ✓ |
-| hybrid_v6_ultra engine | ✓ |
+| hybrid_v7 engine | ✓ |
 | 5-layer AI (ensemble, ML, MLP, GBM, LOB-CNN) | ✓ |
 | Universal + CoinGecko + mock feeds | ✓ |
 | learn 25 / deep 25 / ultra 30 cycles (config) | ✓ |

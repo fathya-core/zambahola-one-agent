@@ -5,6 +5,7 @@ import { ensureDataDirs, readMetrics } from "../storage/index.js";
 import { appendResearchLog } from "../learning/adaptive-weights.js";
 import { boostTopStrategies } from "../learning/strategy-orchestrator.js";
 import { CYCLES } from "../learning/cycle-config.js";
+import { exportModelBundle } from "../learning/model-export.js";
 
 async function main(): Promise<void> {
   await ensureDataDirs();
@@ -45,6 +46,9 @@ async function main(): Promise<void> {
   const post = await runMegaBacktest(Math.min(bars, 1200));
   console.log("\nPost backtest:", JSON.stringify(post, null, 2));
   await appendResearchLog({ event: "ultra_complete", pre, train, post });
+
+  const exported = await exportModelBundle("hybrid_v7");
+  console.log("\nModel export:", exported.path, exported.files);
 }
 
 main().catch((e) => {

@@ -9,6 +9,7 @@ const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const CACHE_FILE = join(pkgRoot, "data", "klines", "btcusdt-1m.json");
 const MEGA_CACHE = join(pkgRoot, "data", "klines", "btcusdt-1m-mega.json");
 const ULTRA_CACHE = join(pkgRoot, "data", "klines", "btcusdt-1m-ultra.json");
+const TENK_CACHE = join(pkgRoot, "data", "klines", "btcusdt-1m-10k.json");
 
 export interface KlineBar {
   open: number;
@@ -51,6 +52,11 @@ export async function fetchKlinesUltra(target = 5000): Promise<KlineBar[]> {
   return fetchKlinesPaginated(target, 12);
 }
 
+/** Paginate up to 10_000 1m candles (v0.7) */
+export async function fetchKlines10k(target = 10_000): Promise<KlineBar[]> {
+  return fetchKlinesPaginated(target, 22);
+}
+
 /** Paginate up to 1500 1m candles */
 export async function fetchKlinesMega(target = 1500): Promise<KlineBar[]> {
   return fetchKlinesPaginated(target, 6);
@@ -89,7 +95,13 @@ export async function loadOrFetchKlines(limit = 500): Promise<{
   source: string;
 }> {
   const file =
-    limit > 2500 ? ULTRA_CACHE : limit > 800 ? MEGA_CACHE : CACHE_FILE;
+    limit > 7500
+      ? TENK_CACHE
+      : limit > 2500
+        ? ULTRA_CACHE
+        : limit > 800
+          ? MEGA_CACHE
+          : CACHE_FILE;
   await mkdir(dirname(file), { recursive: true });
 
   if (existsSync(file)) {
@@ -111,13 +123,21 @@ export async function loadOrFetchKlines(limit = 500): Promise<{
     let source: string;
     try {
       bars =
-        limit > 2500
-          ? await fetchKlinesUltra(limit)
-          : limit > 800
-            ? await fetchKlinesMega(limit)
-            : await fetchKlinesBatch(limit);
+        limit > 7500
+          ? await fetchKlines10k(limit)
+          : limit > 2500
+            ? await fetchKlinesUltra(limit)
+            : limit > 800
+              ? await fetchKlinesMega(limit)
+              : await fetchKlinesBatch(limit);
       source =
-        limit > 2500 ? "binance_ultra" : limit > 800 ? "binance_mega" : "binance_api";
+        limit > 7500
+          ? "binance_10k"
+          : limit > 2500
+            ? "binance_ultra"
+            : limit > 800
+              ? "binance_mega"
+              : "binance_api";
     } catch {
       bars = await fetchBybitKlines(Math.min(limit, 1000));
       source = "bybit_api";

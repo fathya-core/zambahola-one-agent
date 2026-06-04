@@ -54,7 +54,8 @@ run("mega_train", "npm", ["run", "agent:mega-train"], {
 const required = [
   "apps/one-agent/src/prediction-engine/index.ts",
   "apps/one-agent/src/cli/ultra-learn.ts",
-  "docs/ZAMBAHOLA_V06_ULTRA.md",
+  "docs/ZAMBAHOLA_V07.md",
+  "apps/one-agent/src/market-feed/bybit-primary-feed.ts",
   "package.json",
 ];
 for (const f of required) {

@@ -1,4 +1,4 @@
-const MAX = 48;
+const MAX = Number(process.env.ZAMBAHOLA_LOB_DEPTH ?? 128);
 
 const imbalanceSeries: number[] = [];
 const spreadSeries: number[] = [];

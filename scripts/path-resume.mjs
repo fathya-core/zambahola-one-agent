@@ -24,6 +24,7 @@ console.log("[path] ZAMBAHOLA — resume learning & development\n");
 
 run("Live agent (background)", "npm", ["run", "agent:start"], {
   ZAMBAHOLA_FEED: liveFeed,
+  ZAMBAHOLA_AUTO_BYBIT: "1",
 });
 
 run(`Learn ${cycles} cycles`, "npm", ["run", "agent:learn"], {

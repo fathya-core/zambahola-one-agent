@@ -7,5 +7,6 @@ export const CYCLES = {
   ultra: Number(process.env.ZAMBAHOLA_ULTRA_CYCLES ?? 30),
   cycleMs: Number(process.env.ZAMBAHOLA_CYCLE_MS ?? 65_000),
   megaBars: Number(process.env.ZAMBAHOLA_KLINES ?? 3000),
-  ultraBars: Number(process.env.ZAMBAHOLA_ULTRA_KLINES ?? 5000),
+  ultraBars: Number(process.env.ZAMBAHOLA_ULTRA_KLINES ?? 10_000),
+  tenkBars: Number(process.env.ZAMBAHOLA_10K_KLINES ?? 10_000),
 } as const;

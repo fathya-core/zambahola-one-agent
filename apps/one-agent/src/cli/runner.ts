@@ -1,6 +1,7 @@
 import { writeFile, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createZambaholaAgent } from "../sdk/index.js";
+import { createMarketFeed, initFeedAutoProbe } from "../market-feed/factory.js";
 import {
   AGENT_PID_FILE,
   AGENT_STATUS_FILE,
@@ -12,7 +13,11 @@ async function main(): Promise<void> {
   const resetData = process.env.ZAMBAHOLA_RESET === "1";
   await ensureDataDirs();
 
-  const agent = createZambaholaAgent({ resetData });
+  await initFeedAutoProbe();
+  const agent = createZambaholaAgent({
+    resetData,
+    feed: createMarketFeed(),
+  });
   await agent.start();
 
   await writeFile(AGENT_PID_FILE, String(process.pid), "utf8");

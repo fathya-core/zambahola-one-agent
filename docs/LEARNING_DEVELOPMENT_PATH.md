@@ -11,7 +11,8 @@
 | **2 — Deep** | Regime + calibration + deep backtest | `npm run agent:deep-learn` | `data/learning/*.json` |
 | **3 — Mega** | Large kline train + backtest | `npm run agent:mega-train` / `agent:mega-backtest` | ML/MLP/GBM samples |
 | **4 — Ultra** | Full pipeline (5000 bars + 30 cycles) | `npm run agent:ultra-learn` | orchestrator + post metrics |
-| **5 — Next** | v0.7 (see `docs/PREDICTION_ACCURACY_ROADMAP.md`) | TBD | ONNX, 10k klines, sub-second ticks |
+| **5 — v0.7** | 10k klines, Bybit-primary, export | `npm run agent:auto-pipeline` | `export/hybrid_v7-bundle.json` |
+| **6 — Next** | ONNX runtime, default sub-second ticks | TBD | |
 
 ## Quick resume (started 2026-06-04)
 

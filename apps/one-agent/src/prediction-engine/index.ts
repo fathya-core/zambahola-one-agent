@@ -143,7 +143,7 @@ export class PredictionEngine {
       priceAtPrediction: tick.price,
       timestamp: tick.timestamp,
       meta: {
-        engine: "hybrid_v6_ultra",
+        engine: "hybrid_v7",
         strategyCount: STRATEGY_COUNT,
         agreement: ensemble.agreement,
         strategyVotes: ensemble.votes,
