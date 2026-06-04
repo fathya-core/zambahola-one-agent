@@ -4,22 +4,31 @@ Standalone **local paper-trading agent** for BTCUSDT. Mock market feed in v0 (Bi
 
 ## Requirements
 
-- Node.js 20+
-- [pnpm](https://pnpm.io/) 9+
+- **Node.js 20+** only (includes `npm` and **Corepack** — you do **not** need to install pnpm yourself)
 
 ## Setup
 
 ```bash
 git clone https://github.com/fathya-core/zambahola-one-agent.git
 cd zambahola-one-agent
+npm run setup
+```
+
+`npm run setup` installs dependencies using the pinned pnpm version (via Corepack or `npx` — **no separate pnpm install**).
+
+If you already use pnpm globally:
+
+```bash
 pnpm install
 ```
 
 ## Run
 
 ```bash
-pnpm agent:start
+npm run agent:start
 ```
+
+(Or `pnpm agent:start` if you use pnpm directly.)
 
 Opens the dashboard at **http://localhost:8787** (paper mode only).
 
@@ -27,9 +36,9 @@ Other commands:
 
 | Command | Description |
 |---------|-------------|
-| `pnpm agent:status` | JSON status (pid, ticks, port) |
-| `pnpm agent:stop` | Stop background agent |
-| `pnpm agent:test-run` | Headless 65s run; requires ≥60 predictions |
+| `npm run agent:status` | JSON status (pid, ticks, port) |
+| `npm run agent:stop` | Stop background agent |
+| `npm run agent:test-run` | Headless 65s run; requires ≥60 predictions |
 
 ## What v0 does
 
@@ -91,9 +100,9 @@ See `apps/one-agent/src/mcp/index.ts`.
 ## Validation
 
 ```bash
-pnpm install
-pnpm agent:test-run   # ≥60 predictions
-pnpm agent:start      # dashboard at :8787
+npm run setup
+npm run agent:test-run   # ≥60 predictions
+npm run agent:start      # dashboard at :8787
 ```
 
 ## License
