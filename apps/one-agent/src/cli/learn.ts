@@ -3,7 +3,7 @@ import { ensureDataDirs } from "../storage/index.js";
 import { readMetrics } from "../storage/index.js";
 import { appendResearchLog } from "../learning/adaptive-weights.js";
 
-const CYCLES = 3;
+const CYCLES = Number(process.env.ZAMBAHOLA_LEARN_CYCLES ?? 5);
 const CYCLE_MS = 65_000;
 
 async function main(): Promise<void> {

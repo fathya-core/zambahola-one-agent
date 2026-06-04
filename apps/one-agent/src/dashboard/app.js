@@ -6,10 +6,14 @@ async function fetchJson(path) {
 }
 
 function renderMetrics(m) {
-  const rows = [
-    ["Ticks", m.tickCount],
-    ["Predictions", m.predictionCount],
-    ["Hit rate", (m.hitRate * 100).toFixed(1) + "%"],
+    const rows = [
+      ["Feed", m.feedName ?? "—"],
+      ["Regime", m.regime ?? "—"],
+      ["Sentiment", m.sentimentScore ?? "—"],
+      ["ML samples", m.mlSamples ?? 0],
+      ["Ticks", m.tickCount],
+      ["Predictions", m.predictionCount],
+      ["Hit rate", (m.hitRate * 100).toFixed(1) + "%"],
     ["Paper PnL", m.paperPnl],
     ["Avg win", m.averageWin],
     ["Avg loss", m.averageLoss],

@@ -30,7 +30,8 @@ npm run agent:start
 
 (Or `pnpm agent:start` if you use pnpm directly.)
 
-Opens the dashboard at **http://localhost:8787** (paper mode only).
+Opens the dashboard at **http://localhost:8787** (paper mode only).  
+**Default feed:** live Binance BTCUSDT (`ZAMBAHOLA_FEED=mock` for offline/sim).
 
 Other commands:
 
@@ -39,7 +40,8 @@ Other commands:
 | `npm run agent:status` | JSON status (pid, ticks, port) |
 | `npm run agent:stop` | Stop background agent |
 | `npm run agent:test-run` | Headless 65s run; requires ≥60 predictions |
-| `npm run agent:learn` | 3 learning cycles — updates strategy weights |
+| `npm run agent:learn` | 5 learning cycles — ML + strategy weights |
+| `npm run agent:turbo-learn` | Fast learn on mock feed |
 
 ## What v0 does
 

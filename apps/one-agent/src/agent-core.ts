@@ -1,5 +1,6 @@
 import type { MarketFeed } from "./market-feed/index.js";
-import { MockMarketFeed } from "./market-feed/index.js";
+import { createMarketFeed } from "./market-feed/index.js";
+import { startSentimentLoop } from "./sentiment/index.js";
 import { PredictionEngine } from "./prediction-engine/index.js";
 import { strategyHitsFromVotes } from "./prediction-engine/ensemble.js";
 import {
@@ -57,11 +58,12 @@ export class AgentCore {
   private lastDecision: Decision | null = null;
   private lastTick: MarketTick | null = null;
   private strategyHits: Record<string, { hits: number; total: number }> = {};
+  private stopSentiment: (() => void) | null = null;
   private listeners = new Set<TickHandler>();
   private boundOnTick = (tick: MarketTick) => void this.handleTick(tick);
 
   constructor(options: AgentCoreOptions = {}) {
-    this.feed = options.feed ?? new MockMarketFeed();
+    this.feed = options.feed ?? createMarketFeed();
     this.predictionEngine = new PredictionEngine({
       horizonSec: options.horizonSec ?? 30,
     });
@@ -84,6 +86,7 @@ export class AgentCore {
     this.running = true;
     this.startedAt = Date.now();
     await this.predictionEngine.init();
+    this.stopSentiment = startSentimentLoop(90_000);
     await writeReceipt("agent-start", {
       symbol: this.feed.symbol,
       feed: this.feed.name,
@@ -97,6 +100,10 @@ export class AgentCore {
     if (!this.running) return;
     this.feed.offTick(this.boundOnTick);
     this.feed.stop();
+    if (this.stopSentiment) {
+      this.stopSentiment();
+      this.stopSentiment = null;
+    }
     this.running = false;
     await writeReceipt("agent-stop", { tickCount: this.tickCount });
     await this.persistMetrics();
@@ -198,6 +205,15 @@ export class AgentCore {
           hits,
           weights,
         });
+
+        if (evaluatedPred.meta?.features) {
+          await this.predictionEngine.onEvaluationHit(
+            evaluatedPred.meta.features,
+            evaluation.direction,
+            evaluation.predictionHit,
+            evaluatedPred.confidence,
+          );
+        }
       }
     }
 
@@ -249,6 +265,10 @@ export class AgentCore {
       lastDecision: this.lastDecision,
       strategyStats,
       ensembleAgreement: this.lastPrediction?.meta?.agreement,
+      feedName: this.feed.name,
+      regime: this.lastPrediction?.meta?.regime,
+      sentimentScore: this.lastPrediction?.meta?.sentiment,
+      mlSamples: this.lastPrediction?.meta?.mlSamples,
       updatedAt: Date.now(),
     };
   }

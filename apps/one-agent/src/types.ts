@@ -24,6 +24,14 @@ export interface PredictionMeta {
   agreement: number;
   strategyVotes: StrategyVoteMeta[];
   weights: Record<string, number>;
+  regime?: string;
+  gateReason?: string;
+  mlScore?: number;
+  mlProb?: number;
+  mlSamples?: number;
+  sentiment?: number;
+  sentimentLabel?: string;
+  features?: Record<string, number>;
 }
 
 export interface Prediction {
@@ -96,6 +104,10 @@ export interface AgentMetrics {
   lastDecision: Decision | null;
   strategyStats?: StrategyHitStats[];
   ensembleAgreement?: number;
+  feedName?: string;
+  regime?: string;
+  sentimentScore?: number;
+  mlSamples?: number;
   updatedAt: number;
 }
 

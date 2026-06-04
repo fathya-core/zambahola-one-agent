@@ -8,6 +8,7 @@ const RUN_MS = 65_000;
 
 async function main(): Promise<void> {
   process.env.ZAMBAHOLA_RESET = "1";
+  process.env.ZAMBAHOLA_FEED = process.env.ZAMBAHOLA_FEED ?? "mock";
   const agent = new AgentCore({ resetData: true });
 
   console.log(`[zambahola] test-run: ${RUN_MS / 1000}s headless run…`);

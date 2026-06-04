@@ -1,6 +1,6 @@
 # zambahola-one-agent
 
-**ZAMBAHOLA ONE AGENT v0** — local paper-trading agent (`apps/one-agent`).
+**ZAMBAHOLA ONE AGENT v0.2** — hybrid ML + Binance + sentiment (`apps/one-agent`).
 
 ## Commands (from repo root)
 
@@ -23,6 +23,8 @@ No database, Docker, or external APIs in v0.
 ## Environment
 
 - No secrets or exchange keys in v0.
+- `ZAMBAHOLA_FEED=binance|mock|binance_rest` (default `binance` hybrid)
+- `ZAMBAHOLA_LEARN_CYCLES=N` for extended training
 - Optional: `ZAMBAHOLA_RESET=1` clears run/ledger files on next agent start (test-run sets this).
 
 ## Cursor Cloud specific instructions
