@@ -2,6 +2,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isExchangeBlocked } from "./exchange-fallback.js";
+import { fetchBybitKlines } from "./bybit-klines.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const CACHE_FILE = join(pkgRoot, "data", "klines", "btcusdt-1m.json");
@@ -29,7 +31,11 @@ export async function fetchKlinesBatch(
   if (endTime) url.searchParams.set("endTime", String(endTime));
 
   const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
-  const raw = (await res.json()) as number[][];
+  const text = await res.text();
+  if (!res.ok || isExchangeBlocked(text)) {
+    throw new Error("binance_klines_blocked");
+  }
+  const raw = JSON.parse(text) as number[][];
   return raw.map((c) => ({
     openTime: c[0]!,
     open: Number(c[1]),
@@ -101,22 +107,29 @@ export async function loadOrFetchKlines(limit = 500): Promise<{
   }
 
   try {
-    const bars =
-      limit > 2500
-        ? await fetchKlinesUltra(limit)
-        : limit > 800
-          ? await fetchKlinesMega(limit)
-          : await fetchKlinesBatch(limit);
+    let bars: KlineBar[];
+    let source: string;
+    try {
+      bars =
+        limit > 2500
+          ? await fetchKlinesUltra(limit)
+          : limit > 800
+            ? await fetchKlinesMega(limit)
+            : await fetchKlinesBatch(limit);
+      source =
+        limit > 2500 ? "binance_ultra" : limit > 800 ? "binance_mega" : "binance_api";
+    } catch {
+      bars = await fetchBybitKlines(Math.min(limit, 1000));
+      source = "bybit_api";
+    }
     await writeFile(
       file,
       JSON.stringify({ bars, fetchedAt: Date.now() }, null, 0),
       "utf8",
     );
-    const source =
-      limit > 2500 ? "binance_ultra" : limit > 800 ? "binance_mega" : "binance_api";
     return { bars, source };
   } catch {
-    return { bars: syntheticBars(limit), source: "synthetic" };
+    return { bars: syntheticBars(limit), source: "synthetic_fallback" };
   }
 }
 

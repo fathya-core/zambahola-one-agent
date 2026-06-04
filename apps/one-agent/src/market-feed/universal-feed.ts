@@ -3,6 +3,7 @@ import type { MarketFeed } from "./types.js";
 import { HybridBinanceFeed } from "./hybrid-binance.js";
 import { BybitRestFeed } from "./bybit-rest.js";
 import { startDepthPoller } from "./depth-poller.js";
+import { CoinGeckoFeed } from "./coingecko-feed.js";
 
 /**
  * Maximum-power feed: Binance hybrid + order book depth + Bybit failover.
@@ -18,6 +19,8 @@ export class UniversalFeed implements MarketFeed {
   private watchdog: ReturnType<typeof setInterval> | null = null;
   private stopDepth: (() => void) | null = null;
   private usingFallback = false;
+  private usingCoingecko = false;
+  private coingecko = new CoinGeckoFeed();
 
   constructor() {
     this.active = this.primary;
@@ -33,11 +36,16 @@ export class UniversalFeed implements MarketFeed {
     this.stopDepth = startDepthPoller(1500);
 
     this.watchdog = setInterval(() => {
-      if (Date.now() - this.lastTickAt > 6000 && !this.usingFallback) {
+      if (Date.now() - this.lastTickAt > 6000 && !this.usingFallback && !this.usingCoingecko) {
         this.usingFallback = true;
         this.active = this.fallback;
         this.fallback.onTick(relay);
         this.fallback.start();
+      }
+      if (Date.now() - this.lastTickAt > 12000 && !this.usingCoingecko) {
+        this.usingCoingecko = true;
+        this.coingecko.onTick(relay);
+        this.coingecko.start();
       }
     }, 2500);
   }
@@ -47,6 +55,7 @@ export class UniversalFeed implements MarketFeed {
     this.stopDepth?.();
     this.primary.stop();
     this.fallback.stop();
+    this.coingecko.stop();
   }
 
   onTick(handler: (tick: MarketTick) => void): void {

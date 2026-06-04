@@ -5,6 +5,7 @@ import { BinanceRestFeed } from "./binance-rest.js";
 import { UniversalFeed } from "./universal-feed.js";
 import { BybitRestFeed } from "./bybit-rest.js";
 import { FastTickFeed } from "./fast-tick-feed.js";
+import { CoinGeckoFeed } from "./coingecko-feed.js";
 
 export type FeedKind =
   | "mock"
@@ -12,12 +13,14 @@ export type FeedKind =
   | "binance_rest"
   | "bybit"
   | "universal"
-  | "fast";
+  | "fast"
+  | "coingecko";
 
 export function createMarketFeed(kind?: string): MarketFeed {
   let k = (kind ?? process.env.ZAMBAHOLA_FEED ?? "universal").toLowerCase();
   if (process.env.ZAMBAHOLA_FAST === "1") k = "fast";
   if (k === "mock") return new MockMarketFeed();
+  if (k === "coingecko") return new CoinGeckoFeed();
   if (k === "fast") return new FastTickFeed();
   if (k === "binance_rest") return new BinanceRestFeed();
   if (k === "bybit" || k === "bybit_rest") return new BybitRestFeed();

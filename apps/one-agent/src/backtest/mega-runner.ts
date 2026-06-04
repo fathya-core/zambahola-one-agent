@@ -55,7 +55,7 @@ export async function runMegaBacktest(limit = 1200): Promise<MegaBacktestResult>
       : 0;
 
   return {
-    ok: predictions >= 400,
+    ok: predictions >= Math.max(200, Math.floor(bars.length * 0.7)),
     bars: bars.length,
     predictions,
     evaluations: evaluations.length,
