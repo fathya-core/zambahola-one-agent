@@ -1,58 +1,61 @@
 # zambahola-one-agent
 
-Placeholder repository for a future **Zambahola one-agent** product. There is no application source, dependency manifest, or runnable service in the tree yet.
+**ZAMBAHOLA ONE AGENT v0** — local paper-trading agent (`apps/one-agent`).
 
-## Repository state
+## Commands (from repo root)
 
-| Item | Status |
-|------|--------|
-| Application code | Not present |
-| `package.json` / `pyproject.toml` | Not present |
-| Docker / Compose | Not present |
-| Tests / lint config | Not present |
-| CI workflows | Not present |
+| Command | Purpose |
+|---------|---------|
+| `pnpm install` | Install workspace dependencies |
+| `pnpm agent:start` | Start agent + dashboard (background), open browser |
+| `pnpm agent:status` | Check pid / running state |
+| `pnpm agent:stop` | Stop background agent |
+| `pnpm agent:test-run` | Headless 65s run; exit 1 if &lt;60 predictions |
 
-When implementation lands, extend this file with stack-specific run/lint/test commands and update the VM **update script** (see Cursor Cloud settings) to install dependencies.
+## Services
+
+| Service | Required | Port | Notes |
+|---------|----------|------|-------|
+| One Agent HTTP + dashboard | **Yes** (when running) | **8787** | `http://127.0.0.1:8787` |
+
+No database, Docker, or external APIs in v0.
+
+## Environment
+
+- No secrets or exchange keys in v0.
+- Optional: `ZAMBAHOLA_RESET=1` clears run/ledger files on next agent start (test-run sets this).
 
 ## Cursor Cloud specific instructions
 
-### What runs today
-
-Nothing is required to start for local development. There are no backend, frontend, or worker processes defined in this repo.
-
-### VM update script behavior
-
-The configured startup update script is intentionally a no-op (`true`) because there are no project dependencies to refresh after `git pull`. Once a manifest exists (for example `package.json` or `requirements.txt`), change the update script to the appropriate install command (`npm ci`, `pnpm install`, `uv sync`, etc.).
-
-### Baseline tools on the Cloud VM
-
-These are available on the agent VM for future work but are **not** wired to this repo yet:
-
-- **Node.js** via nvm (v22.x), **npm**, **pnpm**
-- **Python 3.12**, **pip**
-- **git**, **GitHub CLI** (`gh`)
-- **Docker** is not installed on the default VM image
-
-### Verification (no app yet)
-
-Until code is added, use this quick check after clone or pull:
+### VM update script
 
 ```bash
-cd /workspace
-test -f README.md
-grep -q zambahola README.md
-git status
+pnpm install
 ```
 
-Expected: clean working tree on `main`, README contains `zambahola-one-agent`.
+### Start / stop
 
-### When you add an application
+```bash
+pnpm agent:start    # detached process; pid in apps/one-agent/data/agent.pid
+pnpm agent:status
+pnpm agent:stop
+```
 
-Document here (and in `README.md`):
+In headless VMs, browser open may fail — use `curl http://127.0.0.1:8787/api/status` or visit the Desktop pane.
 
-1. Required services and ports
-2. Environment variables (`.env.example`)
-3. Install, lint, test, and dev-server commands
-4. A minimal “hello world” flow (e.g. health endpoint, CLI `--help`, or first agent turn)
+### Validation checklist
 
-Do **not** put service startup (`npm run dev`, `docker compose up`, migrations) in the VM update script—only dependency refresh belongs there.
+1. `pnpm install` succeeds
+2. `pnpm agent:test-run` → `ok: true`, `predictionCount >= 60`
+3. `pnpm agent:start` → dashboard responds on port 8787
+4. Confirm `apps/one-agent/data/metrics/current.json` updates
+5. Confirm `paper-ledger.jsonl` has decision/trade lines
+6. `pnpm agent:stop`
+
+### Architecture notes
+
+- **Market feed**: `MockMarketFeed` implements `MarketFeed` — replace with Binance/Bybit websocket adapter without changing engines.
+- **Trading**: paper only via `PaperBroker`.
+- **MCP**: scaffold in `apps/one-agent/src/mcp/` (tools delegate to CLI/files in v0).
+
+Do **not** put `pnpm agent:start` in the VM update script.
