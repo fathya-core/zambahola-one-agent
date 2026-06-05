@@ -11,6 +11,9 @@ import { loadKnowledgeIndex } from "../../knowledge/loader.js";
 import { getSentiment } from "../sentiment/index.js";
 import { getOrderBook } from "../market-feed/orderbook.js";
 import { getMarketSignals } from "../market-signals/index.js";
+import { getLiveLearningState } from "../learning/live-learning.js";
+import { learningFilesExist } from "../learning/learning-state.js";
+import { WEIGHTS_FILE } from "../learning/adaptive-weights.js";
 
 const dashboardDir = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -87,6 +90,26 @@ async function route(
   }
   if (path === "/api/knowledge") {
     return sendJson(res, 200, await loadKnowledgeIndex());
+  }
+  if (path === "/api/learning") {
+    const state = await getLiveLearningState();
+    return sendJson(res, 200, {
+      ...state,
+      persistsToDisk: true,
+      files: {
+        strategyWeights: WEIGHTS_FILE,
+        learningState: "data/learning/learning-state.json",
+        researchLog: "knowledge/research-log.jsonl",
+        modelBundle: "data/learning/export/",
+      },
+      hasSavedWeights: learningFilesExist(),
+      howItWorks: [
+        "Each evaluated prediction trains ML/MLP/GBM online",
+        "Strategy weights adjust on every hit/miss",
+        `Every ${process.env.ZAMBAHOLA_LIVE_ORCH_EVERY ?? 12} evals: orchestrator boosts top strategies`,
+        `Every ${process.env.ZAMBAHOLA_LIVE_EXPORT_EVERY ?? 40} evals: model bundle export`,
+      ],
+    });
   }
   if (path === "/api/strategies") {
     const idx = (await loadKnowledgeIndex()) as { strategies: unknown[] };

@@ -119,6 +119,9 @@ export interface AgentMetrics {
   mlSamples?: number;
   mlpSamples?: number;
   gbmSamples?: number;
+  understandingScore?: number;
+  learningUpdates?: number;
+  liveEvaluations?: number;
   updatedAt: number;
 }
 

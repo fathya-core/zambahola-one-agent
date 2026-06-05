@@ -8,6 +8,8 @@ import {
   recordStrategyOutcome,
   appendResearchLog,
 } from "./learning/adaptive-weights.js";
+import { onLiveEvaluation } from "./learning/live-learning.js";
+import type { LearningState } from "./learning/learning-state.js";
 import { DecisionEngine } from "./decision-engine/index.js";
 import { PaperBroker } from "./paper-broker/index.js";
 import { Evaluator } from "./evaluator/index.js";
@@ -65,6 +67,7 @@ export class AgentCore {
   private boundOnTick = (tick: MarketTick) => void this.handleTick(tick);
   private metricsWriteChain: Promise<void> = Promise.resolve();
   private handlingTick = false;
+  private learningState: LearningState | null = null;
 
   constructor(options: AgentCoreOptions = {}) {
     this.feed = options.feed ?? createMarketFeed();
@@ -234,6 +237,12 @@ export class AgentCore {
             evaluatedPred.confidence,
           );
         }
+
+        this.learningState = await onLiveEvaluation({
+          ensembleHit: evaluation.predictionHit,
+          strategyStats: this.buildMetrics().strategyStats ?? [],
+          engine: this.predictionEngine,
+        });
       }
     }
 
@@ -291,6 +300,9 @@ export class AgentCore {
       mlSamples: this.lastPrediction?.meta?.mlSamples,
       mlpSamples: this.lastPrediction?.meta?.mlpSamples,
       gbmSamples: this.lastPrediction?.meta?.gbmSamples,
+      understandingScore: this.learningState?.understandingScore,
+      learningUpdates: this.learningState?.totalLearningUpdates,
+      liveEvaluations: this.learningState?.totalEvaluations,
       updatedAt: Date.now(),
     };
   }

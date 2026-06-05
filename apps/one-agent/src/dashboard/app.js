@@ -13,6 +13,9 @@ function renderMetrics(m) {
       ["ML samples", m.mlSamples ?? 0],
       ["MLP samples", m.mlpSamples ?? 0],
       ["GBM trees", m.gbmSamples ?? 0],
+      ["Understanding", m.understandingScore != null ? (m.understandingScore * 100).toFixed(1) + "%" : "—"],
+      ["Live evals", m.liveEvaluations ?? 0],
+      ["Learning updates", m.learningUpdates ?? 0],
       ["Ticks", m.tickCount],
       ["Predictions", m.predictionCount],
       ["Hit rate", (m.hitRate * 100).toFixed(1) + "%"],
@@ -66,6 +69,22 @@ async function refresh() {
     renderMetrics(metrics);
     $("position").textContent = JSON.stringify(
       { openPosition: metrics.openPosition, paperPnl: metrics.paperPnl },
+      null,
+      2,
+    );
+
+    const learn = await fetchJson("/api/learning");
+    $("learning").textContent = JSON.stringify(
+      {
+        understandingScore: learn.understandingScore,
+        hitRateEma: learn.hitRateEma,
+        totalEvaluations: learn.totalEvaluations,
+        totalLearningUpdates: learn.totalLearningUpdates,
+        orchestratorBoosts: learn.orchestratorBoosts,
+        modelExports: learn.modelExports,
+        mlSamples: learn.mlSamples,
+        howItWorks: learn.howItWorks,
+      },
       null,
       2,
     );

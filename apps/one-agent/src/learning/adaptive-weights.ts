@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, appendFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,7 +50,7 @@ export async function recordStrategyOutcome(
 export async function appendResearchLog(entry: Record<string, unknown>): Promise<void> {
   await mkdir(dirname(RESEARCH_LOG), { recursive: true });
   const line = `${JSON.stringify({ ...entry, timestamp: Date.now() })}\n`;
-  await writeFile(RESEARCH_LOG, line, { flag: "a" });
+  await appendFile(RESEARCH_LOG, line, "utf8");
 }
 
 export { WEIGHTS_FILE, RESEARCH_LOG };
