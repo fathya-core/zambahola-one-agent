@@ -16,7 +16,8 @@ import {
 } from "./learning/hit-rate-guard.js";
 import type { LearningState } from "./learning/learning-state.js";
 import { DecisionEngine } from "./decision-engine/index.js";
-import { PaperBroker } from "./paper-broker/index.js";
+import type { TradeBroker } from "./broker/types.js";
+import { createBroker } from "./broker/factory.js";
 import { Evaluator } from "./evaluator/index.js";
 import {
   appendRun,
@@ -39,6 +40,7 @@ export interface AgentCoreOptions {
   feed?: MarketFeed;
   horizonSec?: number;
   resetData?: boolean;
+  broker?: TradeBroker;
 }
 
 type TickHandler = (state: AgentRuntimeState) => void;
@@ -54,7 +56,7 @@ export class AgentCore {
   readonly feed: MarketFeed;
   readonly predictionEngine: PredictionEngine;
   readonly decisionEngine = new DecisionEngine();
-  readonly broker = new PaperBroker();
+  readonly broker: TradeBroker;
   readonly evaluator = new Evaluator();
 
   private running = false;
@@ -75,6 +77,7 @@ export class AgentCore {
   private learningState: LearningState | null = null;
 
   constructor(options: AgentCoreOptions = {}) {
+    this.broker = options.broker ?? createBroker();
     this.feed = options.feed ?? createMarketFeed();
     this.predictionEngine = new PredictionEngine({
       horizonSec: options.horizonSec ?? 30,
@@ -136,6 +139,7 @@ export class AgentCore {
       pid: process.pid,
       symbol: this.feed.symbol,
       feed: this.feed.name,
+      brokerMode: this.broker.mode,
       horizonSec: this.predictionEngine.horizonSec,
       port,
       startedAt: this.startedAt,
@@ -287,6 +291,7 @@ export class AgentCore {
       tickCount: this.tickCount,
       predictionCount: this.predictionCount,
       hitRate: this.evaluator.getHitRate(),
+      directionalHitRate: this.evaluator.getDirectionalHitRate(),
       paperPnl: this.broker.getTotalPnl(),
       averageWin: Number(avgWin.toFixed(4)),
       averageLoss: Number(avgLoss.toFixed(4)),

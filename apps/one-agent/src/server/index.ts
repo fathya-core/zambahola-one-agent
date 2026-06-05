@@ -14,6 +14,7 @@ import { getMarketSignals } from "../market-signals/index.js";
 import { getLiveLearningState } from "../learning/live-learning.js";
 import { getGuardStatus } from "../learning/hit-rate-guard.js";
 import { loadBestWeights } from "../learning/weight-snapshot.js";
+import { getBrokerPhase } from "../broker/factory.js";
 import { learningFilesExist } from "../learning/learning-state.js";
 import { WEIGHTS_FILE } from "../learning/adaptive-weights.js";
 
@@ -63,6 +64,16 @@ async function route(
   if (path === "/api/status") {
     return sendJson(res, 200, agent.getStatus(DASHBOARD_PORT));
   }
+  if (path === "/api/broker") {
+    const phase = getBrokerPhase();
+    return sendJson(res, 200, {
+      mode: agent.broker.mode,
+      phase,
+      keysConfigured: Boolean(process.env.BINANCE_API_KEY),
+      testnet: process.env.ZAMBAHOLA_BINANCE_TESTNET !== "0",
+      orderQty: process.env.ZAMBAHOLA_ORDER_QTY ?? "0.001",
+    });
+  }
   if (path === "/api/metrics") {
     const metrics = (await readMetrics()) ?? agent.getRuntimeState().metrics;
     return sendJson(res, 200, metrics);
@@ -95,8 +106,12 @@ async function route(
   }
   if (path === "/api/learning") {
     const state = await getLiveLearningState();
+    const guard = getGuardStatus();
+    const best = await loadBestWeights();
     return sendJson(res, 200, {
       ...state,
+      guard,
+      bestSnapshot: best?.meta ?? null,
       persistsToDisk: true,
       files: {
         strategyWeights: WEIGHTS_FILE,

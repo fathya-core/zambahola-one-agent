@@ -147,6 +147,7 @@ export interface AgentStatus {
   pid: number | null;
   symbol: string;
   feed: string;
+  brokerMode: string;
   horizonSec: number;
   port: number;
   startedAt: number | null;

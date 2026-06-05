@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Decision, MarketTick, PaperTrade } from "../types.js";
 
 export class PaperBroker {
+  readonly mode = "paper" as const;
   private openTrade: PaperTrade | null = null;
   private closedTrades: PaperTrade[] = [];
   private equityCurve: number[] = [0];
