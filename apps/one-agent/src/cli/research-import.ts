@@ -11,6 +11,7 @@ import {
   saveResearchImports,
   researchImportsPaths,
   type ResearchImportsFile,
+  type ResearchImportEntry,
 } from "../knowledge/research-import-loader.js";
 import { applyResearchImportsToDisk } from "../knowledge/research-import-loader.js";
 
@@ -29,6 +30,33 @@ function resolveInputPath(arg: string): string {
     if (existsSync(c)) return c;
   }
   return arg;
+}
+
+/** Map Perplexity verbose rules → simple expert rules the agent understands */
+function simplifyPerplexityRules(rules: unknown[] | undefined) {
+  if (!Array.isArray(rules)) return undefined;
+  const out: NonNullable<ResearchImportEntry["rules"]> = [];
+  for (const r of rules) {
+    if (!r || typeof r !== "object") continue;
+    const rule = r as Record<string, unknown>;
+    const target = rule.target_strategy as string | undefined;
+    const action = rule.action as string | undefined;
+    const condition = rule.condition as Record<string, unknown> | undefined;
+    const primary = condition?.primary_signal as string | undefined;
+    if (
+      target === "mean_reversion" &&
+      (action === "abstain" || action === "downweight") &&
+      (primary === "trend_up" || primary === "trend_down")
+    ) {
+      out.push({
+        id: String(rule.id ?? "perplexity_rule"),
+        regime: primary === "trend_down" ? "trend_down" : "trend_up",
+        blockStrategies: ["mean_reversion"],
+        unlessAgreement: Number(rule.meta_label_threshold ?? 0.65),
+      });
+    }
+  }
+  return out.length ? out : undefined;
 }
 
 async function readStdin(): Promise<string> {
@@ -57,12 +85,44 @@ Writes to: ${paths.data}`);
     process.exit(1);
   }
 
-  const parsed = JSON.parse(raw) as ResearchImportsFile;
-  if (!parsed.entries?.length) {
-    throw new Error("JSON must have entries[] array");
+  const parsed = JSON.parse(raw) as ResearchImportsFile | ResearchImportEntry & {
+    weightAdjustments?: Record<string, number>;
+  };
+
+  let file: ResearchImportsFile;
+  if ("entries" in parsed && Array.isArray(parsed.entries) && parsed.entries.length > 0) {
+    file = parsed as ResearchImportsFile;
+  } else if (
+    "weightAdjustments" in parsed &&
+    parsed.weightAdjustments &&
+    typeof parsed.weightAdjustments === "object"
+  ) {
+    const rawPaste = parsed as ResearchImportEntry & {
+      weightAdjustments: Record<string, number>;
+      rules?: unknown[];
+    };
+    file = {
+      version: "1",
+      entries: [
+        {
+          source: "perplexity",
+          importedAt: new Date().toISOString().slice(0, 10),
+          query: rawPaste.query ?? "Perplexity paste",
+          weightAdjustments: rawPaste.weightAdjustments,
+          minDirectionalHitTarget: rawPaste.minDirectionalHitTarget,
+          rules: simplifyPerplexityRules(rawPaste.rules),
+          notes:
+            rawPaste.notes ??
+            "Auto-wrapped from raw Perplexity JSON (weightAdjustments applied; complex rules simplified).",
+        },
+      ],
+    };
+    console.log("[zambahola] auto-wrapped raw Perplexity JSON → entries[1]");
+  } else {
+    throw new Error("JSON needs entries[] or top-level weightAdjustments (Perplexity paste)");
   }
 
-  const target = await saveResearchImports(parsed, true);
+  const target = await saveResearchImports(file, true);
   const applied = await applyResearchImportsToDisk();
   console.log("[zambahola] research-import saved:", target);
   console.log("[zambahola] applied:", applied.applied, "entries:", applied.entries);
