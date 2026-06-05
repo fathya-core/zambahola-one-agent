@@ -35,6 +35,15 @@ if (quick) {
   baseEnv.ZAMBAHOLA_KLINES = "300";
 }
 
+if (cmd === "start") {
+  console.log("[max-accuracy] Starting live agent (max mode)\n");
+  const r = runNpm(["run", "agent:start"], {
+    cwd: root,
+    env: { ...baseEnv, ZAMBAHOLA_LIVE_FILTER: "1" },
+  });
+  process.exit(r.status);
+}
+
 console.log("[max-accuracy] mode=max", quick ? "(quick test)" : "", "\n");
 console.log(
   "  feed:",
@@ -50,14 +59,6 @@ console.log(
   baseEnv.ZAMBAHOLA_LEARN_CYCLES,
   "(each ~65s — do not close this window)\n",
 );
-
-if (cmd === "start") {
-  const r = runNpm(["run", "agent:start"], {
-    cwd: root,
-    env: { ...baseEnv, ZAMBAHOLA_LIVE_FILTER: "1" },
-  });
-  process.exit(r.status);
-}
 
 const trainEnv = {
   ...baseEnv,

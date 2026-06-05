@@ -1,5 +1,3 @@
-process.env.ZAMBAHOLA_FEED ??= "mock";
-
 import { AgentCore } from "../agent-core.js";
 import { runMegaTrain } from "../learning/batch-trainer.js";
 import { runMegaBacktest } from "../backtest/mega-runner.js";

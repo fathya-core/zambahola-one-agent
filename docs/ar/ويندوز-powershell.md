@@ -51,8 +51,11 @@ npm run agent:export-models
 
 تشغيل حي:
 ```powershell
+git pull origin main
 npm run agent:max-accuracy:start
 ```
+
+إذا ظهر `spawn ... tsx ENOENT` — حدّث المستودع ثم أعد `max-accuracy:start` (تم إصلاح مسار tsx على ويندوز).
 
 ## ماذا تتوقع أثناء `agent:learn`؟
 

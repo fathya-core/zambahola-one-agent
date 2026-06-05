@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import open from "open";
 import { AGENT_PID_FILE, DASHBOARD_PORT } from "../storage/paths.js";
 import { ensureDataDirs } from "../storage/index.js";
+import { resolveTsxSpawn } from "./resolve-tsx.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const runner = join(pkgRoot, "src/cli/runner.ts");
@@ -32,11 +33,12 @@ async function main(): Promise<void> {
     }
   }
 
-  const tsxBin = join(pkgRoot, "node_modules", ".bin", "tsx");
-  const child = spawn(tsxBin, [runner], {
+  const { command, args, shell } = resolveTsxSpawn(runner);
+  const child = spawn(command, args, {
     cwd: pkgRoot,
     detached: true,
     stdio: "ignore",
+    shell,
     env: {
       ...process.env,
       ZAMBAHOLA_LIVE_FILTER:
@@ -46,16 +48,28 @@ async function main(): Promise<void> {
     },
   });
 
+  child.on("error", (err) => {
+    console.error("[zambahola] Failed to start agent:", err.message);
+    process.exit(1);
+  });
+
   child.unref();
 
-  await new Promise((r) => setTimeout(r, 1500));
+  await new Promise((r) => setTimeout(r, 2000));
 
-  const url = `http://127.0.0.1:${DASHBOARD_PORT}`;
-  console.log(`[zambahola] Agent started — opening ${url}`);
-  try {
-    await open(url);
-  } catch {
-    console.log(`[zambahola] Open manually: ${url}`);
+  if (existsSync(AGENT_PID_FILE)) {
+    const url = `http://127.0.0.1:${DASHBOARD_PORT}`;
+    console.log(`[zambahola] Agent started — opening ${url}`);
+    try {
+      await open(url);
+    } catch {
+      console.log(`[zambahola] Open manually: ${url}`);
+    }
+  } else {
+    console.error(
+      "[zambahola] Agent did not start. Check apps/one-agent/data/ or run: npm run agent:status",
+    );
+    process.exit(1);
   }
 }
 
