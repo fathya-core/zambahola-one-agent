@@ -14,6 +14,14 @@ import { ConfidenceCalibrator } from "../learning/calibration.js";
 import { getSentiment } from "../sentiment/index.js";
 import { getAccuracyTuning, isMaxAccuracy } from "../config/accuracy-profile.js";
 import { applyAccuracyFilter } from "./accuracy-filter.js";
+import {
+  applyExpertConsensus,
+  type StrategyTiers,
+} from "./expert-consensus.js";
+import {
+  applyExpertPresetToDisk,
+  loadExpertCurriculum,
+} from "../knowledge/expert-loader.js";
 
 const DEFAULT_HORIZON_SEC = 30;
 const MAX_PRICES = 400;
@@ -32,6 +40,7 @@ export class PredictionEngine {
   private prices: number[] = [];
   private volumes: number[] = [];
   private weights: StrategyWeights = {};
+  private expertTiers: StrategyTiers = {};
   private ready = false;
 
   constructor(options: PredictionEngineOptions = {}) {
@@ -41,6 +50,12 @@ export class PredictionEngine {
   }
 
   async init(): Promise<void> {
+    if (process.env.ZAMBAHOLA_EXPERT !== "0") {
+      await applyExpertPresetToDisk();
+    }
+    const curriculum = await loadExpertCurriculum();
+    if (curriculum?.strategyTiers) this.expertTiers = curriculum.strategyTiers;
+
     this.weights = await loadStrategyWeights(ALL_STRATEGIES.map((s) => s.id));
     const orch = await loadOrchestratorWeights();
     if (orch) this.weights = { ...this.weights, ...orch };
@@ -97,9 +112,26 @@ export class PredictionEngine {
     let lobScore = lob.score;
     let regime = "range" as ReturnType<typeof detectRegime>;
     let gateReason = "n/a";
+    let expertReason = "n/a";
+    let tierSVotes = 0;
     let qualityTier: "high" | "medium" | "abstain" = "medium";
 
     if (features) {
+      regime = detectRegime(features);
+
+      const expert = applyExpertConsensus(
+        ensemble.direction,
+        ensemble.confidence,
+        ensemble.agreement,
+        regime,
+        ensemble.votes,
+        this.expertTiers,
+      );
+      direction = expert.direction;
+      confidence = expert.confidence;
+      expertReason = expert.reason;
+      tierSVotes = expert.tierSVotes;
+
       const logit = this.ml.predict(features);
       const deep = this.mlp.predict(features);
       const gbm = this.gbm.predict(features);
@@ -109,11 +141,10 @@ export class PredictionEngine {
       mlpProb = deep.prob;
       gbmScore = gbm.score;
       gbmProb = gbm.prob;
-      regime = detectRegime(features);
 
       const blended = blendMega(
-        ensemble.direction,
-        ensemble.confidence,
+        direction,
+        confidence,
         logit.direction,
         logit.prob,
         deep.direction,
@@ -146,7 +177,7 @@ export class PredictionEngine {
         gbmProb,
         lobReady: lob.ready,
         regime,
-        blocked: gated.blocked,
+        blocked: gated.blocked || expert.blocked,
         mlSamples: this.ml.getSampleCount(),
       });
       direction = filtered.direction;
@@ -174,6 +205,9 @@ export class PredictionEngine {
         weights: { ...this.weights },
         regime,
         gateReason,
+        expertReason,
+        tierSVotes,
+        expertMode: process.env.ZAMBAHOLA_EXPERT !== "0",
         mlScore,
         mlProb,
         mlpScore,

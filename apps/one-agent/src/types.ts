@@ -41,6 +41,11 @@ export interface PredictionMeta {
   sentiment?: number;
   sentimentLabel?: string;
   features?: Record<string, number>;
+  expertReason?: string;
+  tierSVotes?: number;
+  expertMode?: boolean;
+  accuracyMode?: string;
+  qualityTier?: string;
 }
 
 export interface Prediction {

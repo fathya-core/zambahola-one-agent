@@ -1,0 +1,77 @@
+{
+  "version": "1",
+  "title": "ZAMBAHOLA Directed Expert Curriculum",
+  "titleAr": "المنهج التعليمي الموجّه — خبرات مستوردة",
+  "disclaimer": "Public methodology summaries only. No copyrighted text.",
+  "phases": [
+    {
+      "id": "P1_regime",
+      "nameAr": "إتقان النظام (ترند/رنج/تقلب)",
+      "strategiesFocus": ["volatility_regime", "ema_cross", "momentum", "session_bias"],
+      "trainBars": 3000,
+      "liveCycles": 8,
+      "minHitRate": 0.48,
+      "sources": ["Murphy trend structure", "Pring momentum cycles"]
+    },
+    {
+      "id": "P2_micro",
+      "nameAr": "البنية الدقيقة والمشتقات",
+      "strategiesFocus": ["order_imbalance", "funding_fade", "premium_momentum", "open_interest", "long_short_extreme"],
+      "trainBars": 5000,
+      "liveCycles": 10,
+      "minHitRate": 0.5,
+      "sources": ["Market microstructure", "Binance FAPI signals"]
+    },
+    {
+      "id": "P3_fusion",
+      "nameAr": "الدمج والإجماع الخبير",
+      "strategiesFocus": ["macd", "atr_breakout", "vwap_proxy", "volume_breakout", "rsi", "bollinger"],
+      "trainBars": 8000,
+      "liveCycles": 12,
+      "minHitRate": 0.52,
+      "sources": ["Chan mean-reversion vs momentum", "López de Prado meta-labeling concept"]
+    },
+    {
+      "id": "P4_mastery",
+      "nameAr": "الإتقان والمعايرة",
+      "strategiesFocus": ["*"],
+      "trainBars": 10000,
+      "liveCycles": 15,
+      "minHitRate": 0.54,
+      "sources": ["Ensemble calibration", "Walk-forward validation"]
+    }
+  ],
+  "strategyTiers": {
+    "S_trend": ["momentum", "ema_cross", "macd", "session_bias", "atr_breakout"],
+    "S_micro": ["order_imbalance", "premium_momentum", "funding_fade", "open_interest"],
+    "A_flow": ["volume_breakout", "vwap_proxy", "tick_momentum"],
+    "B_range": ["mean_reversion", "rsi", "bollinger"],
+    "C_context": ["volatility_regime", "long_short_extreme"]
+  },
+  "expertRules": [
+    {
+      "id": "trend_no_fade",
+      "regime": "trend_up",
+      "blockStrategies": ["mean_reversion"],
+      "unlessAgreement": 0.72
+    },
+    {
+      "id": "trend_down_no_long_fade",
+      "regime": "trend_down",
+      "blockStrategies": ["mean_reversion", "rsi"],
+      "unlessAgreement": 0.7
+    },
+    {
+      "id": "range_no_chase",
+      "regime": "range",
+      "requireTier": "B_range",
+      "minTierVotes": 2
+    },
+    {
+      "id": "high_vol_cap",
+      "regime": "high_vol",
+      "maxConfidence": 0.68,
+      "requireSTier": 2
+    }
+  ]
+}

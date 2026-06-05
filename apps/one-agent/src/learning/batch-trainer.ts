@@ -34,9 +34,10 @@ export async function runMegaTrain(bars = 3000): Promise<MegaTrainResult> {
       timestamp: klines[i]!.openTime,
     };
     const pred = engine.predict(tick);
-    const future = klines[i + 1]!.close;
+    const future = klines[i + 2]!.close;
     const change = future - tick.price;
-    const band = tick.price * 0.0008;
+    const vol = pred.meta?.features?.volatility ?? 0.0003;
+    const band = tick.price * (vol > 0.00045 ? 0.0011 : 0.00085);
     const hit =
       pred.direction === "up"
         ? change > band
