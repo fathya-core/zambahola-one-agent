@@ -1,15 +1,13 @@
 {
   "version": "1",
-  "titleAr": "مثال استيراد بحث Perplexity / Manus",
-  "instructionsAr": "انسخ هذا الملف إلى data/learning/research-imports.json أو استخدم npm run agent:research-import",
+  "titleAr": "استيراد بحث Perplexity فقط (بدون Manus)",
+  "instructionsAr": "انسخ إجابات Perplexity كـ entries[]. لا حاجة لـ Manus — يكفي Perplexity أو لصق يدوي (source: manual).",
   "perplexityPrompts": [
-    "What are the best ensemble methods for short-horizon BTC direction prediction with abstention (meta-labeling)? List strategy weight priors for trend vs mean-reversion regimes.",
-    "Summarize walk-forward validation and triple-barrier labeling for 30-60 second crypto horizons. Output JSON weightAdjustments for momentum, order_imbalance, rsi.",
-    "Market microstructure signals on Binance futures: funding rate fade, premium momentum, open interest — which combinations reduce false positives?"
-  ],
-  "manusPrompts": [
-    "Build a research brief: López de Prado meta-labeling applied to 17-strategy ensemble. Return JSON with weightAdjustments and minDirectionalHitTarget.",
-    "Compare Chan vs Murphy regime detection for BTC 1m. Suggest blockStrategies rules for trend_up and range regimes."
+    "What are the best ensemble methods for short-horizon BTC direction prediction with abstention (meta-labeling)? Return JSON only: weightAdjustments object for momentum, ema_cross, mean_reversion, rsi and minDirectionalHitTarget.",
+    "Summarize walk-forward validation and triple-barrier labeling for 30-60 second crypto horizons. Return JSON only with weightAdjustments for momentum, order_imbalance, rsi, funding_fade.",
+    "Market microstructure signals on Binance futures: funding rate fade, premium momentum, open interest — which combinations reduce false positives? Return JSON weightAdjustments and blockStrategies rules for trend_up regime.",
+    "López de Prado meta-labeling for a 17-strategy BTC ensemble: suggest weight priors and minDirectionalHitTarget. JSON only.",
+    "Chan vs Murphy regime detection for BTC 1m: suggest when to block mean_reversion in trend. JSON with rules array and weightAdjustments."
   ],
   "entries": [
     {
@@ -33,12 +31,12 @@
           "unlessAgreement": 0.72
         }
       ],
-      "notes": "Replace with your actual Perplexity paste — multiply weights stack across entries."
+      "notes": "استبدل هذا بإجابة Perplexity الحقيقية — يمكنك إضافة entries متعددة."
     },
     {
-      "source": "manus",
+      "source": "perplexity",
       "importedAt": "2026-06-04",
-      "query": "Walk-forward + microstructure for crypto",
+      "query": "Walk-forward + Binance microstructure",
       "topics": ["walk-forward", "funding", "premium"],
       "weightAdjustments": {
         "funding_fade": 1.12,
@@ -46,7 +44,7 @@
         "open_interest": 1.06,
         "volatility_regime": 1.04
       },
-      "notes": "Manus deep-research output — paste full JSON entry here."
+      "notes": "سؤال Perplexity الثاني — microstructure. احذف هذا المثال إذا لم تلصق بعد."
     }
   ]
 }

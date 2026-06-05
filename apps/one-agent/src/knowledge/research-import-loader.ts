@@ -21,7 +21,8 @@ export interface ResearchRule {
 }
 
 export interface ResearchImportEntry {
-  source: "perplexity" | "manus" | "manual";
+  /** perplexity | manual recommended; manus kept for old paste files only */
+  source: "perplexity" | "manual" | "manus";
   importedAt?: string;
   query?: string;
   topics?: string[];

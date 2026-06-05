@@ -1,5 +1,5 @@
 /**
- * Import Perplexity / Manus research into research-imports.json
+ * Import Perplexity (or manual) research into research-imports.json
  * Usage:
  *   npm run research-import -- path/to/paste.json
  *   cat paste.json | npm run research-import
