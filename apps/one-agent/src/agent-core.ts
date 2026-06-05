@@ -63,6 +63,8 @@ export class AgentCore {
   private stopMarketSignals: (() => void) | null = null;
   private listeners = new Set<TickHandler>();
   private boundOnTick = (tick: MarketTick) => void this.handleTick(tick);
+  private metricsWriteChain: Promise<void> = Promise.resolve();
+  private handlingTick = false;
 
   constructor(options: AgentCoreOptions = {}) {
     this.feed = options.feed ?? createMarketFeed();
@@ -143,6 +145,17 @@ export class AgentCore {
   }
 
   private async handleTick(tick: MarketTick): Promise<void> {
+    if (this.handlingTick) return;
+    this.handlingTick = true;
+    try {
+      await this.processTick(tick);
+    } finally {
+      this.handlingTick = false;
+    }
+  }
+
+  private async processTick(tick: MarketTick): Promise<void> {
+    if (!this.running) return;
     this.tickCount += 1;
     this.lastPrice = tick.price;
     this.lastTick = tick;
@@ -284,7 +297,10 @@ export class AgentCore {
 
   private async persistMetrics(): Promise<void> {
     const metrics = this.buildMetrics();
-    await writeMetrics(metrics);
+    this.metricsWriteChain = this.metricsWriteChain
+      .then(() => writeMetrics(metrics))
+      .catch(() => undefined);
+    await this.metricsWriteChain;
     await appendRun({
       type: "metric",
       payload: metrics,

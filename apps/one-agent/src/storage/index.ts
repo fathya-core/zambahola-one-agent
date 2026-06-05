@@ -1,5 +1,5 @@
-import { mkdir, appendFile, writeFile, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdir, appendFile, writeFile } from "node:fs/promises";
+import { readJsonSafe, writeJsonAtomic } from "./json-io.js";
 import type { AgentMetrics, RunRecord } from "../types.js";
 import {
   CURRENT_METRICS_FILE,
@@ -30,13 +30,11 @@ export async function appendTradeLedger(payload: unknown): Promise<void> {
 }
 
 export async function writeMetrics(metrics: AgentMetrics): Promise<void> {
-  await writeFile(CURRENT_METRICS_FILE, JSON.stringify(metrics, null, 2), "utf8");
+  await writeJsonAtomic(CURRENT_METRICS_FILE, metrics);
 }
 
 export async function readMetrics(): Promise<AgentMetrics | null> {
-  if (!existsSync(CURRENT_METRICS_FILE)) return null;
-  const raw = await readFile(CURRENT_METRICS_FILE, "utf8");
-  return JSON.parse(raw) as AgentMetrics;
+  return readJsonSafe<AgentMetrics>(CURRENT_METRICS_FILE);
 }
 
 export async function writeReceipt(name: string, payload: unknown): Promise<string> {

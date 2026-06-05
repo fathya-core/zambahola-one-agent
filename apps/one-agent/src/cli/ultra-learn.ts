@@ -30,7 +30,7 @@ async function main(): Promise<void> {
     await new Promise((r) => setTimeout(r, CYCLES.cycleMs));
     await agent.stop();
 
-    const metrics = await readMetrics();
+    const metrics = agent.getRuntimeState().metrics;
     await boostTopStrategies(metrics?.strategyStats, getAccuracyTuning().orchestratorTopN);
 
     await appendResearchLog({

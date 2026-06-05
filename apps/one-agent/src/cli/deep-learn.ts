@@ -21,7 +21,7 @@ async function main(): Promise<void> {
     await new Promise((r) => setTimeout(r, CYCLE_MS));
     await agent.stop();
 
-    const metrics = await readMetrics();
+    const metrics = agent.getRuntimeState().metrics;
     await appendResearchLog({
       event: "deep_learn_cycle",
       cycle: i,
