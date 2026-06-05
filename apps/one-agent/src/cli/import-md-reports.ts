@@ -40,7 +40,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const files = (await readdir(dir)).filter((f) => f.endsWith(".md"));
+  const files = (await readdir(dir)).filter(
+    (f) => f.endsWith(".md") && f.toLowerCase() !== "readme.md" && !f.startsWith("_"),
+  );
   if (files.length === 0) {
     console.error(`[zambahola] no .md files in: ${dir}`);
     process.exit(1);
