@@ -1,0 +1,39 @@
+{
+  "version": "1",
+  "titleAr": "جاهز للوكيل — بعد مراجعة AI (Perplexity + تقاريرك)",
+  "entries": [
+    {
+      "source": "perplexity",
+      "importedAt": "2026-06-05",
+      "query": "meta-labeling BTC 17-strategy 30-60s",
+      "topics": ["meta-labeling", "trend_up", "mean_reversion", "order_imbalance"],
+      "minDirectionalHitTarget": 0.62,
+      "weightAdjustments": {
+        "momentum": 1.25,
+        "order_imbalance": 1.4,
+        "ema_cross": 1.15,
+        "funding_fade": 0.85,
+        "mean_reversion": 0.7,
+        "rsi": 0.95,
+        "premium_momentum": 1.1,
+        "volatility_regime": 1.05,
+        "macd": 1.08
+      },
+      "rules": [
+        {
+          "id": "block_mean_reversion_on_trend_up",
+          "regime": "trend_up",
+          "blockStrategies": ["mean_reversion"],
+          "unlessAgreement": 0.65
+        },
+        {
+          "id": "block_mean_reversion_high_funding",
+          "regime": "trend_up",
+          "blockStrategies": ["mean_reversion"],
+          "unlessAgreement": 0.7
+        }
+      ],
+      "notes": "من رد Perplexity المباشر. قواعد abstain_all المعقدة مدمجة جزئياً في expert-consensus."
+    }
+  ]
+}
