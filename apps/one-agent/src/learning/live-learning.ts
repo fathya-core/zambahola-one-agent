@@ -28,6 +28,8 @@ async function getState(): Promise<LearningState> {
 
 export interface LiveEvalContext {
   ensembleHit: boolean;
+  direction?: "up" | "down" | "range";
+  directionalHit?: boolean | null;
   strategyStats: StrategyHitStats[];
   engine: PredictionEngine;
 }
@@ -37,15 +39,20 @@ export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningSt
   let state = await getState();
   state.totalEvaluations += 1;
 
-  const guard = recordHit(ctx.ensembleHit);
+  const isDirectional = ctx.direction !== undefined && ctx.direction !== "range";
+  const guard = recordHit(ctx.ensembleHit, {
+    directional: isDirectional ? (ctx.directionalHit ?? ctx.ensembleHit) : null,
+  });
   state.stabilizeMode = guard.stabilizeMode;
   state.peakHitRate = Math.max(state.peakHitRate ?? 0, guard.sessionPeak);
-
-  state = bumpUnderstanding(
-    state,
-    ctx.ensembleHit,
-    ctx.engine.ml.getSampleCount(),
+  state.peakDirectionalHitRate = Math.max(
+    state.peakDirectionalHitRate ?? 0,
+    guard.directionalPeak,
   );
+
+  state = bumpUnderstanding(state, ctx.ensembleHit, ctx.engine.ml.getSampleCount(), {
+    directionalHit: isDirectional ? (ctx.directionalHit ?? ctx.ensembleHit) : null,
+  });
 
   state = await maybeSnapshotOrRestore(guard.rollingHitRate, state, (w) =>
     ctx.engine.setWeights(w),
@@ -70,7 +77,7 @@ export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningSt
     state.totalEvaluations % ORCH_EVERY === 0 &&
     ctx.strategyStats.length > 0 &&
     !shouldSkipOrchestratorBoost() &&
-    guard.rollingHitRate >= 0.52
+    (guard.directionalRolling >= 0.55 || guard.rollingHitRate >= 0.52)
   ) {
     const boosted = await boostTopStrategies(ctx.strategyStats, 10);
     ctx.engine.setWeights(boosted);

@@ -21,6 +21,7 @@ function renderMetrics(m) {
       ["Hit rate", (m.hitRate * 100).toFixed(1) + "%"],
       ["Directional hit", m.directionalHitRate != null ? (m.directionalHitRate * 100).toFixed(1) + "%" : "—"],
       ["Rolling hit (60)", m.rollingHitRate != null ? (m.rollingHitRate * 100).toFixed(1) + "%" : "—"],
+      ["Dir. rolling (60)", m.directionalRollingHitRate != null ? (m.directionalRollingHitRate * 100).toFixed(1) + "%" : "—"],
       ["Peak hit", m.peakHitRate != null ? (m.peakHitRate * 100).toFixed(1) + "%" : "—"],
       ["Stabilize mode", m.stabilizeMode ? "ON (حماية)" : "off"],
     ["Paper PnL", m.paperPnl],

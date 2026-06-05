@@ -19,7 +19,13 @@ async function main(): Promise<void> {
   );
 
   const pre = await runMegaBacktest(Math.min(bars, 1200));
-  console.log("Pre backtest:", pre.hitRate, pre.predictions);
+  console.log(
+    "Pre backtest:",
+    pre.hitRate,
+    "dir=",
+    pre.directionalHitRate,
+    pre.predictions,
+  );
 
   const train = await runMegaTrain(bars);
   console.log("Mega train:", train.trainSteps, train.source);
@@ -38,10 +44,11 @@ async function main(): Promise<void> {
       event: "ultra_live_cycle",
       cycle: i,
       hitRate: metrics?.hitRate,
+      directionalHitRate: metrics?.directionalHitRate,
       strategyStats: metrics?.strategyStats,
     });
     console.log(
-      `Live ${i}/${liveCycles} hit=${metrics?.hitRate} preds=${metrics?.predictionCount}`,
+      `Live ${i}/${liveCycles} hit=${metrics?.hitRate} dir=${metrics?.directionalHitRate} preds=${metrics?.predictionCount}`,
     );
   }
 

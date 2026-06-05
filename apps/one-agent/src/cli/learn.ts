@@ -28,12 +28,13 @@ async function main(): Promise<void> {
       event: "learn_cycle",
       cycle: i,
       hitRate: metrics?.hitRate,
+      directionalHitRate: metrics?.directionalHitRate,
       predictionCount: metrics?.predictionCount,
       strategyStats: metrics?.strategyStats,
     });
 
     console.log(
-      `Cycle ${i}/${cycles} — predictions: ${metrics?.predictionCount} hitRate: ${metrics?.hitRate}`,
+      `Cycle ${i}/${cycles} — predictions: ${metrics?.predictionCount} hit=${metrics?.hitRate} dir=${metrics?.directionalHitRate}`,
     );
   }
 

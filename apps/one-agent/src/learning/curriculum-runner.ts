@@ -63,12 +63,16 @@ export async function runCurriculum(): Promise<{
 
     process.env.ZAMBAHOLA_KLINES = String(phase.trainBars);
     process.env.ZAMBAHOLA_EXPERT = "1";
+    process.env.ZAMBAHOLA_STRATEGIES_FOCUS = phase.strategiesFocus.join(",");
 
     const train = await runMegaTrain(phase.trainBars);
     console.log("[curriculum] train:", train.source, train.trainSteps);
 
     const bt = await runMegaBacktest(Math.min(phase.trainBars, 1500));
-    const passed = bt.hitRate >= phase.minHitRate;
+    const minDir =
+      (phase as { minDirectionalHitRate?: number }).minDirectionalHitRate ??
+      phase.minHitRate;
+    const passed = bt.directionalHitRate >= minDir;
 
     if (phase.liveCycles > 0) {
       runLearnCycles(phase.liveCycles, phase.id);
@@ -81,7 +85,7 @@ export async function runCurriculum(): Promise<{
       trainSource: train.source,
       backtestHitRate: bt.hitRate,
       directionalHitRate: bt.directionalHitRate,
-      minRequired: phase.minHitRate,
+      minRequired: minDir,
       passed,
       liveCycles: phase.liveCycles,
     };

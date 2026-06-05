@@ -68,3 +68,9 @@ Headless: `curl http://127.0.0.1:8787/api/status`. Engine id in metrics: `hybrid
 `apps/one-agent/knowledge/research-log.jsonl` is runtime-only (ignored after `!apps/one-agent/knowledge/**/*` negation — ignore rule must come **after** that line in `.gitignore`).
 
 Do **not** put `npm run agent:start` or `npm run verify` in the VM update script.
+
+### Hit rate / training (cloud)
+
+- Guard uses **directional** rolling by default (`ZAMBAHOLA_GUARD_METRIC=directional`).
+- Full pre-Binance pipeline: `npm run agent:omni-train:quick` (CI) or `agent:omni-train` (long).
+- Research paste: `npm run agent:research-import -- apps/one-agent/knowledge/research-imports.example.json`

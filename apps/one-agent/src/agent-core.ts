@@ -249,6 +249,9 @@ export class AgentCore {
 
         this.learningState = await onLiveEvaluation({
           ensembleHit: evaluation.predictionHit,
+          direction: evaluation.direction,
+          directionalHit:
+            evaluation.direction !== "range" ? evaluation.predictionHit : null,
           strategyStats: this.buildMetrics().strategyStats ?? [],
           engine: this.predictionEngine,
         });
@@ -314,6 +317,7 @@ export class AgentCore {
       learningUpdates: this.learningState?.totalLearningUpdates,
       liveEvaluations: this.learningState?.totalEvaluations,
       rollingHitRate: getGuardStatus().rollingHitRate,
+      directionalRollingHitRate: getGuardStatus().directionalRollingHitRate,
       peakHitRate: getGuardStatus().sessionPeak,
       stabilizeMode: getGuardStatus().stabilizeMode,
       updatedAt: Date.now(),

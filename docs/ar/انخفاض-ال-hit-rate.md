@@ -15,11 +15,15 @@
   - أوزان تتغير بلطف (1.008 بدل 1.04)
   - استرجاع أفضل snapshot محفوظ
 - **Directional hit** — دقة up/down فقط (أصدق من الإجمالي)
+- **Guard الاتجاهي** — `ZAMBAHOLA_GUARD_METRIC=directional` (افتراضي في max-accuracy)
+- **Omni train** — تعليم معزّز قبل Binance: `npm run agent:omni-train`
 
 ## على جهازك
 
 ```powershell
 git pull origin main
+npm run agent:research-import -- apps\one-agent\knowledge\research-imports.example.json
+npm run agent:omni-train
 npm run agent:stop
 npm run agent:restore-weights
 npm run agent:max-accuracy:start

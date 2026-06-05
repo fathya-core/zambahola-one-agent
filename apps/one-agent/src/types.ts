@@ -129,6 +129,7 @@ export interface AgentMetrics {
   liveEvaluations?: number;
   directionalHitRate?: number;
   rollingHitRate?: number;
+  directionalRollingHitRate?: number;
   peakHitRate?: number;
   stabilizeMode?: boolean;
   updatedAt: number;

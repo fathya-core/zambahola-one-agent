@@ -2,6 +2,12 @@ import { loadOrFetchKlines } from "../data/klines-cache.js";
 import { PredictionEngine } from "../prediction-engine/index.js";
 import type { MarketTick } from "../types.js";
 import { refreshMarketSignals } from "../market-signals/index.js";
+import { getAccuracyTuning } from "../config/accuracy-profile.js";
+import {
+  computeHitBand,
+  horizonBarsAhead,
+  isPredictionHit,
+} from "./hit-eval.js";
 
 export interface MegaTrainResult {
   bars: number;
@@ -10,17 +16,31 @@ export interface MegaTrainResult {
   mlSamples: number;
   mlpSamples: number;
   gbmSamples: number;
+  strategiesFocus?: string[];
+}
+
+function parseStrategiesFocus(): string[] | null {
+  const phase = process.env.ZAMBAHOLA_CURRICULUM_PHASE;
+  if (!phase) return null;
+  const raw = process.env.ZAMBAHOLA_STRATEGIES_FOCUS;
+  if (!raw || raw === "*") return null;
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 export async function runMegaTrain(bars = 3000): Promise<MegaTrainResult> {
   await refreshMarketSignals();
   const { bars: klines, source } = await loadOrFetchKlines(bars);
-  const engine = new PredictionEngine({ horizonSec: 60 });
+  const tuning = getAccuracyTuning();
+  const horizonSec = tuning.horizonSec;
+  const ahead = horizonBarsAhead(horizonSec);
+  const focus = parseStrategiesFocus();
+
+  const engine = new PredictionEngine({ horizonSec });
   await engine.init();
 
   let trainSteps = 0;
 
-  for (let i = 30; i < klines.length - 2; i++) {
+  for (let i = 30; i < klines.length - ahead; i++) {
     const slice = klines.slice(0, i + 1);
     engine.seedHistory(
       slice.map((b) => b.close),
@@ -34,16 +54,17 @@ export async function runMegaTrain(bars = 3000): Promise<MegaTrainResult> {
       timestamp: klines[i]!.openTime,
     };
     const pred = engine.predict(tick);
-    const future = klines[i + 2]!.close;
+
+    if (focus && pred.meta?.strategyVotes) {
+      const voted = pred.meta.strategyVotes.some((v) => focus.includes(v.strategyId));
+      if (!voted && pred.direction !== "range") continue;
+    }
+
+    const future = klines[i + ahead]!.close;
     const change = future - tick.price;
     const vol = pred.meta?.features?.volatility ?? 0.0003;
-    const band = tick.price * (vol > 0.00045 ? 0.0011 : 0.00085);
-    const hit =
-      pred.direction === "up"
-        ? change > band
-        : pred.direction === "down"
-          ? change < -band
-          : Math.abs(change) <= band;
+    const band = computeHitBand(tick.price, vol);
+    const hit = isPredictionHit(pred.direction, change, band);
 
     if (pred.meta?.features) {
       await engine.onEvaluationHit(
@@ -63,5 +84,6 @@ export async function runMegaTrain(bars = 3000): Promise<MegaTrainResult> {
     mlSamples: engine.ml.getSampleCount(),
     mlpSamples: engine.mlp.getSampleCount(),
     gbmSamples: engine.gbm.getSampleCount(),
+    strategiesFocus: focus ?? undefined,
   };
 }

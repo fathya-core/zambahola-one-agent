@@ -10,7 +10,7 @@ interface PendingEval {
   evaluateAt: number;
 }
 
-const RANGE_BAND_PCT = 0.0008;
+import { computeHitBand, isPredictionHit } from "../learning/hit-eval.js";
 
 export class Evaluator {
   private pending: PendingEval[] = [];
@@ -85,9 +85,9 @@ export class Evaluator {
   ): PredictionEvaluation {
     const { priceAtPrediction, direction } = prediction;
     const change = priceAtHorizon - priceAtPrediction;
-    const band = priceAtPrediction * RANGE_BAND_PCT;
+    const band = computeHitBand(priceAtPrediction);
 
-    const predictionHit = this.isHit(direction, change, band);
+    const predictionHit = isPredictionHit(direction, change, band);
 
     return {
       evaluationId: `eval-${randomUUID()}`,
@@ -102,13 +102,4 @@ export class Evaluator {
     };
   }
 
-  private isHit(
-    direction: PredictionDirection,
-    change: number,
-    band: number,
-  ): boolean {
-    if (direction === "up") return change > band;
-    if (direction === "down") return change < -band;
-    return Math.abs(change) <= band;
-  }
 }

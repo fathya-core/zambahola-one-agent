@@ -14,7 +14,13 @@ async function main(): Promise<void> {
 
   const bt = await runDeepBacktest(500);
   await appendResearchLog({ event: "deep_backtest_preflight", ...bt });
-  console.log("Preflight backtest:", bt.hitRate, bt.source);
+  console.log(
+    "Preflight backtest:",
+    bt.hitRate,
+    "dir=",
+    bt.directionalHitRate,
+    bt.source,
+  );
 
   for (let i = 1; i <= cycles; i++) {
     const agent = new AgentCore({ resetData: i === 1 });
@@ -27,11 +33,12 @@ async function main(): Promise<void> {
       event: "deep_learn_cycle",
       cycle: i,
       hitRate: metrics?.hitRate,
+      directionalHitRate: metrics?.directionalHitRate,
       mlpSamples: metrics?.lastPrediction?.meta?.mlpSamples,
       mlSamples: metrics?.mlSamples,
     });
     console.log(
-      `Cycle ${i}/${cycles} hit=${metrics?.hitRate} mlp=${metrics?.lastPrediction?.meta?.mlpSamples}`,
+      `Cycle ${i}/${cycles} hit=${metrics?.hitRate} dir=${metrics?.directionalHitRate} mlp=${metrics?.lastPrediction?.meta?.mlpSamples}`,
     );
   }
 
