@@ -6,9 +6,10 @@
  *   npm run import-md-reports -- C:\path\to\folder
  *   npm run import-md-reports -- knowledge/user-reports
  */
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { dirname, join, basename } from "node:path";
+import { dirname, join } from "node:path";
+import { listReportMdFiles } from "../learning/report-files.js";
 import { fileURLToPath } from "node:url";
 import {
   saveResearchImports,
@@ -40,8 +41,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const files = (await readdir(dir)).filter(
-    (f) => f.endsWith(".md") && f.toLowerCase() !== "readme.md" && !f.startsWith("_"),
+  const files = (await listReportMdFiles(dir)).filter(
+    (f) => f.toLowerCase() !== "bundle-for-review.md",
   );
   if (files.length === 0) {
     console.error(`[zambahola] no .md files in: ${dir}`);
