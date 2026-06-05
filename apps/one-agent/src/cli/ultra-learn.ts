@@ -1,3 +1,5 @@
+process.env.ZAMBAHOLA_FEED ??= "mock";
+
 import { AgentCore } from "../agent-core.js";
 import { runMegaTrain } from "../learning/batch-trainer.js";
 import { runMegaBacktest } from "../backtest/mega-runner.js";
@@ -9,6 +11,7 @@ import { getAccuracyTuning } from "../config/accuracy-profile.js";
 import { exportModelBundle } from "../learning/model-export.js";
 
 async function main(): Promise<void> {
+  process.env.ZAMBAHOLA_FEED ??= "mock";
   await ensureDataDirs();
   const bars = CYCLES.ultraBars;
   const liveCycles = CYCLES.ultra;

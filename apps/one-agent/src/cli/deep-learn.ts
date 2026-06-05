@@ -7,6 +7,7 @@ import { CYCLES } from "../learning/cycle-config.js";
 const CYCLE_MS = 65_000;
 
 async function main(): Promise<void> {
+  process.env.ZAMBAHOLA_FEED ??= "mock";
   await ensureDataDirs();
   const cycles = CYCLES.deep;
   console.log(`[zambahola] DEEP LEARN: ${cycles} live cycles + kline backtest\n`);

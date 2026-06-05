@@ -10,15 +10,20 @@ const CYCLE_MS = CYCLES.cycleMs;
 async function main(): Promise<void> {
   await ensureDataDirs();
   const cycles = CYCLES.learn;
-  console.log(`[zambahola] learn: ${cycles} cycles × ${CYCLE_MS / 1000}s\n`);
+  const fromCycle = Math.max(1, Number(process.env.ZAMBAHOLA_LEARN_FROM ?? 1));
+  console.log(
+    `[zambahola] learn: ${cycles} cycles × ${CYCLE_MS / 1000}s` +
+      (fromCycle > 1 ? ` (from cycle ${fromCycle})` : "") +
+      "\n",
+  );
 
-  for (let i = 1; i <= cycles; i++) {
-    const agent = new AgentCore({ resetData: i === 1 });
+  for (let i = fromCycle; i <= cycles; i++) {
+    const agent = new AgentCore({ resetData: i === 1 && fromCycle === 1 });
     await agent.start();
     await new Promise((r) => setTimeout(r, CYCLE_MS));
     await agent.stop();
 
-    const metrics = await readMetrics();
+    const metrics = agent.getRuntimeState().metrics;
     await appendResearchLog({
       event: "learn_cycle",
       cycle: i,

@@ -20,7 +20,7 @@
     "agent:stop": "npm run stop -w @zambahola/one-agent",
     "agent:test-run": "npm run test-run -w @zambahola/one-agent",
     "agent:learn": "npm run learn -w @zambahola/one-agent",
-    "agent:turbo-learn": "ZAMBAHOLA_FEED=mock npm run learn -w @zambahola/one-agent",
+    "agent:turbo-learn": "node scripts/run-env.mjs ZAMBAHOLA_FEED=mock -- npm run learn -w @zambahola/one-agent",
     "agent:backtest": "npm run backtest -w @zambahola/one-agent",
     "agent:power-learn": "npm run power-learn -w @zambahola/one-agent",
     "agent:deep-backtest": "npm run deep-backtest -w @zambahola/one-agent",

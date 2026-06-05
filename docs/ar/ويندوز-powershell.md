@@ -4,6 +4,15 @@
 
 `git pull` + `npm run setup` ✅ — أنت على النسخة الصحيحة.
 
+## إذا ظهر `'ZAMBAHOLA_FEED' is not recognized` (ويندوز)
+
+```powershell
+git pull origin main
+npm run agent:deep-learn
+```
+
+تم إصلاح سكربتات `deep-learn` و `ultra-learn` لتعمل على CMD/PowerShell.
+
 ## إذا `agent:max-accuracy` يوقف فوراً عند `=== learn ===`
 
 1. حدّث السكربتات:
