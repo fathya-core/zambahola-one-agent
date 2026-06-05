@@ -9,6 +9,11 @@ import {
   appendResearchLog,
 } from "./learning/adaptive-weights.js";
 import { onLiveEvaluation } from "./learning/live-learning.js";
+import {
+  gentleWeightMultipliers,
+  shouldPauseMlTrain,
+  getGuardStatus,
+} from "./learning/hit-rate-guard.js";
 import type { LearningState } from "./learning/learning-state.js";
 import { DecisionEngine } from "./decision-engine/index.js";
 import { PaperBroker } from "./paper-broker/index.js";
@@ -214,7 +219,7 @@ export class AgentCore {
           change,
           band,
         );
-        const weights = await recordStrategyOutcome(hits);
+        const weights = await recordStrategyOutcome(hits, gentleWeightMultipliers());
         this.predictionEngine.setWeights(weights);
         for (const [sid, hit] of Object.entries(hits)) {
           if (!this.strategyHits[sid]) this.strategyHits[sid] = { hits: 0, total: 0 };
@@ -229,7 +234,7 @@ export class AgentCore {
           weights,
         });
 
-        if (evaluatedPred.meta?.features) {
+        if (evaluatedPred.meta?.features && !shouldPauseMlTrain()) {
           await this.predictionEngine.onEvaluationHit(
             evaluatedPred.meta.features,
             evaluation.direction,
@@ -303,6 +308,9 @@ export class AgentCore {
       understandingScore: this.learningState?.understandingScore,
       learningUpdates: this.learningState?.totalLearningUpdates,
       liveEvaluations: this.learningState?.totalEvaluations,
+      rollingHitRate: getGuardStatus().rollingHitRate,
+      peakHitRate: getGuardStatus().sessionPeak,
+      stabilizeMode: getGuardStatus().stabilizeMode,
       updatedAt: Date.now(),
     };
   }

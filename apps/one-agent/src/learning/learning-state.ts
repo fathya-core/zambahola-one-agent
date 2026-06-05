@@ -18,6 +18,9 @@ export interface LearningState {
   gbmSamples: number;
   hitRateEma: number;
   understandingScore: number;
+  peakHitRate: number;
+  weightRestores: number;
+  stabilizeMode: boolean;
   lastUpdateAt: number;
   startedAt: number;
   live: boolean;
@@ -34,6 +37,9 @@ const DEFAULT: LearningState = {
   gbmSamples: 0,
   hitRateEma: 0,
   understandingScore: 0,
+  peakHitRate: 0,
+  weightRestores: 0,
+  stabilizeMode: false,
   lastUpdateAt: 0,
   startedAt: Date.now(),
   live: true,

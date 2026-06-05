@@ -31,14 +31,17 @@ export async function loadStrategyWeights(
 
 export async function recordStrategyOutcome(
   strategyHits: Record<string, boolean>,
+  multipliers?: { hit: number; miss: number },
 ): Promise<StrategyWeights> {
   const ids = Object.keys(strategyHits);
   const weights = await loadStrategyWeights(ids);
+  const hitM = multipliers?.hit ?? 1.025;
+  const missM = multipliers?.miss ?? 0.975;
 
   for (const [id, hit] of Object.entries(strategyHits)) {
     const w = weights[id] ?? DEFAULT_WEIGHT;
     weights[id] = Number(
-      Math.max(0.25, Math.min(3, w * (hit ? 1.04 : 0.96))).toFixed(4),
+      Math.max(0.25, Math.min(3, w * (hit ? hitM : missM))).toFixed(4),
     );
   }
 

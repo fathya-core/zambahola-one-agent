@@ -12,6 +12,8 @@ import { getSentiment } from "../sentiment/index.js";
 import { getOrderBook } from "../market-feed/orderbook.js";
 import { getMarketSignals } from "../market-signals/index.js";
 import { getLiveLearningState } from "../learning/live-learning.js";
+import { getGuardStatus } from "../learning/hit-rate-guard.js";
+import { loadBestWeights } from "../learning/weight-snapshot.js";
 import { learningFilesExist } from "../learning/learning-state.js";
 import { WEIGHTS_FILE } from "../learning/adaptive-weights.js";
 

@@ -55,6 +55,16 @@ export class Evaluator {
     return Number((hits / this.evaluations.length).toFixed(4));
   }
 
+  getDirectionalHitRate(): number {
+    const dir = this.evaluations.filter((e) => e.direction !== "range");
+    if (dir.length === 0) return 0;
+    return Number((dir.filter((e) => e.predictionHit).length / dir.length).toFixed(4));
+  }
+
+  getDirectionalCount(): number {
+    return this.evaluations.filter((e) => e.direction !== "range").length;
+  }
+
   getFalsePositiveRate(): number {
     const tradeSignals = this.evaluations.length;
     if (tradeSignals === 0) return 0;

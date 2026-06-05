@@ -9,6 +9,11 @@ import {
   saveLearningState,
   type LearningState,
 } from "./learning-state.js";
+import {
+  recordHit,
+  shouldSkipOrchestratorBoost,
+  maybeSnapshotOrRestore,
+} from "./hit-rate-guard.js";
 
 const WEIGHT_EVERY = Number(process.env.ZAMBAHOLA_LIVE_WEIGHT_EVERY ?? 5);
 const ORCH_EVERY = Number(process.env.ZAMBAHOLA_LIVE_ORCH_EVERY ?? 12);
@@ -31,10 +36,19 @@ export interface LiveEvalContext {
 export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningState> {
   let state = await getState();
   state.totalEvaluations += 1;
+
+  const guard = recordHit(ctx.ensembleHit);
+  state.stabilizeMode = guard.stabilizeMode;
+  state.peakHitRate = Math.max(state.peakHitRate ?? 0, guard.sessionPeak);
+
   state = bumpUnderstanding(
     state,
     ctx.ensembleHit,
     ctx.engine.ml.getSampleCount(),
+  );
+
+  state = await maybeSnapshotOrRestore(guard.rollingHitRate, state, (w) =>
+    ctx.engine.setWeights(w),
   );
   state.mlpSamples = ctx.engine.mlp.getSampleCount();
   state.gbmSamples = ctx.engine.gbm.getSampleCount();
@@ -52,7 +66,12 @@ export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningSt
     });
   }
 
-  if (state.totalEvaluations % ORCH_EVERY === 0 && ctx.strategyStats.length > 0) {
+  if (
+    state.totalEvaluations % ORCH_EVERY === 0 &&
+    ctx.strategyStats.length > 0 &&
+    !shouldSkipOrchestratorBoost() &&
+    guard.rollingHitRate >= 0.52
+  ) {
     const boosted = await boostTopStrategies(ctx.strategyStats, 10);
     ctx.engine.setWeights(boosted);
     state.orchestratorBoosts += 1;

@@ -122,6 +122,10 @@ export interface AgentMetrics {
   understandingScore?: number;
   learningUpdates?: number;
   liveEvaluations?: number;
+  directionalHitRate?: number;
+  rollingHitRate?: number;
+  peakHitRate?: number;
+  stabilizeMode?: boolean;
   updatedAt: number;
 }
 
