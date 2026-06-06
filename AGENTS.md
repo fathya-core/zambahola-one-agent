@@ -73,4 +73,6 @@ Do **not** put `npm run agent:start` or `npm run verify` in the VM update script
 
 - Guard uses **directional** rolling by default (`ZAMBAHOLA_GUARD_METRIC=directional`).
 - Full pre-Binance pipeline: `npm run agent:omni-train:quick` (CI) or `agent:omni-train` (long).
+- Phase 2 live profile: `npm run agent:phase2-live` (`config/phase2-live.env` — micro gates, meta-PnL, analyst AR).
+- Threshold sweeps (internal replay, not user backtest): `npm run agent:experiments:quick` or `agent:experiments`.
 - Research paste: `npm run agent:research-import -- apps/one-agent/knowledge/research-imports.example.json`

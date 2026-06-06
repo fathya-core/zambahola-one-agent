@@ -23,6 +23,9 @@ import {
   loadExpertCurriculum,
 } from "../knowledge/expert-loader.js";
 import { getMetaLabeler } from "../learning/meta-label.js";
+import { getMetaPnlModel } from "../learning/meta-pnl.js";
+import { applyMicrostructureGates } from "./microstructure-gates.js";
+import { explainGateReasonAr } from "../learning/analyst-ar.js";
 
 const DEFAULT_HORIZON_SEC = 30;
 const MAX_PRICES = 400;
@@ -44,6 +47,7 @@ export class PredictionEngine {
   private expertTiers: StrategyTiers = {};
   private ready = false;
   private metaLabeler: Awaited<ReturnType<typeof getMetaLabeler>> | null = null;
+  private metaPnl: Awaited<ReturnType<typeof getMetaPnlModel>> | null = null;
 
   constructor(options: PredictionEngineOptions = {}) {
     this.horizonSec =
@@ -66,6 +70,7 @@ export class PredictionEngine {
     await this.gbm.load();
     await this.calibrator.load();
     this.metaLabeler = await getMetaLabeler();
+    this.metaPnl = await getMetaPnlModel();
     this.ready = true;
   }
 
@@ -120,6 +125,9 @@ export class PredictionEngine {
     let qualityTier: "high" | "medium" | "abstain" = "medium";
     let metaLabelProb = 0.5;
     let metaTrust = true;
+    let metaPnlProb = 0.5;
+    let metaPnlEnter = true;
+    let analystSummaryAr: string | undefined;
 
     if (features) {
       regime = detectRegime(features);
@@ -190,6 +198,14 @@ export class PredictionEngine {
       qualityTier = filtered.qualityTier;
       gateReason = `${gateReason} | ${filtered.filterReason}`;
 
+      const micro = applyMicrostructureGates(direction, confidence, features);
+      if (micro.blocked) {
+        direction = micro.direction;
+        confidence = micro.confidence;
+        qualityTier = "abstain";
+        gateReason = `${gateReason} | ${micro.reason}`;
+      }
+
       if (
         this.metaLabeler &&
         direction !== "range" &&
@@ -211,6 +227,35 @@ export class PredictionEngine {
           qualityTier = "abstain";
           gateReason = `${gateReason} | meta_label_abstain_${metaLabelProb}`;
         }
+      }
+
+      if (
+        this.metaPnl &&
+        direction !== "range" &&
+        process.env.ZAMBAHOLA_META_PNL !== "0"
+      ) {
+        metaPnlProb = this.metaPnl.score(
+          features,
+          confidence,
+          ensemble.agreement,
+          regime,
+        );
+        metaPnlEnter = this.metaPnl.shouldEnter(
+          features,
+          confidence,
+          ensemble.agreement,
+          regime,
+        );
+        if (!metaPnlEnter) {
+          direction = "range";
+          confidence = 0.46;
+          qualityTier = "abstain";
+          gateReason = `${gateReason} | meta_pnl_abstain_${metaPnlProb}`;
+        }
+      }
+
+      if (process.env.ZAMBAHOLA_ANALYST_AR !== "0") {
+        analystSummaryAr = explainGateReasonAr(gateReason);
       }
     }
 
@@ -252,6 +297,9 @@ export class PredictionEngine {
         features: features ? { ...features } : undefined,
         metaLabelProb,
         metaTrust,
+        metaPnlProb,
+        metaPnlEnter,
+        analystSummaryAr,
       },
     };
   }

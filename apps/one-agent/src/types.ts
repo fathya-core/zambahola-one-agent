@@ -48,6 +48,9 @@ export interface PredictionMeta {
   qualityTier?: string;
   metaLabelProb?: number;
   metaTrust?: boolean;
+  metaPnlProb?: number;
+  metaPnlEnter?: boolean;
+  analystSummaryAr?: string;
 }
 
 export interface Prediction {

@@ -5,6 +5,10 @@ export interface OrderBookSnapshot {
   bidVolume: number;
   askVolume: number;
   imbalance: number;
+  /** Top-5 level imbalance */
+  imbalance5: number;
+  /** Top-20 level imbalance */
+  imbalance20: number;
   spreadBps: number;
   midPrice: number;
   updatedAt: number;
@@ -26,7 +30,24 @@ export function computeImbalance(
   bids: Array<[string, string]>,
   asks: Array<[string, string]>,
   levels = 10,
-): { bidVol: number; askVol: number; imbalance: number; mid: number; spreadBps: number } {
+): {
+  bidVol: number;
+  askVol: number;
+  imbalance: number;
+  imbalance5: number;
+  imbalance20: number;
+  mid: number;
+  spreadBps: number;
+} {
+  const imbAt = (n: number) => {
+    let bidVol = 0;
+    let askVol = 0;
+    for (let i = 0; i < Math.min(n, bids.length); i++) bidVol += Number(bids[i]![1]);
+    for (let i = 0; i < Math.min(n, asks.length); i++) askVol += Number(asks[i]![1]);
+    const total = bidVol + askVol || 1;
+    return (bidVol - askVol) / total;
+  };
+
   let bidVol = 0;
   let askVol = 0;
   for (let i = 0; i < Math.min(levels, bids.length); i++) {
@@ -44,6 +65,8 @@ export function computeImbalance(
     bidVol,
     askVol,
     imbalance: (bidVol - askVol) / total,
+    imbalance5: imbAt(5),
+    imbalance20: imbAt(20),
     mid,
     spreadBps,
   };

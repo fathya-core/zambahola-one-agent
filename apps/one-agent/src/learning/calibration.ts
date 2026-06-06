@@ -62,4 +62,27 @@ export class ConfidenceCalibrator {
     }
     return n > 0 ? Number((1 - err / n).toFixed(4)) : 0;
   }
+
+  getReliabilityCurve(): Array<{
+    bucket: number;
+    predicted: number;
+    empirical: number;
+    count: number;
+    gap: number;
+  }> {
+    return this.buckets.map((b, i) => {
+      const empirical = b.count > 0 ? b.actual / b.count : 0;
+      return {
+        bucket: i,
+        predicted: b.predicted,
+        empirical: Number(empirical.toFixed(4)),
+        count: b.count,
+        gap: Number(Math.abs(b.predicted - empirical).toFixed(4)),
+      };
+    });
+  }
+
+  getTotalSamples(): number {
+    return this.buckets.reduce((s, b) => s + b.count, 0);
+  }
 }

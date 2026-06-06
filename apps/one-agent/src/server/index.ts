@@ -110,8 +110,11 @@ async function route(
     const best = await loadBestWeights();
     const { getPatternJournal } = await import("../learning/pattern-journal.js");
     const { getMetaLabeler } = await import("../learning/meta-label.js");
+    const { getMetaPnlModel } = await import("../learning/meta-pnl.js");
     const patterns = await getPatternJournal();
     const meta = await getMetaLabeler();
+    const metaPnl = await getMetaPnlModel();
+    const cal = agent.predictionEngine.calibrator;
     return sendJson(res, 200, {
       ...state,
       guard,
@@ -119,6 +122,11 @@ async function route(
       patternInsightsAr: patterns.recentInsightsAr,
       patternJournal: patterns,
       metaLabel: meta.getState(),
+      metaPnl: metaPnl.getState(),
+      calibration: {
+        score: cal.getCalibrationScore(),
+        curve: cal.getReliabilityCurve(),
+      },
       persistsToDisk: true,
       files: {
         strategyWeights: WEIGHTS_FILE,
@@ -126,12 +134,15 @@ async function route(
         researchLog: "knowledge/research-log.jsonl",
         patternJournal: "data/learning/pattern-journal.md",
         metaLabel: "data/learning/meta-label-weights.json",
+        metaPnl: "data/learning/meta-pnl-weights.json",
+        experiments: "data/learning/experiments/",
         modelBundle: "data/learning/export/",
       },
       hasSavedWeights: learningFilesExist(),
       howItWorks: [
-        "Each evaluated prediction trains ML/MLP/GBM + meta-label online",
-        "Pattern journal: regime × strategy hit/miss (Arabic insights)",
+        "Each evaluated prediction trains ML/MLP/GBM + meta-label + meta-PnL online",
+        "Micro gates: spread/vol/imbalance + main prob ≥ 0.58",
+        "Pattern journal: regime × strategy × gate (Arabic insights)",
         "Strategy weights adjust on every hit/miss",
         `Every ${process.env.ZAMBAHOLA_LIVE_ORCH_EVERY ?? 12} evals: orchestrator boosts top strategies`,
         `Every ${process.env.ZAMBAHOLA_LIVE_EXPORT_EVERY ?? 40} evals: model bundle export`,
@@ -141,6 +152,35 @@ async function route(
   if (path === "/api/patterns") {
     const { getPatternJournal } = await import("../learning/pattern-journal.js");
     return sendJson(res, 200, await getPatternJournal());
+  }
+  if (path === "/api/calibration") {
+    const cal = agent.predictionEngine.calibrator;
+    return sendJson(res, 200, {
+      score: cal.getCalibrationScore(),
+      samples: cal.getTotalSamples(),
+      curve: cal.getReliabilityCurve(),
+    });
+  }
+  if (path === "/api/analyst") {
+    const { getPatternJournal } = await import("../learning/pattern-journal.js");
+    const { buildAnalystReportAr } = await import("../learning/analyst-ar.js");
+    const { getMetaPnlModel } = await import("../learning/meta-pnl.js");
+    const { lastPrediction } = agent.getRuntimeState();
+    const patterns = await getPatternJournal();
+    const metaPnl = await getMetaPnlModel();
+    const report = buildAnalystReportAr(lastPrediction?.meta, patterns);
+    return sendJson(res, 200, {
+      ...report,
+      metaPnl: metaPnl.getState(),
+      lastPrediction: lastPrediction
+        ? {
+            direction: lastPrediction.direction,
+            confidence: lastPrediction.confidence,
+            analystSummaryAr: lastPrediction.meta?.analystSummaryAr,
+            gateReason: lastPrediction.meta?.gateReason,
+          }
+        : null,
+    });
   }
   if (path === "/api/strategies") {
     const idx = (await loadKnowledgeIndex()) as { strategies: unknown[] };

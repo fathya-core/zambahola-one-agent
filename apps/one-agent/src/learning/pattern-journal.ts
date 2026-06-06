@@ -20,6 +20,7 @@ export interface PatternJournalData {
   totalEvaluations: number;
   byRegime: Record<string, PatternBucket>;
   byRegimeStrategy: Record<string, PatternBucket>;
+  byGateReason: Record<string, PatternBucket>;
   recentInsightsAr: string[];
 }
 
@@ -28,6 +29,7 @@ const EMPTY: PatternJournalData = {
   totalEvaluations: 0,
   byRegime: {},
   byRegimeStrategy: {},
+  byGateReason: {},
   recentInsightsAr: [],
 };
 
@@ -48,7 +50,8 @@ function getBucket(map: Record<string, PatternBucket>, key: string): PatternBuck
 
 async function ensureLoaded(): Promise<PatternJournalData> {
   if (data) return data;
-  data = (await readJsonSafe<PatternJournalData>(JSON_FILE)) ?? { ...EMPTY };
+  const raw = (await readJsonSafe<PatternJournalData>(JSON_FILE)) ?? { ...EMPTY };
+  data = { ...EMPTY, ...raw, byGateReason: raw.byGateReason ?? {} };
   return data;
 }
 
@@ -72,6 +75,11 @@ export async function recordPatternEvaluation(ctx: {
     }
   }
 
+  const gateKey = normalizeGateKey(ctx.gateReason);
+  if (gateKey) {
+    bump(getBucket(d.byGateReason, gateKey), ctx.ensembleHit);
+  }
+
   d.recentInsightsAr = buildInsightsAr(d);
   d.updatedAt = Date.now();
 
@@ -79,6 +87,14 @@ export async function recordPatternEvaluation(ctx: {
   if (d.totalEvaluations % every === 0) {
     await flushJournal(d);
   }
+}
+
+function normalizeGateKey(reason?: string): string | null {
+  if (!reason || reason === "n/a") return null;
+  const first = reason.split("|")[0]?.trim() ?? "";
+  if (!first) return null;
+  const prefix = first.split("_").slice(0, 2).join("_");
+  return prefix.length > 2 ? prefix : first.slice(0, 24);
 }
 
 function buildInsightsAr(d: PatternJournalData): string[] {
@@ -118,7 +134,18 @@ function buildInsightsAr(d: PatternJournalData): string[] {
     );
   }
 
-  return lines.slice(0, 12);
+  const topGates = Object.entries(d.byGateReason ?? {})
+    .filter(([, b]) => b.total >= 5)
+    .sort((a, b) => b[1].total - a[1].total)
+    .slice(0, 4);
+
+  for (const [gate, b] of topGates) {
+    lines.push(
+      `🚧 بوابة ${gate}: ${b.total} مرة · hit ${(b.hitRate * 100).toFixed(1)}%`,
+    );
+  }
+
+  return lines.slice(0, 14);
 }
 
 export async function flushJournal(d?: PatternJournalData): Promise<void> {

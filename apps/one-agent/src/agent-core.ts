@@ -10,6 +10,7 @@ import {
 } from "./learning/adaptive-weights.js";
 import { onLiveEvaluation } from "./learning/live-learning.js";
 import { getMetaLabeler } from "./learning/meta-label.js";
+import { getMetaPnlModel } from "./learning/meta-pnl.js";
 import { recordPatternEvaluation } from "./learning/pattern-journal.js";
 import type { FeatureVector } from "./features/index.js";
 import {
@@ -78,6 +79,12 @@ export class AgentCore {
   private metricsWriteChain: Promise<void> = Promise.resolve();
   private handlingTick = false;
   private learningState: LearningState | null = null;
+  private entryTradeContext: {
+    features: FeatureVector;
+    confidence: number;
+    agreement: number;
+    regime: string;
+  } | null = null;
 
   constructor(options: AgentCoreOptions = {}) {
     this.broker = options.broker ?? createBroker();
@@ -203,6 +210,27 @@ export class AgentCore {
     if (trade) {
       await appendTradeLedger({ event: "trade", trade, decision });
       await appendRun({ type: "trade", payload: trade, timestamp: Date.now() });
+
+      const fv = prediction.meta?.features as FeatureVector | undefined;
+      if (trade.status === "open" && fv && prediction.meta?.agreement != null) {
+        this.entryTradeContext = {
+          features: fv,
+          confidence: prediction.confidence,
+          agreement: prediction.meta.agreement,
+          regime: prediction.meta.regime ?? "range",
+        };
+      }
+      if (trade.status === "closed" && this.entryTradeContext) {
+        const metaPnl = await getMetaPnlModel();
+        await metaPnl.train(
+          this.entryTradeContext.features,
+          this.entryTradeContext.confidence,
+          this.entryTradeContext.agreement,
+          this.entryTradeContext.regime,
+          (trade.pnl ?? 0) > 0,
+        );
+        this.entryTradeContext = null;
+      }
     } else if (decision.action !== "no_trade") {
       await appendTradeLedger({ event: "decision", decision });
     }

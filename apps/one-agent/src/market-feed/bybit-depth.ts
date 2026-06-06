@@ -15,16 +15,16 @@ export function startBybitDepthPoller(intervalMs = 2500): () => void {
       };
       const bids = data.result?.b ?? [];
       const asks = data.result?.a ?? [];
-      const { bidVol, askVol, imbalance, mid, spreadBps } = computeImbalance(
-        bids,
-        asks,
-      );
+      const { bidVol, askVol, imbalance, imbalance5, imbalance20, mid, spreadBps } =
+        computeImbalance(bids, asks);
       const existing = Date.now();
       setOrderBook({
         symbol: "BTCUSDT",
         bidVolume: bidVol,
         askVolume: askVol,
         imbalance,
+        imbalance5,
+        imbalance20,
         spreadBps,
         midPrice: mid,
         updatedAt: existing,

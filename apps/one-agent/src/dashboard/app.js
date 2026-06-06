@@ -66,7 +66,10 @@ async function refresh() {
       $("confidence").textContent =
         "confidence " + (prediction.confidence * 100).toFixed(1) + "%";
       $("horizon").textContent = "horizon " + prediction.horizonSec + "s";
-      const why = prediction.meta?.gateReason || prediction.meta?.expertReason;
+      const why =
+        prediction.meta?.analystSummaryAr ||
+        prediction.meta?.gateReason ||
+        prediction.meta?.expertReason;
       if (why) {
         $("decision-reason").textContent = why;
       }
@@ -80,6 +83,20 @@ async function refresh() {
     renderMetrics(metrics);
     $("position").textContent = JSON.stringify(
       { openPosition: metrics.openPosition, paperPnl: metrics.paperPnl },
+      null,
+      2,
+    );
+
+    const [analyst, cal] = await Promise.all([
+      fetchJson("/api/analyst"),
+      fetchJson("/api/calibration"),
+    ]);
+    $("analyst").textContent =
+      analyst.summaryAr +
+      "\n\n" +
+      (analyst.bulletsAr ?? []).map((l) => "• " + l).join("\n");
+    $("calibration").textContent = JSON.stringify(
+      { score: cal.score, samples: cal.samples, curve: cal.curve },
       null,
       2,
     );

@@ -14,15 +14,15 @@ async function pollBinance(): Promise<void> {
       bids: [string, string][];
       asks: [string, string][];
     };
-    const { bidVol, askVol, imbalance, mid, spreadBps } = computeImbalance(
-      data.bids,
-      data.asks,
-    );
+    const { bidVol, askVol, imbalance, imbalance5, imbalance20, mid, spreadBps } =
+      computeImbalance(data.bids, data.asks);
     setOrderBook({
       symbol: "BTCUSDT",
       bidVolume: bidVol,
       askVolume: askVol,
       imbalance,
+      imbalance5,
+      imbalance20,
       spreadBps,
       midPrice: mid,
       updatedAt: Date.now(),

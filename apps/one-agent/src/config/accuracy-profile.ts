@@ -60,11 +60,15 @@ export function getAccuracyTuning(): AccuracyTuning {
   const minModelVoters = Number(
     process.env.ZAMBAHOLA_MIN_MODEL_VOTERS ?? base.minModelVoters,
   );
+  const blendCombined = Number(
+    process.env.ZAMBAHOLA_BLEND_COMBINED ?? base.blendCombined,
+  );
   return {
     ...base,
     horizonSec: horizon,
     minAgreement,
     minModelVoters,
+    blendCombined,
   };
 }
 
