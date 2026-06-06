@@ -73,8 +73,14 @@ async function main() {
     const ok = status.running === true;
     if (ok) {
       pass("agent", `feed=${status.feed} horizon=${status.horizonSec}s ticks=${status.tickCount}`);
-      if (status.horizonSec !== 45) warn("agent:horizon", `expected 45s, got ${status.horizonSec}s — use agent:phase2-live`);
-      if (status.feed === "mock") warn("agent:feed", "mock feed — on Windows use agent:phase2-live (universal/bybit)");
+      if (status.horizonSec !== 45) {
+        warn("agent:horizon", `expected 45s, got ${status.horizonSec}s — stop agent then: npm run agent:phase2-live`);
+      }
+      if (status.feed === "mock") {
+        warn("agent:feed", "mock feed — use agent:phase2-live on a real PC");
+      } else if (status.feed === "fast_tick") {
+        pass("agent:feed", "fast_tick (live ticks via Binance/Bybit — OK for phase2)");
+      }
     } else fail("agent", "not running");
   } catch (e) {
     fail("agent", `${agentUrl} — ${e.message}`);

@@ -89,9 +89,9 @@ export class AgentCore {
   constructor(options: AgentCoreOptions = {}) {
     this.broker = options.broker ?? createBroker();
     this.feed = options.feed ?? createMarketFeed();
-    this.predictionEngine = new PredictionEngine({
-      horizonSec: options.horizonSec ?? 30,
-    });
+    this.predictionEngine = new PredictionEngine(
+      options.horizonSec != null ? { horizonSec: options.horizonSec } : {},
+    );
     this.resetDataOnStart = options.resetData ?? false;
   }
 
