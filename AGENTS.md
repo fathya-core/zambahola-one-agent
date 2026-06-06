@@ -75,4 +75,7 @@ Do **not** put `npm run agent:start` or `npm run verify` in the VM update script
 - Full pre-Binance pipeline: `npm run agent:omni-train:quick` (CI) or `agent:omni-train` (long).
 - Phase 2 live profile: `npm run agent:phase2-live` (`config/phase2-live.env` — micro gates, meta-PnL, analyst AR).
 - Threshold sweeps (internal replay, not user backtest): `npm run agent:experiments:quick` or `agent:experiments`.
+- **Local PC bridge:** `agent:local-bridge` (:8790) + `agent:push-telemetry` → `apps/one-agent/data/bridge/LOCAL-TELEMETRY.json` for cloud visibility.
+- MCP local server: `mcp-servers/zambahola-local/server.mjs` — see `.cursor/mcp.json.example`.
+- Arabic: `docs/ar/ربط-الجهاز-المحلي.md` · `docs/INTEGRATIONS.md`.
 - Research paste: `npm run agent:research-import -- apps/one-agent/knowledge/research-imports.example.json`
