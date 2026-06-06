@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, copyFileSync } from "node:fs";
+import { existsSync, copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,16 +46,14 @@ function abortStuckGit() {
     console.log("[push-telemetry] aborting stuck rebase...");
     git(["rebase", "--abort"], { inherit: true });
   }
-  const unmerged = (git(["diff", "--name-only", "--diff-filter=U"]).stdout ?? "").trim();
-  if (unmerged) {
-    console.log("[push-telemetry] clearing merge conflicts on bridge files...");
-    for (const f of bridgeFiles) {
-      if (existsSync(join(root, f))) git(["checkout", "--", f], { inherit: true });
-    }
-    git(["add", ...bridgeFiles.filter((f) => existsSync(join(root, f)))], { inherit: true });
-    git(["merge", "--abort"], { inherit: true });
-    git(["rebase", "--abort"], { inherit: true });
-  }
+  git(["merge", "--abort"], { inherit: true });
+}
+
+function dirtyFiles() {
+  return (git(["status", "--porcelain"]).stdout ?? "")
+    .split("\n")
+    .map((l) => l.trim().slice(3))
+    .filter(Boolean);
 }
 
 function syncWithRemote(telemetryBackup) {
@@ -63,36 +61,42 @@ function syncWithRemote(telemetryBackup) {
   console.log("[push-telemetry] syncing with origin/main...");
   git(["fetch", "origin", "main"], { inherit: true });
 
-  const dirty = (git(["status", "--porcelain"]).stdout ?? "").trim();
-  if (dirty) {
-    console.log("[push-telemetry] stashing local changes before pull...");
-    git(["stash", "push", "-u", "-m", "push-telemetry-auto"], { inherit: true });
+  const dirty = dirtyFiles();
+  const nonBridge = dirty.filter((f) => !bridgeFiles.includes(f.replace(/\\/g, "/")));
+
+  if (nonBridge.length) {
+    console.log("[push-telemetry] stashing non-bridge changes...");
+    git(["stash", "push", "-m", "push-telemetry-auto", "--", ...nonBridge], { inherit: true });
   }
 
   const pull = git(["pull", "--rebase", "origin", "main"], { inherit: true });
   if (pull.status !== 0) {
     git(["rebase", "--abort"], { inherit: true });
-    console.error("[push-telemetry] pull failed. Run manually:");
-    console.error("  git stash push -u -m wip");
-    console.error("  git pull origin main --rebase");
-    console.error("  git stash pop");
-    console.error("  npm run agent:push-telemetry");
+    console.error("[push-telemetry] pull failed — run: npm run agent:fix-git-push");
     return false;
   }
 
-  if (dirty) {
-    const pop = git(["stash", "pop"], { inherit: true });
-    if (pop.status !== 0) {
-      console.log("[push-telemetry] stash pop conflict — keeping telemetry backup, dropping stash");
-      git(["checkout", "--", "apps/one-agent/data/bridge/"], { inherit: true });
-      git(["stash", "drop"], { inherit: true });
-    }
+  if (nonBridge.length) {
+    git(["stash", "pop"], { inherit: true });
   }
 
   if (existsSync(telemetryBackup)) {
     copyFileSync(telemetryBackup, telemetry);
   }
   return true;
+}
+
+function telemetryChanged() {
+  if (!existsSync(telemetry)) return false;
+  const head = git(["show", "HEAD:apps/one-agent/data/bridge/LOCAL-TELEMETRY.json"]);
+  if (head.status !== 0) return true;
+  try {
+    const a = JSON.parse(head.stdout);
+    const b = JSON.parse(readFileSync(telemetry, "utf8"));
+    return JSON.stringify(a) !== JSON.stringify(b);
+  } catch {
+    return true;
+  }
 }
 
 if (!existsSync(telemetry)) {
@@ -110,22 +114,31 @@ if (existsSync(telemetry)) copyFileSync(telemetry, backup);
 
 if (!syncWithRemote(backup)) process.exit(1);
 
+if (existsSync(backup)) copyFileSync(backup, telemetry);
+
 const ts = new Date().toISOString().slice(0, 16).replace("T", " ");
 const files = bridgeFiles.filter((f) => existsSync(join(root, f)));
 
-git(["add", ...files], { inherit: true });
+git(["add", "-f", ...files], { inherit: true });
+
+if (!telemetryChanged()) {
+  const snap = JSON.parse(readFileSync(telemetry, "utf8"));
+  console.log(
+    `[push-telemetry] nothing new — same snapshot (hostname=${snap.hostname ?? "?"}, ticks=${snap.status?.tickCount ?? "?"})`,
+  );
+  process.exit(0);
+}
 
 const commit = git(["commit", "-m", `telemetry: ${ts}`]);
 
 if (commit.status !== 0) {
-  const out = (commit.stdout ?? "") + (commit.stderr ?? "");
-  if (out.includes("nothing to commit")) {
-    console.log("[push-telemetry] nothing new (file unchanged since last commit)");
-  } else {
-    console.log("[push-telemetry] nothing new — telemetry unchanged");
-  }
-  console.log("[push-telemetry] tip: ensure agent:local-bridge is running, then retry");
-  process.exit(0);
+  const out = `${commit.stdout ?? ""}${commit.stderr ?? ""}`;
+  console.error("[push-telemetry] commit failed:", out.trim() || "unknown");
+  console.error("[push-telemetry] manual fix:");
+  console.error("  git add -f apps/one-agent/data/bridge/LOCAL-TELEMETRY.json");
+  console.error(`  git commit -m "telemetry: ${ts}"`);
+  console.error("  git push origin main");
+  process.exit(1);
 }
 
 const push = git(["push", "origin", "main"], { inherit: true });
