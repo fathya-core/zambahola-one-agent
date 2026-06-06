@@ -63,9 +63,9 @@ function syncWithRemote(telemetryBackup) {
   if (dirty) {
     const pop = git(["stash", "pop"], { inherit: true });
     if (pop.status !== 0) {
-      console.log("[push-telemetry] stash pop conflict — using telemetry backup");
-      git(["reset", "--hard", "HEAD"], { inherit: true });
-      git(["clean", "-fd", "apps/one-agent/data/bridge/"], { inherit: true });
+      console.log("[push-telemetry] stash pop conflict — keeping telemetry backup, dropping stash");
+      git(["checkout", "--", "apps/one-agent/data/bridge/"], { inherit: true });
+      git(["stash", "drop"], { inherit: true });
     }
   }
 
