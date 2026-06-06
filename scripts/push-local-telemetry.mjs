@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, copyFileSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, copyFileSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,18 +8,18 @@ import { tmpdir } from "node:os";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const telemetry = join(root, "apps/one-agent/data/bridge/LOCAL-TELEMETRY.json");
 const bridgeUrl = process.env.ZAMBAHOLA_BRIDGE_URL ?? "http://127.0.0.1:8790";
-const bridgeFiles = [
+const bridgeFiles = new Set([
   "apps/one-agent/data/bridge/LOCAL-TELEMETRY.json",
   "apps/one-agent/data/bridge/REMOTE-COMMANDS.json",
   "apps/one-agent/data/bridge/REMOTE-COMMANDS-DONE.json",
-];
+]);
 
 function git(args, opts = {}) {
   return spawnSync("git", args, {
     cwd: root,
     encoding: "utf8",
     stdio: opts.inherit ? "inherit" : "pipe",
-    shell: process.platform === "win32",
+    shell: false,
     ...opts,
   });
 }
@@ -46,13 +46,25 @@ function abortStuckGit() {
     console.log("[push-telemetry] aborting stuck rebase...");
     git(["rebase", "--abort"], { inherit: true });
   }
-  git(["merge", "--abort"], { inherit: true });
+  if (existsSync(join(root, ".git", "MERGE_HEAD"))) {
+    git(["merge", "--abort"], { inherit: true });
+  }
+}
+
+function normalizePath(p) {
+  return p.replace(/\\/g, "/").trim();
 }
 
 function dirtyFiles() {
-  return (git(["status", "--porcelain"]).stdout ?? "")
-    .split("\n")
-    .map((l) => l.trim().slice(3))
+  return (git(["status", "--porcelain", "-u"]).stdout ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      if (l.startsWith("?? ")) return normalizePath(l.slice(3));
+      const m = l.match(/^.. (.+)$/);
+      return m ? normalizePath(m[1]) : normalizePath(l);
+    })
     .filter(Boolean);
 }
 
@@ -62,11 +74,17 @@ function syncWithRemote(telemetryBackup) {
   git(["fetch", "origin", "main"], { inherit: true });
 
   const dirty = dirtyFiles();
-  const nonBridge = dirty.filter((f) => !bridgeFiles.includes(f.replace(/\\/g, "/")));
+  const nonBridge = dirty.filter((f) => !bridgeFiles.has(f));
 
   if (nonBridge.length) {
     console.log("[push-telemetry] stashing non-bridge changes...");
-    git(["stash", "push", "-m", "push-telemetry-auto", "--", ...nonBridge], { inherit: true });
+    const stash = git(
+      ["stash", "push", "-m", "push-telemetry-auto", "--", ...nonBridge],
+      { inherit: true },
+    );
+    if (stash.status !== 0) {
+      console.warn("[push-telemetry] stash skipped — continuing pull");
+    }
   }
 
   const pull = git(["pull", "--rebase", "origin", "main"], { inherit: true });
@@ -117,7 +135,7 @@ if (!syncWithRemote(backup)) process.exit(1);
 if (existsSync(backup)) copyFileSync(backup, telemetry);
 
 const ts = new Date().toISOString().slice(0, 16).replace("T", " ");
-const files = bridgeFiles.filter((f) => existsSync(join(root, f)));
+const files = [...bridgeFiles].filter((f) => existsSync(join(root, f)));
 
 git(["add", "-f", ...files], { inherit: true });
 
