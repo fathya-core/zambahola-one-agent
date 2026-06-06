@@ -10,6 +10,10 @@ if (-not (Test-Path "config/bridge.env")) {
     Write-Host "Created config/bridge.env — edit ZAMBAHOLA_BRIDGE_TOKEN" -ForegroundColor Yellow
 }
 
+Write-Host "[0] git merge driver for telemetry..." -ForegroundColor Cyan
+git config merge.ours.driver true
+git config merge.ours.name "keep local telemetry on conflict"
+
 Write-Host "[1] npm setup..." -ForegroundColor Cyan
 npm run setup
 
