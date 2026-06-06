@@ -1,0 +1,66 @@
+{
+  "version": "1",
+  "titleAr": "بعد مراجعة BUNDLE-FOR-REVIEW.md + Perplexity",
+  "entries": [
+    {
+      "source": "perplexity",
+      "importedAt": "2026-06-06",
+      "query": "meta-labeling + weightAdjustments (رد مباشر)",
+      "minDirectionalHitTarget": 0.62,
+      "weightAdjustments": {
+        "momentum": 1.25,
+        "order_imbalance": 1.4,
+        "ema_cross": 1.15,
+        "funding_fade": 0.85,
+        "mean_reversion": 0.7,
+        "rsi": 0.95
+      },
+      "rules": [
+        {
+          "id": "block_mean_reversion_on_trend_up",
+          "regime": "trend_up",
+          "blockStrategies": ["mean_reversion"],
+          "unlessAgreement": 0.65
+        }
+      ]
+    },
+    {
+      "source": "manual",
+      "importedAt": "2026-06-06",
+      "query": "BUNDLE synthesis — دقة التنبوء + ML + تنبوء-2",
+      "topics": [
+        "meta-labeling",
+        "orderbook",
+        "walk-forward",
+        "abstention",
+        "calibration"
+      ],
+      "minDirectionalHitTarget": 0.62,
+      "weightAdjustments": {
+        "order_imbalance": 1.12,
+        "premium_momentum": 1.1,
+        "open_interest": 1.08,
+        "tick_momentum": 1.1,
+        "volume_breakout": 1.08,
+        "vwap_proxy": 1.06,
+        "atr_breakout": 1.07,
+        "volatility_regime": 1.1,
+        "macd": 1.08,
+        "session_bias": 1.05,
+        "long_short_extreme": 1.06,
+        "bollinger": 0.92,
+        "mean_reversion": 0.88,
+        "funding_fade": 0.9,
+        "rsi": 0.93
+      },
+      "notes": "من التقارير: orderbook+vol أهم؛ mean_reversion ضعيف في ترند؛ ensemble يشبه ml+mlp+gbm في الوكيل."
+    },
+    {
+      "source": "manual",
+      "importedAt": "2026-06-06",
+      "query": "ايه.md + قيود — thresholds من التقارير",
+      "minDirectionalHitTarget": 0.6,
+      "notes": "عتبات مقترحة: prob_main>=0.58, meta>=0.55, spread abstain>5bp — مدمجة جزئياً في max-accuracy + expert-consensus. هياكل Python في التقارير = مرجع تطوير v0.5+ وليست استيراد أوزان."
+    }
+  ]
+}

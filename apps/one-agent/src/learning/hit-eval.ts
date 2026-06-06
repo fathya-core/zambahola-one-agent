@@ -1,6 +1,7 @@
 import type { PredictionDirection } from "../types.js";
 
-export const RANGE_BAND_PCT = 0.0008;
+/** Default ~8bp; reports suggest 2–3bp flat zone — override via ZAMBAHOLA_LABEL_BP=2.5 */
+export const RANGE_BAND_PCT = Number(process.env.ZAMBAHOLA_LABEL_BP ?? 8) / 10_000;
 
 /** Volatility-adaptive band for batch training (optional via env) */
 export function computeHitBand(price: number, volatility?: number): number {
