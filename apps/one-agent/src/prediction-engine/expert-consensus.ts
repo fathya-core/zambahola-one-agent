@@ -21,6 +21,14 @@ export interface ExpertConsensusResult {
   reason: string;
 }
 
+function minSTierVotes(agreement: number): number {
+  const base = Number(process.env.ZAMBAHOLA_EXPERT_MIN_S_VOTES ?? 2);
+  if (process.env.ZAMBAHOLA_EXPERT_RELAX === "1" && agreement >= 0.55) {
+    return Math.min(base, 1);
+  }
+  return base;
+}
+
 export function applyExpertConsensus(
   direction: PredictionDirection,
   confidence: number,
@@ -61,11 +69,11 @@ export function applyExpertConsensus(
       c = 0.48;
       blocked = true;
       reason = "expert_block_counter_mean_rev_in_trend";
-    } else if (direction !== "range" && sVotes < 2) {
+    } else if (direction !== "range" && sVotes < minSTierVotes(agreement)) {
       d = "range";
       c = 0.5;
       blocked = true;
-      reason = "expert_need_2_S_tier_votes";
+      reason = "expert_need_S_tier_votes";
     }
   }
 

@@ -66,6 +66,10 @@ async function refresh() {
       $("confidence").textContent =
         "confidence " + (prediction.confidence * 100).toFixed(1) + "%";
       $("horizon").textContent = "horizon " + prediction.horizonSec + "s";
+      const why = prediction.meta?.gateReason || prediction.meta?.expertReason;
+      if (why) {
+        $("decision-reason").textContent = why;
+      }
     }
 
     if (metrics.lastDecision) {
