@@ -140,6 +140,9 @@ export interface AgentMetrics {
   directionalRollingHitRate?: number;
   peakHitRate?: number;
   stabilizeMode?: boolean;
+  paperTradeCount?: number;
+  closedTradeCount?: number;
+  learnTradeMode?: boolean;
   updatedAt: number;
 }
 

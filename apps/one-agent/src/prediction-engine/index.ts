@@ -26,6 +26,7 @@ import { getMetaLabeler } from "../learning/meta-label.js";
 import { getMetaPnlModel } from "../learning/meta-pnl.js";
 import { applyMicrostructureGates } from "./microstructure-gates.js";
 import { explainGateReasonAr } from "../learning/analyst-ar.js";
+import { inferLeanFromVotes, isLearnTradeMode } from "./learn-trade.js";
 
 const DEFAULT_HORIZON_SEC = 30;
 const MAX_PRICES = 400;
@@ -209,7 +210,8 @@ export class PredictionEngine {
       if (
         this.metaLabeler &&
         direction !== "range" &&
-        process.env.ZAMBAHOLA_META_LABEL !== "0"
+        process.env.ZAMBAHOLA_META_LABEL !== "0" &&
+        !isLearnTradeMode()
       ) {
         metaLabelProb = this.metaLabeler.score(
           features,
@@ -232,7 +234,8 @@ export class PredictionEngine {
       if (
         this.metaPnl &&
         direction !== "range" &&
-        process.env.ZAMBAHOLA_META_PNL !== "0"
+        process.env.ZAMBAHOLA_META_PNL !== "0" &&
+        !isLearnTradeMode()
       ) {
         metaPnlProb = this.metaPnl.score(
           features,
@@ -251,6 +254,16 @@ export class PredictionEngine {
           confidence = 0.46;
           qualityTier = "abstain";
           gateReason = `${gateReason} | meta_pnl_abstain_${metaPnlProb}`;
+        }
+      }
+
+      if (isLearnTradeMode() && direction === "range") {
+        const lean = inferLeanFromVotes(ensemble.votes);
+        if (lean) {
+          direction = lean.direction;
+          confidence = lean.confidence;
+          qualityTier = "medium";
+          gateReason = `${gateReason} | learn_trade_lean`;
         }
       }
 

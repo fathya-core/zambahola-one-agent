@@ -75,6 +75,21 @@ export class PaperBroker {
     this.peakEquity = Math.max(this.peakEquity, total);
   }
 
+  /** Rotate open paper positions so meta-PnL / strategy weights learn faster */
+  forceCloseIfStale(tick: MarketTick, maxHoldSec: number): PaperTrade | null {
+    if (!this.openTrade || maxHoldSec <= 0) return null;
+    if (tick.timestamp - this.openTrade.entryTime < maxHoldSec * 1000) return null;
+    const decision = {
+      decisionId: `dec-learn-rotate-${this.openTrade.tradeId.slice(0, 8)}`,
+      tickId: tick.tickId,
+      predictionId: "learn-rotate",
+      action: "paper_close" as const,
+      reason: `Learn rotate after ${maxHoldSec}s`,
+      timestamp: tick.timestamp,
+    };
+    return this.close(tick, decision);
+  }
+
   private open(
     side: "long" | "short",
     tick: MarketTick,

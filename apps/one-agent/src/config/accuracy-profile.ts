@@ -69,6 +69,9 @@ export function getAccuracyTuning(): AccuracyTuning {
   const counterTrendAgreement = Number(
     process.env.ZAMBAHOLA_COUNTER_TREND_AGREEMENT ?? base.counterTrendAgreement,
   );
+  const ensembleNorm = Number(
+    process.env.ZAMBAHOLA_ENSEMBLE_NORM ?? base.ensembleNorm,
+  );
   return {
     ...base,
     horizonSec: horizon,
@@ -77,6 +80,7 @@ export function getAccuracyTuning(): AccuracyTuning {
     blendCombined,
     rangeAgreementBlock,
     counterTrendAgreement,
+    ensembleNorm,
   };
 }
 

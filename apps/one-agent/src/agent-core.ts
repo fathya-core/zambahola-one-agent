@@ -24,6 +24,7 @@ import type { TradeBroker } from "./broker/types.js";
 import { createBroker } from "./broker/factory.js";
 import { Evaluator } from "./evaluator/index.js";
 import { timeSnapshot } from "./lib/time-display.js";
+import { isLearnTradeMode } from "./prediction-engine/learn-trade.js";
 import {
   appendRun,
   appendTradeLedger,
@@ -208,7 +209,14 @@ export class AgentCore {
       timestamp: decision.timestamp,
     });
 
-    const trade = this.broker.execute(decision, tick);
+    let trade = this.broker.execute(decision, tick);
+    if (isLearnTradeMode() && !trade) {
+      const maxHold = Number(
+        process.env.ZAMBAHOLA_TRADE_MAX_HOLD_SEC ??
+          Math.round(this.predictionEngine.horizonSec * 1.2),
+      );
+      trade = this.broker.forceCloseIfStale(tick, maxHold);
+    }
     if (trade) {
       await appendTradeLedger({ event: "trade", trade, decision });
       await appendRun({ type: "trade", payload: trade, timestamp: Date.now() });
@@ -376,6 +384,9 @@ export class AgentCore {
       directionalRollingHitRate: getGuardStatus().directionalRollingHitRate,
       peakHitRate: getGuardStatus().sessionPeak,
       stabilizeMode: getGuardStatus().stabilizeMode,
+      paperTradeCount: this.broker.getAllTrades().length,
+      closedTradeCount: this.broker.getClosedTrades().length,
+      learnTradeMode: isLearnTradeMode(),
       updatedAt: Date.now(),
     };
   }
