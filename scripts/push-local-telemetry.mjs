@@ -1,18 +1,21 @@
 #!/usr/bin/env node
+/**
+ * Push LOCAL-TELEMETRY.json to GitHub.
+ * Windows-safe: no path stash, uses --autostash on pull.
+ */
 import { existsSync, copyFileSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tmpdir } from "node:os";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const telemetry = join(root, "apps/one-agent/data/bridge/LOCAL-TELEMETRY.json");
 const bridgeUrl = process.env.ZAMBAHOLA_BRIDGE_URL ?? "http://127.0.0.1:8790";
-const bridgeFiles = new Set([
+const bridgeFiles = [
   "apps/one-agent/data/bridge/LOCAL-TELEMETRY.json",
   "apps/one-agent/data/bridge/REMOTE-COMMANDS.json",
   "apps/one-agent/data/bridge/REMOTE-COMMANDS-DONE.json",
-]);
+];
 
 function git(args, opts = {}) {
   return spawnSync("git", args, {
@@ -20,7 +23,6 @@ function git(args, opts = {}) {
     encoding: "utf8",
     stdio: opts.inherit ? "inherit" : "pipe",
     shell: false,
-    ...opts,
   });
 }
 
@@ -28,80 +30,24 @@ async function refreshFromBridge() {
   try {
     const res = await fetch(`${bridgeUrl}/telemetry`, { signal: AbortSignal.timeout(12000) });
     if (!res.ok) {
-      console.warn(`[push-telemetry] bridge refresh HTTP ${res.status} — using file on disk`);
+      console.warn(`[push-telemetry] bridge refresh HTTP ${res.status} — is local-bridge running?`);
       return false;
     }
     console.log("[push-telemetry] refreshed from bridge");
     return true;
   } catch (e) {
-    console.warn(`[push-telemetry] bridge unreachable (${e.message}) — using file on disk`);
+    console.warn(`[push-telemetry] bridge offline — run: npm run agent:local-bridge`);
     return false;
   }
 }
 
-function abortStuckGit() {
+function abortStuckRebase() {
   const reb = git(["rev-parse", "--git-path", "rebase-merge"]).stdout?.trim();
   const reb2 = git(["rev-parse", "--git-path", "rebase-apply"]).stdout?.trim();
   if ((reb && existsSync(join(root, reb))) || (reb2 && existsSync(join(root, reb2)))) {
     console.log("[push-telemetry] aborting stuck rebase...");
     git(["rebase", "--abort"], { inherit: true });
   }
-  if (existsSync(join(root, ".git", "MERGE_HEAD"))) {
-    git(["merge", "--abort"], { inherit: true });
-  }
-}
-
-function normalizePath(p) {
-  return p.replace(/\\/g, "/").trim();
-}
-
-function dirtyFiles() {
-  return (git(["status", "--porcelain", "-u"]).stdout ?? "")
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((l) => {
-      if (l.startsWith("?? ")) return normalizePath(l.slice(3));
-      const m = l.match(/^.. (.+)$/);
-      return m ? normalizePath(m[1]) : normalizePath(l);
-    })
-    .filter(Boolean);
-}
-
-function syncWithRemote(telemetryBackup) {
-  abortStuckGit();
-  console.log("[push-telemetry] syncing with origin/main...");
-  git(["fetch", "origin", "main"], { inherit: true });
-
-  const dirty = dirtyFiles();
-  const nonBridge = dirty.filter((f) => !bridgeFiles.has(f));
-
-  if (nonBridge.length) {
-    console.log("[push-telemetry] stashing non-bridge changes...");
-    const stash = git(
-      ["stash", "push", "-m", "push-telemetry-auto", "--", ...nonBridge],
-      { inherit: true },
-    );
-    if (stash.status !== 0) {
-      console.warn("[push-telemetry] stash skipped — continuing pull");
-    }
-  }
-
-  const pull = git(["pull", "--rebase", "origin", "main"], { inherit: true });
-  if (pull.status !== 0) {
-    git(["rebase", "--abort"], { inherit: true });
-    console.error("[push-telemetry] pull failed — run: npm run agent:fix-git-push");
-    return false;
-  }
-
-  if (nonBridge.length) {
-    git(["stash", "pop"], { inherit: true });
-  }
-
-  if (existsSync(telemetryBackup)) {
-    copyFileSync(telemetryBackup, telemetry);
-  }
-  return true;
 }
 
 function telemetryChanged() {
@@ -109,53 +55,54 @@ function telemetryChanged() {
   const head = git(["show", "HEAD:apps/one-agent/data/bridge/LOCAL-TELEMETRY.json"]);
   if (head.status !== 0) return true;
   try {
-    const a = JSON.parse(head.stdout);
-    const b = JSON.parse(readFileSync(telemetry, "utf8"));
-    return JSON.stringify(a) !== JSON.stringify(b);
+    return JSON.stringify(JSON.parse(head.stdout)) !== JSON.stringify(JSON.parse(readFileSync(telemetry, "utf8")));
   } catch {
     return true;
   }
 }
 
+abortStuckRebase();
+
 if (!existsSync(telemetry)) {
-  const refreshed = await refreshFromBridge();
-  if (!refreshed && !existsSync(telemetry)) {
-    console.error("[push-telemetry] missing — run: npm run agent:local-bridge");
+  await refreshFromBridge();
+  if (!existsSync(telemetry)) {
+    console.error("[push-telemetry] missing — start: npm run agent:local-bridge");
     process.exit(1);
   }
 } else {
   await refreshFromBridge();
 }
 
-const backup = join(tmpdir(), `zambahola-telemetry-${Date.now()}.json`);
-if (existsSync(telemetry)) copyFileSync(telemetry, backup);
-
-if (!syncWithRemote(backup)) process.exit(1);
-
-if (existsSync(backup)) copyFileSync(backup, telemetry);
+if (!existsSync(telemetry)) {
+  console.error("[push-telemetry] no telemetry file — bridge must be running on :8790");
+  process.exit(1);
+}
 
 const ts = new Date().toISOString().slice(0, 16).replace("T", " ");
-const files = [...bridgeFiles].filter((f) => existsSync(join(root, f)));
-
-git(["add", "-f", ...files], { inherit: true });
+const files = bridgeFiles.filter((f) => existsSync(join(root, f)));
 
 if (!telemetryChanged()) {
   const snap = JSON.parse(readFileSync(telemetry, "utf8"));
   console.log(
-    `[push-telemetry] nothing new — same snapshot (hostname=${snap.hostname ?? "?"}, ticks=${snap.status?.tickCount ?? "?"})`,
+    `[push-telemetry] nothing new (hostname=${snap.hostname ?? "?"}, ticks=${snap.status?.tickCount ?? "?"})`,
   );
   process.exit(0);
 }
 
-const commit = git(["commit", "-m", `telemetry: ${ts}`]);
+console.log("[push-telemetry] syncing with origin/main...");
+git(["fetch", "origin", "main"], { inherit: true });
 
+const pull = git(["pull", "--rebase", "--autostash", "origin", "main"], { inherit: true });
+if (pull.status !== 0) {
+  console.error("[push-telemetry] pull failed — run: npm run agent:fix-git-push");
+  process.exit(1);
+}
+
+git(["add", "-f", ...files], { inherit: true });
+
+const commit = git(["commit", "-m", `telemetry: ${ts}`], { inherit: true });
 if (commit.status !== 0) {
-  const out = `${commit.stdout ?? ""}${commit.stderr ?? ""}`;
-  console.error("[push-telemetry] commit failed:", out.trim() || "unknown");
-  console.error("[push-telemetry] manual fix:");
-  console.error("  git add -f apps/one-agent/data/bridge/LOCAL-TELEMETRY.json");
-  console.error(`  git commit -m "telemetry: ${ts}"`);
-  console.error("  git push origin main");
+  console.error("[push-telemetry] commit failed");
   process.exit(1);
 }
 
