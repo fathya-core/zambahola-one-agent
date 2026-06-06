@@ -19,6 +19,8 @@ const ACTION_MAP = {
   "phase2-live": ["run", "agent:phase2-live"],
   patterns: ["run", "agent:patterns"],
   experiments: ["run", "agent:experiments:quick"],
+  "push-telemetry": ["run", "agent:push-telemetry"],
+  "health-check": ["run", "agent:health-check"],
 };
 
 function runNpm(args) {
