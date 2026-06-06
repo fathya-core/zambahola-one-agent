@@ -10,7 +10,9 @@ export function detectRegime(f: FeatureVector): MarketRegime {
     if (f.momentumNorm < -0.25) return "trend_down";
     return "high_vol";
   }
-  if (Math.abs(f.momentumNorm) < 0.12 && Math.abs(f.zScore) < 0.5) return "range";
+  const rangeMom = Number(process.env.ZAMBAHOLA_RANGE_MOMENTUM_MAX ?? 0.12);
+  const rangeZ = Number(process.env.ZAMBAHOLA_RANGE_ZSCORE_MAX ?? 0.5);
+  if (Math.abs(f.momentumNorm) < rangeMom && Math.abs(f.zScore) < rangeZ) return "range";
   if (f.momentumNorm > 0.2) return "trend_up";
   if (f.momentumNorm < -0.2) return "trend_down";
   return "range";

@@ -63,12 +63,20 @@ export function getAccuracyTuning(): AccuracyTuning {
   const blendCombined = Number(
     process.env.ZAMBAHOLA_BLEND_COMBINED ?? base.blendCombined,
   );
+  const rangeAgreementBlock = Number(
+    process.env.ZAMBAHOLA_RANGE_AGREEMENT_BLOCK ?? base.rangeAgreementBlock,
+  );
+  const counterTrendAgreement = Number(
+    process.env.ZAMBAHOLA_COUNTER_TREND_AGREEMENT ?? base.counterTrendAgreement,
+  );
   return {
     ...base,
     horizonSec: horizon,
     minAgreement,
     minModelVoters,
     blendCombined,
+    rangeAgreementBlock,
+    counterTrendAgreement,
   };
 }
 

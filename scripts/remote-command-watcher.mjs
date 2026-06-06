@@ -17,6 +17,7 @@ const ACTION_MAP = {
   "research-import": ["run", "agent:research-import", "--", "apps/one-agent/knowledge/user-reports/AGENT-IMPORT-FINAL.json"],
   stop: ["run", "agent:stop"],
   "phase2-live": ["run", "agent:phase2-live"],
+  "phase2-signals": ["run", "agent:phase2-signals"],
   patterns: ["run", "agent:patterns"],
   experiments: ["run", "agent:experiments:quick"],
   "push-telemetry": ["run", "agent:push-telemetry"],
