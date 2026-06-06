@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
+import { existsSync, copyFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const telemetry = join(root, "apps/one-agent/data/bridge/LOCAL-TELEMETRY.json");
@@ -18,6 +19,7 @@ function git(args, opts = {}) {
     cwd: root,
     encoding: "utf8",
     stdio: opts.inherit ? "inherit" : "pipe",
+    shell: process.platform === "win32",
     ...opts,
   });
 }
@@ -37,36 +39,38 @@ async function refreshFromBridge() {
   }
 }
 
-function syncWithRemote() {
+function syncWithRemote(telemetryBackup) {
   console.log("[push-telemetry] syncing with origin/main...");
   git(["fetch", "origin", "main"], { inherit: true });
 
-  const pull = git(["pull", "--rebase", "origin", "main"], { inherit: true });
-  if (pull.status === 0) return true;
+  const dirty = (git(["status", "--porcelain"]).stdout ?? "").trim();
+  if (dirty) {
+    console.log("[push-telemetry] stashing local changes before pull...");
+    git(["stash", "push", "-u", "-m", "push-telemetry-auto"], { inherit: true });
+  }
 
-  const status = git(["status", "--porcelain"]).stdout ?? "";
-  const conflicted = bridgeFiles.some((f) => status.includes(f));
-  if (!conflicted) {
-    console.error("[push-telemetry] git pull failed — run: git pull --rebase origin main");
+  const pull = git(["pull", "--rebase", "origin", "main"], { inherit: true });
+  if (pull.status !== 0) {
+    git(["rebase", "--abort"], { inherit: true });
+    console.error("[push-telemetry] pull failed. Run manually:");
+    console.error("  git stash push -u -m wip");
+    console.error("  git pull origin main --rebase");
+    console.error("  git stash pop");
+    console.error("  npm run agent:push-telemetry");
     return false;
   }
 
-  console.log("[push-telemetry] resolving bridge file conflicts (keeping your local telemetry)...");
-  for (const f of bridgeFiles) {
-    if (existsSync(join(root, f))) {
-      git(["checkout", "--ours", f]);
-      git(["add", f]);
+  if (dirty) {
+    const pop = git(["stash", "pop"], { inherit: true });
+    if (pop.status !== 0) {
+      console.log("[push-telemetry] stash pop conflict — using telemetry backup");
+      git(["reset", "--hard", "HEAD"], { inherit: true });
+      git(["clean", "-fd", "apps/one-agent/data/bridge/"], { inherit: true });
     }
   }
-  const cont = git(["rebase", "--continue"], { inherit: true });
-  if (cont.status !== 0) {
-    git(["rebase", "--abort"], { inherit: true });
-    console.error("[push-telemetry] rebase failed — run manually:");
-    console.error("  git pull --rebase origin main");
-    console.error("  git checkout --ours apps/one-agent/data/bridge/LOCAL-TELEMETRY.json");
-    console.error("  git add apps/one-agent/data/bridge/LOCAL-TELEMETRY.json");
-    console.error("  git rebase --continue");
-    return false;
+
+  if (existsSync(telemetryBackup)) {
+    copyFileSync(telemetryBackup, telemetry);
   }
   return true;
 }
@@ -81,7 +85,10 @@ if (!existsSync(telemetry)) {
   await refreshFromBridge();
 }
 
-if (!syncWithRemote()) process.exit(1);
+const backup = join(tmpdir(), `zambahola-telemetry-${Date.now()}.json`);
+if (existsSync(telemetry)) copyFileSync(telemetry, backup);
+
+if (!syncWithRemote(backup)) process.exit(1);
 
 const ts = new Date().toISOString().slice(0, 16).replace("T", " ");
 const files = bridgeFiles.filter((f) => existsSync(join(root, f)));
@@ -91,7 +98,12 @@ git(["add", ...files], { inherit: true });
 const commit = git(["commit", "-m", `telemetry: ${ts}`]);
 
 if (commit.status !== 0) {
-  console.log("[push-telemetry] nothing new (file unchanged since last commit)");
+  const out = (commit.stdout ?? "") + (commit.stderr ?? "");
+  if (out.includes("nothing to commit")) {
+    console.log("[push-telemetry] nothing new (file unchanged since last commit)");
+  } else {
+    console.log("[push-telemetry] nothing new — telemetry unchanged");
+  }
   console.log("[push-telemetry] tip: ensure agent:local-bridge is running, then retry");
   process.exit(0);
 }
