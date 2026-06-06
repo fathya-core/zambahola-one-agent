@@ -85,10 +85,16 @@ async function refresh() {
     );
 
     const learn = await fetchJson("/api/learning");
-    $("learning").textContent = JSON.stringify(
+    const insights = learn.patternInsightsAr ?? [];
+    $("learning").textContent =
+      (insights.length
+        ? "تحليل الأنماط:\n" + insights.map((l) => "• " + l).join("\n") + "\n\n"
+        : "") +
+      JSON.stringify(
       {
         understandingScore: learn.understandingScore,
         hitRateEma: learn.hitRateEma,
+        metaLabel: learn.metaLabel,
         totalEvaluations: learn.totalEvaluations,
         totalLearningUpdates: learn.totalLearningUpdates,
         orchestratorBoosts: learn.orchestratorBoosts,

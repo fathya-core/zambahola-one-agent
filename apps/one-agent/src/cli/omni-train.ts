@@ -8,9 +8,9 @@ import { fileURLToPath } from "node:url";
 import { applyResearchImportsToDisk } from "../knowledge/research-import-loader.js";
 import { applyExpertPresetToDisk } from "../knowledge/expert-loader.js";
 import { runWalkForwardTrain } from "../learning/walk-forward-trainer.js";
-import { runMegaBacktest } from "../backtest/mega-runner.js";
 import { exportModelBundle } from "../learning/model-export.js";
 import { appendResearchLog } from "../learning/adaptive-weights.js";
+import { readMetrics } from "../storage/index.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const root = join(pkgRoot, "../..");
@@ -74,9 +74,18 @@ async function main(): Promise<void> {
     });
   }
 
-  const final = await runMegaBacktest(Math.min(1500, wfBars));
-  console.log("\n[omni] final backtest:", JSON.stringify(final, null, 2));
-  await appendResearchLog({ event: "omni_complete", final });
+  const metrics = await readMetrics();
+  await appendResearchLog({
+    event: "omni_complete",
+    walkForward: wf,
+    directionalHitRate: metrics?.directionalHitRate,
+    hitRate: metrics?.hitRate,
+  });
+  console.log(
+    "\n[omni] live metrics:",
+    `hit=${metrics?.hitRate ?? "—"}`,
+    `dir=${metrics?.directionalHitRate ?? "—"}`,
+  );
 
   const exported = await exportModelBundle("hybrid_v7_omni");
   console.log("\n[omni] export:", exported.path);

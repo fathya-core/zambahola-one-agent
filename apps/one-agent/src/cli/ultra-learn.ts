@@ -1,7 +1,6 @@
 import { AgentCore } from "../agent-core.js";
 import { runMegaTrain } from "../learning/batch-trainer.js";
-import { runMegaBacktest } from "../backtest/mega-runner.js";
-import { ensureDataDirs, readMetrics } from "../storage/index.js";
+import { ensureDataDirs } from "../storage/index.js";
 import { appendResearchLog } from "../learning/adaptive-weights.js";
 import { boostTopStrategies } from "../learning/strategy-orchestrator.js";
 import { CYCLES } from "../learning/cycle-config.js";
@@ -16,15 +15,6 @@ async function main(): Promise<void> {
 
   console.log(
     `[zambahola] ULTRA LEARN — ${bars} bars + ${liveCycles} live cycles\n`,
-  );
-
-  const pre = await runMegaBacktest(Math.min(bars, 1200));
-  console.log(
-    "Pre backtest:",
-    pre.hitRate,
-    "dir=",
-    pre.directionalHitRate,
-    pre.predictions,
   );
 
   const train = await runMegaTrain(bars);
@@ -52,12 +42,9 @@ async function main(): Promise<void> {
     );
   }
 
-  const post = await runMegaBacktest(Math.min(bars, 1200));
-  console.log("\nPost backtest:", JSON.stringify(post, null, 2));
-  await appendResearchLog({ event: "ultra_complete", pre, train, post });
-
   const exported = await exportModelBundle("hybrid_v7");
   console.log("\nModel export:", exported.path, exported.files);
+  console.log("\n[zambahola] Ultra done — راقب directional hit على اللوحة الحية.\n");
 }
 
 main().catch((e) => {

@@ -43,9 +43,6 @@ run("setup", ["run", "setup"]);
 }
 
 run("test_run", ["run", "agent:test-run"], { ZAMBAHOLA_FEED: "mock" });
-run("mega_backtest", ["run", "agent:mega-backtest"], {
-  ZAMBAHOLA_KLINES: "400",
-});
 run("mega_train", ["run", "agent:mega-train"], {
   ZAMBAHOLA_KLINES: "300",
 });

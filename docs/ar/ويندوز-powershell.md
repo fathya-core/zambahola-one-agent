@@ -44,7 +44,6 @@ npm run agent:learn
 ```powershell
 npm run agent:deep-learn
 npm run agent:mega-train
-npm run agent:mega-backtest
 npm run agent:ultra-learn
 npm run agent:export-models
 ```

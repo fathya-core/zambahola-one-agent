@@ -52,11 +52,11 @@ Other commands:
 | `npm run agent:learn` | **25** learning cycles (65s each) |
 | `npm run agent:turbo-learn` | Fast learn on mock feed |
 | `npm run agent:power-learn` | **20**-cycle intensive training |
-| `npm run agent:backtest` | Backtest on 120×1m candles |
-| `npm run agent:deep-learn` | **25** cycles + deep backtest |
+| `npm run agent:deep-learn` | **25** live learning cycles |
 | `npm run agent:mega-train` | Batch train on **3000** bars |
-| `npm run agent:mega-backtest` | Backtest **1200** bars |
 | `npm run agent:ultra-learn` | **30** cycles + **5000**-bar train (full pipeline) |
+| `npm run agent:patterns` | Arabic pattern journal (Phase 1) |
+| `npm run agent:directional-live` | Live profile tuned for directional hit |
 | `npm run agent:max-accuracy` | **Max hit-rate** train profile (see `config/max-accuracy.env`) |
 | `npm run agent:max-accuracy:start` | Live agent with max-accuracy env |
 

@@ -9,6 +9,9 @@ import {
   appendResearchLog,
 } from "./learning/adaptive-weights.js";
 import { onLiveEvaluation } from "./learning/live-learning.js";
+import { getMetaLabeler } from "./learning/meta-label.js";
+import { recordPatternEvaluation } from "./learning/pattern-journal.js";
+import type { FeatureVector } from "./features/index.js";
 import {
   gentleWeightMultipliers,
   shouldPauseMlTrain,
@@ -246,6 +249,27 @@ export class AgentCore {
             evaluatedPred.confidence,
           );
         }
+
+        const fv = evaluatedPred.meta?.features as FeatureVector | undefined;
+        if (fv && evaluatedPred.meta?.agreement != null) {
+          const meta = await getMetaLabeler();
+          await meta.train(
+            fv,
+            evaluatedPred.confidence,
+            evaluatedPred.meta.agreement,
+            evaluation.direction,
+            evaluation.predictionHit,
+          );
+        }
+
+        await recordPatternEvaluation({
+          regime: evaluatedPred.meta?.regime ?? "range",
+          direction: evaluation.direction,
+          ensembleHit: evaluation.predictionHit,
+          strategyHits: hits,
+          expertReason: evaluatedPred.meta?.expertReason,
+          gateReason: evaluatedPred.meta?.gateReason,
+        });
 
         this.learningState = await onLiveEvaluation({
           ensembleHit: evaluation.predictionHit,

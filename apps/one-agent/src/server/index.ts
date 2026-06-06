@@ -108,25 +108,39 @@ async function route(
     const state = await getLiveLearningState();
     const guard = getGuardStatus();
     const best = await loadBestWeights();
+    const { getPatternJournal } = await import("../learning/pattern-journal.js");
+    const { getMetaLabeler } = await import("../learning/meta-label.js");
+    const patterns = await getPatternJournal();
+    const meta = await getMetaLabeler();
     return sendJson(res, 200, {
       ...state,
       guard,
       bestSnapshot: best?.meta ?? null,
+      patternInsightsAr: patterns.recentInsightsAr,
+      patternJournal: patterns,
+      metaLabel: meta.getState(),
       persistsToDisk: true,
       files: {
         strategyWeights: WEIGHTS_FILE,
         learningState: "data/learning/learning-state.json",
         researchLog: "knowledge/research-log.jsonl",
+        patternJournal: "data/learning/pattern-journal.md",
+        metaLabel: "data/learning/meta-label-weights.json",
         modelBundle: "data/learning/export/",
       },
       hasSavedWeights: learningFilesExist(),
       howItWorks: [
-        "Each evaluated prediction trains ML/MLP/GBM online",
+        "Each evaluated prediction trains ML/MLP/GBM + meta-label online",
+        "Pattern journal: regime × strategy hit/miss (Arabic insights)",
         "Strategy weights adjust on every hit/miss",
         `Every ${process.env.ZAMBAHOLA_LIVE_ORCH_EVERY ?? 12} evals: orchestrator boosts top strategies`,
         `Every ${process.env.ZAMBAHOLA_LIVE_EXPORT_EVERY ?? 40} evals: model bundle export`,
       ],
     });
+  }
+  if (path === "/api/patterns") {
+    const { getPatternJournal } = await import("../learning/pattern-journal.js");
+    return sendJson(res, 200, await getPatternJournal());
   }
   if (path === "/api/strategies") {
     const idx = (await loadKnowledgeIndex()) as { strategies: unknown[] };

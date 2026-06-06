@@ -46,6 +46,8 @@ export interface PredictionMeta {
   expertMode?: boolean;
   accuracyMode?: string;
   qualityTier?: string;
+  metaLabelProb?: number;
+  metaTrust?: boolean;
 }
 
 export interface Prediction {

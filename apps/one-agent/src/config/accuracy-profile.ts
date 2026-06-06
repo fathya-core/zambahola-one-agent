@@ -10,7 +10,7 @@ export function isMaxAccuracy(): boolean {
   return getAccuracyMode() === "max";
 }
 
-/** Strict abstain filter — live agent only by default (off during train/backtest) */
+/** Strict abstain filter — live agent only by default (off during train) */
 export function isAccuracyFilterActive(): boolean {
   if (!isMaxAccuracy()) return false;
   if (process.env.ZAMBAHOLA_ACCURACY_FILTER === "off") return false;

@@ -27,7 +27,6 @@ const phases = [
   ["learn", ["run", "agent:learn"]],
   ["deep_learn", ["run", "agent:deep-learn"]],
   ["mega_train", ["run", "agent:mega-train"]],
-  ["mega_backtest", ["run", "agent:mega-backtest"]],
   ["ultra_learn", ["run", "agent:ultra-learn"]],
   ["export_models", ["run", "agent:export-models"]],
   ["verify", ["run", "verify"]],

@@ -41,7 +41,7 @@ Binance/Bybit REST may return **restricted location**. Use:
 
 - `ZAMBAHOLA_FEED=coingecko` for live BTC price (no keys)
 - `ZAMBAHOLA_FEED=mock` for headless CI
-- Train/backtest still work via `synthetic_fallback` / Bybit when allowed
+- Train pipelines work via `synthetic_fallback` / Bybit when allowed (no backtest CLI)
 
 Default `universal` is best on home networks without geo-block.
 
@@ -51,7 +51,7 @@ Default `universal` is best on home networks without geo-block.
 npm run verify
 ```
 
-Writes `docs/VERIFICATION_REPORT.json` (setup, 17 strategies, test-run, mega-backtest, mega-train, required files).
+Writes `docs/VERIFICATION_REPORT.json` (setup, 17 strategies, test-run, mega-train, required files).
 
 ### Start / stop
 

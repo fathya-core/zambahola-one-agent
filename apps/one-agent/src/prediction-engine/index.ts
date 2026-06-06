@@ -22,6 +22,7 @@ import {
   applyExpertPresetToDisk,
   loadExpertCurriculum,
 } from "../knowledge/expert-loader.js";
+import { getMetaLabeler } from "../learning/meta-label.js";
 
 const DEFAULT_HORIZON_SEC = 30;
 const MAX_PRICES = 400;
@@ -42,6 +43,7 @@ export class PredictionEngine {
   private weights: StrategyWeights = {};
   private expertTiers: StrategyTiers = {};
   private ready = false;
+  private metaLabeler: Awaited<ReturnType<typeof getMetaLabeler>> | null = null;
 
   constructor(options: PredictionEngineOptions = {}) {
     this.horizonSec =
@@ -63,6 +65,7 @@ export class PredictionEngine {
     await this.mlp.load();
     await this.gbm.load();
     await this.calibrator.load();
+    this.metaLabeler = await getMetaLabeler();
     this.ready = true;
   }
 
@@ -115,6 +118,8 @@ export class PredictionEngine {
     let expertReason = "n/a";
     let tierSVotes = 0;
     let qualityTier: "high" | "medium" | "abstain" = "medium";
+    let metaLabelProb = 0.5;
+    let metaTrust = true;
 
     if (features) {
       regime = detectRegime(features);
@@ -184,6 +189,29 @@ export class PredictionEngine {
       confidence = filtered.confidence;
       qualityTier = filtered.qualityTier;
       gateReason = `${gateReason} | ${filtered.filterReason}`;
+
+      if (
+        this.metaLabeler &&
+        direction !== "range" &&
+        process.env.ZAMBAHOLA_META_LABEL !== "0"
+      ) {
+        metaLabelProb = this.metaLabeler.score(
+          features,
+          confidence,
+          ensemble.agreement,
+        );
+        metaTrust = this.metaLabeler.shouldTrust(
+          features,
+          confidence,
+          ensemble.agreement,
+        );
+        if (!metaTrust) {
+          direction = "range";
+          confidence = 0.47;
+          qualityTier = "abstain";
+          gateReason = `${gateReason} | meta_label_abstain_${metaLabelProb}`;
+        }
+      }
     }
 
     return {
@@ -222,6 +250,8 @@ export class PredictionEngine {
         sentiment: sentiment.score,
         sentimentLabel: sentiment.label,
         features: features ? { ...features } : undefined,
+        metaLabelProb,
+        metaTrust,
       },
     };
   }

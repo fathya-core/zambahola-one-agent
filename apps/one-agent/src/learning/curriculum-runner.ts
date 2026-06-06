@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 import { loadExpertCurriculum } from "../knowledge/expert-loader.js";
 import { applyExpertPresetToDisk } from "../knowledge/expert-loader.js";
 import { runMegaTrain } from "./batch-trainer.js";
-import { runMegaBacktest } from "../backtest/mega-runner.js";
 import { writeJsonAtomic } from "../storage/json-io.js";
 import { exportModelBundle } from "./model-export.js";
+import { readMetrics } from "../storage/index.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const PROGRESS = join(pkgRoot, "data", "learning", "curriculum-progress.json");
@@ -39,7 +39,7 @@ export interface CurriculumPhaseResult {
   nameAr: string;
   trainBars: number;
   trainSource: string;
-  backtestHitRate: number;
+  liveHitRate: number;
   directionalHitRate: number;
   minRequired: number;
   passed: boolean;
@@ -68,23 +68,25 @@ export async function runCurriculum(): Promise<{
     const train = await runMegaTrain(phase.trainBars);
     console.log("[curriculum] train:", train.source, train.trainSteps);
 
-    const bt = await runMegaBacktest(Math.min(phase.trainBars, 1500));
-    const minDir =
-      (phase as { minDirectionalHitRate?: number }).minDirectionalHitRate ??
-      phase.minHitRate;
-    const passed = bt.directionalHitRate >= minDir;
-
     if (phase.liveCycles > 0) {
       runLearnCycles(phase.liveCycles, phase.id);
     }
+
+    const metrics = await readMetrics();
+    const hitRate = metrics?.hitRate ?? 0;
+    const directionalHitRate = metrics?.directionalHitRate ?? 0;
+    const minDir =
+      (phase as { minDirectionalHitRate?: number }).minDirectionalHitRate ??
+      phase.minHitRate;
+    const passed = directionalHitRate >= minDir;
 
     const row: CurriculumPhaseResult = {
       id: phase.id,
       nameAr: phase.nameAr,
       trainBars: phase.trainBars,
       trainSource: train.source,
-      backtestHitRate: bt.hitRate,
-      directionalHitRate: bt.directionalHitRate,
+      liveHitRate: hitRate,
+      directionalHitRate,
       minRequired: minDir,
       passed,
       liveCycles: phase.liveCycles,
@@ -99,7 +101,7 @@ export async function runCurriculum(): Promise<{
     });
 
     console.log(
-      `[curriculum] ${phase.id} hit=${bt.hitRate} dir=${bt.directionalHitRate} ${passed ? "PASS" : "RETRY next"}`,
+      `[curriculum] ${phase.id} live hit=${hitRate} dir=${directionalHitRate} ${passed ? "PASS" : "RETRY next"}`,
     );
   }
 
