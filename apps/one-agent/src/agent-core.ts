@@ -295,6 +295,8 @@ export class AgentCore {
       predictionCount: this.predictionCount,
       hitRate: this.evaluator.getHitRate(),
       directionalHitRate: this.evaluator.getDirectionalHitRate(),
+      directionalCount: this.evaluator.getDirectionalCount(),
+      abstainRate: this.evaluator.getAbstainRate(),
       paperPnl: this.broker.getTotalPnl(),
       averageWin: Number(avgWin.toFixed(4)),
       averageLoss: Number(avgLoss.toFixed(4)),

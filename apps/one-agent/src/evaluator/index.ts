@@ -65,6 +65,12 @@ export class Evaluator {
     return this.evaluations.filter((e) => e.direction !== "range").length;
   }
 
+  getAbstainRate(): number {
+    if (this.evaluations.length === 0) return 0;
+    const range = this.evaluations.filter((e) => e.direction === "range").length;
+    return Number((range / this.evaluations.length).toFixed(4));
+  }
+
   getFalsePositiveRate(): number {
     const tradeSignals = this.evaluations.length;
     if (tradeSignals === 0) return 0;

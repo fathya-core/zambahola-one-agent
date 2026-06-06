@@ -54,7 +54,18 @@ const MAX: AccuracyTuning = {
 export function getAccuracyTuning(): AccuracyTuning {
   const base = isMaxAccuracy() ? MAX : NORMAL;
   const horizon = Number(process.env.ZAMBAHOLA_HORIZON_SEC ?? base.horizonSec);
-  return { ...base, horizonSec: horizon };
+  const minAgreement = Number(
+    process.env.ZAMBAHOLA_MIN_AGREEMENT ?? base.minAgreement,
+  );
+  const minModelVoters = Number(
+    process.env.ZAMBAHOLA_MIN_MODEL_VOTERS ?? base.minModelVoters,
+  );
+  return {
+    ...base,
+    horizonSec: horizon,
+    minAgreement,
+    minModelVoters,
+  };
 }
 
 /** Recommended env for home PC / full Binance access */

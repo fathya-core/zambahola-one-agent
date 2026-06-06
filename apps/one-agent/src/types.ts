@@ -128,6 +128,8 @@ export interface AgentMetrics {
   learningUpdates?: number;
   liveEvaluations?: number;
   directionalHitRate?: number;
+  directionalCount?: number;
+  abstainRate?: number;
   rollingHitRate?: number;
   directionalRollingHitRate?: number;
   peakHitRate?: number;
