@@ -1,6 +1,7 @@
 import type { PredictionDirection } from "../types.js";
 import { getOrderBook } from "../market-feed/orderbook.js";
 import { getMarketSignals, signalsToFeatures } from "../market-signals/index.js";
+import { localHourFraction } from "../lib/time-display.js";
 
 export interface FeatureVector {
   ret1: number;
@@ -73,7 +74,7 @@ export function extractFeatures(
   const lastVol = volumes[volumes.length - 1] ?? avgVol;
   const volumeNorm = Math.max(-1, Math.min(1, (lastVol - avgVol) / (avgVol || 1)));
 
-  const hour = new Date(timestamp).getUTCHours() + new Date(timestamp).getUTCMinutes() / 60;
+  const hour = localHourFraction(timestamp);
   const timeSin = Math.sin((hour / 24) * Math.PI * 2);
   const timeCos = Math.cos((hour / 24) * Math.PI * 2);
 

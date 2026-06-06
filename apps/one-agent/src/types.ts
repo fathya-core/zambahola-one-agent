@@ -9,6 +9,7 @@ export interface MarketTick {
   tickId: string;
   symbol: string;
   price: number;
+  /** Wall-clock ms when the agent received/emitted the tick */
   timestamp: number;
 }
 
@@ -155,6 +156,17 @@ export interface RunRecord {
   timestamp: number;
 }
 
+export interface AgentTimeInfo {
+  timezone: string;
+  nowUtc: string;
+  nowLocal: string;
+  startedAtLocal: string | null;
+  lastTickLocal: string | null;
+  uptimeSec: number;
+  uptimeLabel: string;
+  lastTickAgeSec: number | null;
+}
+
 export interface AgentStatus {
   running: boolean;
   pid: number | null;
@@ -165,4 +177,5 @@ export interface AgentStatus {
   port: number;
   startedAt: number | null;
   tickCount: number;
+  time?: AgentTimeInfo;
 }

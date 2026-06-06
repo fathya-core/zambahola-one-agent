@@ -5,8 +5,19 @@ async function fetchJson(path) {
   return res.json();
 }
 
+function formatCountdown(ms) {
+  if (ms == null || ms <= 0) return "—";
+  const s = Math.ceil(ms / 1000);
+  return s + "s";
+}
+
 function renderMetrics(m) {
     const rows = [
+      ["Local time", m.nowLocal ?? "—"],
+      ["Last tick", m.lastTickLocal ?? "—"],
+      ["Tick age", m.lastTickAgeSec != null ? m.lastTickAgeSec + "s" : "—"],
+      ["Uptime", m.uptimeLabel ?? "—"],
+      ["Timezone", m.timezone ?? "—"],
       ["Feed", m.feedName ?? "—"],
       ["Regime", m.regime ?? "—"],
       ["Sentiment", m.sentimentScore ?? "—"],
@@ -54,6 +65,15 @@ async function refresh() {
     pill.textContent = status.running ? "agent live" : "agent stopped";
     pill.className = "pill" + (status.running ? " live" : "");
 
+    if (status.time) {
+      $("clock").textContent =
+        status.time.nowLocal +
+        " (" +
+        status.time.timezone +
+        ") · تشغيل " +
+        status.time.uptimeLabel;
+    }
+
     $("price").textContent =
       metrics.lastPrice != null
         ? "$" + Number(metrics.lastPrice).toLocaleString()
@@ -65,7 +85,13 @@ async function refresh() {
       el.className = "big pred-" + prediction.direction;
       $("confidence").textContent =
         "confidence " + (prediction.confidence * 100).toFixed(1) + "%";
-      $("horizon").textContent = "horizon " + prediction.horizonSec + "s";
+      const evalAt =
+        prediction.timestamp + prediction.horizonSec * 1000 - Date.now();
+      $("horizon").textContent =
+        "horizon " +
+        prediction.horizonSec +
+        "s · eval in " +
+        formatCountdown(evalAt);
       const why =
         prediction.meta?.analystSummaryAr ||
         prediction.meta?.gateReason ||
@@ -80,7 +106,15 @@ async function refresh() {
       $("decision-reason").textContent = metrics.lastDecision.reason;
     }
 
-    renderMetrics(metrics);
+    const timeMeta = status.time ?? {};
+    renderMetrics({
+      ...metrics,
+      nowLocal: timeMeta.nowLocal,
+      lastTickLocal: timeMeta.lastTickLocal,
+      lastTickAgeSec: timeMeta.lastTickAgeSec,
+      uptimeLabel: timeMeta.uptimeLabel,
+      timezone: timeMeta.timezone,
+    });
     $("position").textContent = JSON.stringify(
       { openPosition: metrics.openPosition, paperPnl: metrics.paperPnl },
       null,

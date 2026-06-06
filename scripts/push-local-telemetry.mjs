@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { refreshTelemetry } from "./collect-telemetry.mjs";
+import { formatLocalNow } from "./time-local.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const telemetry = join(root, "apps/one-agent/data/bridge/LOCAL-TELEMETRY.json");
@@ -57,7 +58,7 @@ if (!telemetryChanged()) {
   process.exit(0);
 }
 
-const ts = new Date().toISOString().slice(0, 16).replace("T", " ");
+const ts = formatLocalNow().slice(0, 16);
 const files = bridgeFiles.filter((f) => existsSync(join(root, f)));
 
 console.log("[push-telemetry] syncing with origin/main...");

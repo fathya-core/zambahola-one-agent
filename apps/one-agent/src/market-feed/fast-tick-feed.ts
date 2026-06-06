@@ -14,6 +14,7 @@ export class FastTickFeed implements MarketFeed {
   private ws: WebSocket | null = null;
   private handlers = new Set<(tick: MarketTick) => void>();
   private pendingPrice = 0;
+  private pendingTradeMs = 0;
   private lastEmit = 0;
   private tickSeq = 0;
   private readonly intervalMs: number;
@@ -27,8 +28,15 @@ export class FastTickFeed implements MarketFeed {
     this.ws = new WebSocket(WS_URL);
     this.ws.on("message", (raw) => {
       try {
-        const msg = JSON.parse(raw.toString()) as { p?: string };
-        if (msg.p) this.pendingPrice = Number(msg.p);
+        const msg = JSON.parse(raw.toString()) as {
+          p?: string;
+          T?: number;
+          E?: number;
+        };
+        if (msg.p) {
+          this.pendingPrice = Number(msg.p);
+          this.pendingTradeMs = Number(msg.T ?? msg.E ?? 0) || 0;
+        }
       } catch {
         /* */
       }
@@ -60,6 +68,9 @@ export class FastTickFeed implements MarketFeed {
     if (!price) return;
     const now = Date.now();
     if (now - this.lastEmit < this.intervalMs * 0.85) return;
+    const tradeMs = this.pendingTradeMs > 0 ? this.pendingTradeMs : now;
+    // Stale exchange trade time breaks 45s horizon — wall clock at emit (same as binance-ws).
+    if (tradeMs > 0 && now - tradeMs > 15_000) return;
     this.lastEmit = now;
     this.tickSeq += 1;
     const tick: MarketTick = {

@@ -3,6 +3,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { telemetryTimeFields } from "./time-local.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const bridgeDir = join(root, "apps/one-agent/data/bridge");
@@ -25,7 +26,7 @@ async function fromAgent() {
     fetchJson(agentUrl, "/api/learning"),
   ]);
   return {
-    ts: new Date().toISOString(),
+    ...telemetryTimeFields(),
     hostname: process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? "local",
     agentUrl,
     status,

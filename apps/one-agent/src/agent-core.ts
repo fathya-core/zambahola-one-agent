@@ -23,6 +23,7 @@ import { DecisionEngine } from "./decision-engine/index.js";
 import type { TradeBroker } from "./broker/types.js";
 import { createBroker } from "./broker/factory.js";
 import { Evaluator } from "./evaluator/index.js";
+import { timeSnapshot } from "./lib/time-display.js";
 import {
   appendRun,
   appendTradeLedger,
@@ -154,6 +155,7 @@ export class AgentCore {
       port,
       startedAt: this.startedAt,
       tickCount: this.tickCount,
+      time: timeSnapshot(this.startedAt, this.lastTick?.timestamp ?? null),
     };
   }
 
@@ -236,7 +238,7 @@ export class AgentCore {
     }
 
     this.broker.markToMarket(tick.price);
-    const completed = this.evaluator.onPrice(tick.price, tick.timestamp);
+    const completed = this.evaluator.onPrice(tick.price, Date.now());
     for (const { evaluation, prediction: evaluatedPred } of completed) {
       await appendRun({
         type: "evaluation",
