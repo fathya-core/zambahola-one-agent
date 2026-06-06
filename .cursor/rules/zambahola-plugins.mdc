@@ -1,0 +1,38 @@
+---
+description: ZAMBAHOLA ONE AGENT — which Cursor marketplace plugins/skills to use for trading agent work
+alwaysApply: true
+---
+
+# ZAMBAHOLA plugin map
+
+Install plugins from Cursor Marketplace (see `docs/ar/تثبيت-اضافات-السوق.md`).
+
+## Required for this project
+
+| Plugin | Use when |
+|--------|----------|
+| **zambahola-local** (repo MCP) | Read telemetry, Arabic analyst, queue remote commands |
+| **zapier** | Slack/Sheets/GitHub alerts on directional hit |
+| **tavily** | Market research, news, docs (replaces Perplexity for agent) |
+| **huggingface-skills** | Papers, datasets, HF Jobs training, research import |
+| **cli-for-agent** | Designing/fixing `npm run agent:*` scripts |
+
+## Optional
+
+| Plugin | Use when |
+|--------|----------|
+| **cursor-sdk** | Automate cloud agents from CI/scripts |
+| **agent-compatibility** | Score repo agent-readiness |
+| **continual-learning** | Auto-update AGENTS.md from sessions |
+
+## Skill triggers (after install)
+
+- Research / news → `tavily-search` or `tavily-research`
+- HF papers/models → `hf-cli` / Hugging Face MCP tools
+- Zapier setup → `zapier-setup` then enable GitHub · Sheets · Slack
+- Local agent state → `zambahola_get_telemetry` / `zambahola_get_analyst`
+
+## Safety
+
+- No live Binance keys in repo; paper mode until directional ≥ 58%.
+- Zapier writes (Slack/Sheets) need user confirmation before send.

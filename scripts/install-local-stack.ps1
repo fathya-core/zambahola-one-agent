@@ -29,5 +29,6 @@ Write-Host "  3) npm run agent:push-telemetry   (every few minutes)"
 Write-Host "  4) npm run agent:remote-watcher   (cloud commands)"
 Write-Host ""
 Write-Host "Health: npm run agent:health-check" -ForegroundColor Cyan
+Write-Host "Cursor plugins: .\scripts\install-cursor-marketplace.ps1" -ForegroundColor Cyan
 Write-Host "Optional tunnel: npm run agent:tunnel-bridge" -ForegroundColor Cyan
-Write-Host "Docs: docs/ar/ربط-الجهاز-المحلي.md"
+Write-Host "Docs: docs/ar/ربط-الجهاز-المحلي.md · docs/ar/تثبيت-اضافات-السوق.md"

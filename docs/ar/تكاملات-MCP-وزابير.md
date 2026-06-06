@@ -12,6 +12,14 @@
 | **Zapier → MCP Client** | ربط MCP إضافي |
 | **Hugging Face** | papers · models · docs |
 
+## تثبيت إضافات Marketplace
+
+راجع: `docs/ar/تثبيت-اضافات-السوق.md` أو شغّل:
+
+```powershell
+.\scripts\install-cursor-marketplace.ps1
+```
+
 ## خطوة واحدة — فعّل Auth
 
 في Cursor Desktop:
