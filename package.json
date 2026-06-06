@@ -25,7 +25,7 @@
     "agent:research-import": "npm run research-import -w @zambahola/one-agent --",
     "agent:import-md-reports": "npm run import-md-reports -w @zambahola/one-agent",
     "agent:bundle-reports": "npm run bundle-reports -w @zambahola/one-agent",
-    "agent:start": "npm run start -w @zambahola/one-agent",
+    "agent:start": "node scripts/run-env.mjs --file config/max-accuracy.env -- npm run start -w @zambahola/one-agent",
     "agent:status": "npm run status -w @zambahola/one-agent",
     "agent:stop": "npm run stop -w @zambahola/one-agent",
     "agent:test-run": "npm run test-run -w @zambahola/one-agent",

@@ -78,7 +78,10 @@ export function applyExpertConsensus(
   }
 
   if (regime === "range" && direction !== "range") {
-    if (bVotes < 2 && agreement < 0.65) {
+    const relax = process.env.ZAMBAHOLA_EXPERT_RELAX === "1";
+    const minB = relax ? 1 : 2;
+    const minAgree = relax ? 0.52 : 0.65;
+    if (bVotes < minB && agreement < minAgree) {
       d = "range";
       c = 0.48;
       blocked = true;
