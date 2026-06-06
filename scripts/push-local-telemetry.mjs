@@ -39,7 +39,27 @@ async function refreshFromBridge() {
   }
 }
 
+function abortStuckGit() {
+  const reb = git(["rev-parse", "--git-path", "rebase-merge"]).stdout?.trim();
+  const reb2 = git(["rev-parse", "--git-path", "rebase-apply"]).stdout?.trim();
+  if ((reb && existsSync(join(root, reb))) || (reb2 && existsSync(join(root, reb2)))) {
+    console.log("[push-telemetry] aborting stuck rebase...");
+    git(["rebase", "--abort"], { inherit: true });
+  }
+  const unmerged = (git(["diff", "--name-only", "--diff-filter=U"]).stdout ?? "").trim();
+  if (unmerged) {
+    console.log("[push-telemetry] clearing merge conflicts on bridge files...");
+    for (const f of bridgeFiles) {
+      if (existsSync(join(root, f))) git(["checkout", "--", f], { inherit: true });
+    }
+    git(["add", ...bridgeFiles.filter((f) => existsSync(join(root, f)))], { inherit: true });
+    git(["merge", "--abort"], { inherit: true });
+    git(["rebase", "--abort"], { inherit: true });
+  }
+}
+
 function syncWithRemote(telemetryBackup) {
+  abortStuckGit();
   console.log("[push-telemetry] syncing with origin/main...");
   git(["fetch", "origin", "main"], { inherit: true });
 
