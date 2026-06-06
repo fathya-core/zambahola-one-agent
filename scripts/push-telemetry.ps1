@@ -1,14 +1,12 @@
-# Push telemetry - Windows fallback
+# Push telemetry - Windows (bridge OR agent :8787 fallback)
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-Write-Host "[1] bridge refresh..." -ForegroundColor Cyan
-try {
-    Invoke-WebRequest -Uri "http://127.0.0.1:8790/telemetry" -UseBasicParsing -TimeoutSec 15 | Out-Null
-    Write-Host "  bridge OK" -ForegroundColor Green
-} catch {
-    Write-Host "Bridge offline - run: npm run agent:local-bridge" -ForegroundColor Red
+Write-Host "[1] collect telemetry..." -ForegroundColor Cyan
+node scripts/collect-telemetry.mjs
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Failed - start agent: npm run agent:phase2-signals" -ForegroundColor Red
     exit 1
 }
 
