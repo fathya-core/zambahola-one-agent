@@ -52,6 +52,9 @@ export interface PredictionMeta {
   metaPnlProb?: number;
   metaPnlEnter?: boolean;
   analystSummaryAr?: string;
+  hybridProfile?: "learn" | "signals";
+  hybridSwitched?: boolean;
+  hybridPendingRegime?: string | null;
 }
 
 export interface Prediction {
@@ -143,6 +146,9 @@ export interface AgentMetrics {
   paperTradeCount?: number;
   closedTradeCount?: number;
   learnTradeMode?: boolean;
+  hybridAuto?: boolean;
+  hybridProfile?: "learn" | "signals" | null;
+  hybridSwitchCount?: number;
   updatedAt: number;
 }
 
@@ -181,4 +187,8 @@ export interface AgentStatus {
   startedAt: number | null;
   tickCount: number;
   time?: AgentTimeInfo;
+  hybridAuto?: boolean;
+  hybridProfile?: "learn" | "signals" | null;
+  horizonLearnSec?: number;
+  horizonSignalsSec?: number;
 }

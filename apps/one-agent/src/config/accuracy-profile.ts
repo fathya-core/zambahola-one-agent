@@ -1,5 +1,7 @@
 /** Accuracy tuning — `ZAMBAHOLA_ACCURACY_MODE=max` for highest hit-rate focus */
 
+import { isLearnTradeActive, isHybridAuto } from "./hybrid-mode.js";
+
 export type AccuracyMode = "normal" | "max";
 
 export function getAccuracyMode(): AccuracyMode {
@@ -10,11 +12,13 @@ export function isMaxAccuracy(): boolean {
   return getAccuracyMode() === "max";
 }
 
-/** Strict abstain filter — live agent only by default (off during train) */
+/** Strict abstain filter — live agent only by default (off during train / hybrid learn) */
 export function isAccuracyFilterActive(): boolean {
+  if (isHybridAuto() && isLearnTradeActive()) return false;
   if (!isMaxAccuracy()) return false;
   if (process.env.ZAMBAHOLA_ACCURACY_FILTER === "off") return false;
   if (process.env.ZAMBAHOLA_ACCURACY_FILTER === "all") return true;
+  if (isHybridAuto()) return true;
   return process.env.ZAMBAHOLA_LIVE_FILTER === "1";
 }
 

@@ -10,7 +10,7 @@ if ($env:ZAMBAHOLA_OVERNIGHT_HOURS) {
 }
 
 Write-Host "=== ZAMBAHOLA overnight ($Hours h) ===" -ForegroundColor Cyan
-Write-Host "Mode: learn-trade (paper) + watchdog + auto push" -ForegroundColor Yellow
+Write-Host "Mode: phase2-hybrid (auto learn/signals) + watchdog + auto push" -ForegroundColor Yellow
 
 Write-Host ""
 Write-Host "[1] git pull..." -ForegroundColor Cyan
@@ -33,4 +33,5 @@ Write-Host 'Log: apps/one-agent/data/bridge/OVERNIGHT-LOG.jsonl' -ForegroundColo
 Write-Host 'Dashboard: http://127.0.0.1:8787' -ForegroundColor Gray
 
 $env:ZAMBAHOLA_OVERNIGHT_HOURS = $Hours
+$env:ZAMBAHOLA_OVERNIGHT_START = "agent:phase2-hybrid"
 node scripts/overnight-watchdog.mjs

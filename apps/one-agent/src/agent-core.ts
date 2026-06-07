@@ -26,6 +26,12 @@ import { Evaluator } from "./evaluator/index.js";
 import { timeSnapshot } from "./lib/time-display.js";
 import { isLearnTradeMode } from "./prediction-engine/learn-trade.js";
 import {
+  getHybridProfile,
+  isHybridAuto,
+  resolveHorizonSec,
+  resolveTradeMaxHoldSec,
+} from "./config/hybrid-mode.js";
+import {
   appendRun,
   appendTradeLedger,
   ensureDataDirs,
@@ -74,6 +80,7 @@ export class AgentCore {
   private lastDecision: Decision | null = null;
   private lastTick: MarketTick | null = null;
   private strategyHits: Record<string, { hits: number; total: number }> = {};
+  private hybridSwitchTotal = 0;
   private stopSentiment: (() => void) | null = null;
   private stopMarketSignals: (() => void) | null = null;
   private listeners = new Set<TickHandler>();
@@ -152,11 +159,15 @@ export class AgentCore {
       symbol: this.feed.symbol,
       feed: this.feed.name,
       brokerMode: this.broker.mode,
-      horizonSec: this.predictionEngine.horizonSec,
+      horizonSec: resolveHorizonSec(),
       port,
       startedAt: this.startedAt,
       tickCount: this.tickCount,
       time: timeSnapshot(this.startedAt, this.lastTick?.timestamp ?? null),
+      hybridAuto: isHybridAuto(),
+      hybridProfile: getHybridProfile(),
+      horizonLearnSec: Number(process.env.ZAMBAHOLA_HORIZON_LEARN ?? 25),
+      horizonSignalsSec: Number(process.env.ZAMBAHOLA_HORIZON_SIGNALS ?? 45),
     };
   }
 
@@ -190,6 +201,31 @@ export class AgentCore {
     const prediction = this.predictionEngine.predict(tick);
     this.predictionCount += 1;
     this.lastPrediction = prediction;
+
+    if (prediction.meta?.hybridSwitched) {
+      this.hybridSwitchTotal += 1;
+    }
+
+    if (
+      prediction.meta?.hybridSwitched &&
+      prediction.meta.hybridProfile === "signals" &&
+      this.broker.getOpenTrade()
+    ) {
+      const closeDecision = {
+        decisionId: `dec-hybrid-switch-${this.tickCount}`,
+        tickId: tick.tickId,
+        predictionId: prediction.predictionId,
+        action: "paper_close" as const,
+        reason: "Hybrid switch range→signals — close learn position",
+        timestamp: Date.now(),
+      };
+      const closed = this.broker.execute(closeDecision, tick);
+      if (closed) {
+        await appendTradeLedger({ event: "trade", trade: closed, decision: closeDecision });
+        await appendRun({ type: "trade", payload: closed, timestamp: Date.now() });
+      }
+    }
+
     this.evaluator.schedule(prediction);
 
     await appendRun({
@@ -211,10 +247,7 @@ export class AgentCore {
 
     let trade = this.broker.execute(decision, tick);
     if (isLearnTradeMode() && !trade) {
-      const maxHold = Number(
-        process.env.ZAMBAHOLA_TRADE_MAX_HOLD_SEC ??
-          Math.round(this.predictionEngine.horizonSec * 1.2),
-      );
+      const maxHold = resolveTradeMaxHoldSec(prediction.horizonSec);
       trade = this.broker.forceCloseIfStale(tick, maxHold);
     }
     if (trade) {
@@ -387,6 +420,9 @@ export class AgentCore {
       paperTradeCount: this.broker.getAllTrades().length,
       closedTradeCount: this.broker.getClosedTrades().length,
       learnTradeMode: isLearnTradeMode(),
+      hybridAuto: isHybridAuto(),
+      hybridProfile: getHybridProfile(),
+      hybridSwitchCount: this.hybridSwitchTotal,
       updatedAt: Date.now(),
     };
   }

@@ -1,6 +1,7 @@
 import type { FeatureVector } from "../features/index.js";
 import type { PredictionDirection } from "../types.js";
 import { getOrderBook } from "../market-feed/orderbook.js";
+import { isLearnTradeActive } from "../config/hybrid-mode.js";
 
 export interface MicrostructureGateResult {
   direction: PredictionDirection;
@@ -10,6 +11,7 @@ export interface MicrostructureGateResult {
 }
 
 function gatesEnabled(): boolean {
+  if (isLearnTradeActive()) return false;
   return process.env.ZAMBAHOLA_MICRO_GATES !== "0";
 }
 

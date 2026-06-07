@@ -1,7 +1,8 @@
 import type { PredictionDirection, StrategyVoteMeta } from "../types.js";
+import { isLearnTradeActive } from "../config/hybrid-mode.js";
 
 export function isLearnTradeMode(): boolean {
-  return process.env.ZAMBAHOLA_LEARN_TRADE === "1";
+  return isLearnTradeActive();
 }
 
 /** When ensemble says range, pick up/down from strategy vote skew for paper learning */

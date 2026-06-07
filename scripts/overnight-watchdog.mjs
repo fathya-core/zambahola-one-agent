@@ -14,7 +14,7 @@ const agentUrl = process.env.ZAMBAHOLA_AGENT_URL ?? "http://127.0.0.1:8787";
 const hours = Number(process.env.ZAMBAHOLA_OVERNIGHT_HOURS ?? 8);
 const checkSec = Number(process.env.ZAMBAHOLA_OVERNIGHT_CHECK_SEC ?? 90);
 const pushMin = Number(process.env.ZAMBAHOLA_OVERNIGHT_PUSH_MIN ?? 45);
-const startCmd = process.env.ZAMBAHOLA_OVERNIGHT_START ?? "agent:phase2-learn-trade";
+const startCmd = process.env.ZAMBAHOLA_OVERNIGHT_START ?? "agent:phase2-hybrid";
 
 const endAt = Date.now() + hours * 3600_000;
 let lastPush = 0;

@@ -27,6 +27,13 @@ import { getMetaPnlModel } from "../learning/meta-pnl.js";
 import { applyMicrostructureGates } from "./microstructure-gates.js";
 import { explainGateReasonAr } from "../learning/analyst-ar.js";
 import { inferLeanFromVotes, isLearnTradeMode } from "./learn-trade.js";
+import {
+  getHybridProfile,
+  hybridStatusAr,
+  isHybridAuto,
+  resolveHorizonSec,
+  updateHybridRegime,
+} from "../config/hybrid-mode.js";
 
 const DEFAULT_HORIZON_SEC = 30;
 const MAX_PRICES = 400;
@@ -129,9 +136,17 @@ export class PredictionEngine {
     let metaPnlProb = 0.5;
     let metaPnlEnter = true;
     let analystSummaryAr: string | undefined;
+    let hybridProfile = getHybridProfile();
+    let hybridSwitched = false;
+    let hybridPendingRegime: string | null = null;
+    const horizonSec = resolveHorizonSec();
 
     if (features) {
       regime = detectRegime(features);
+      const hybrid = updateHybridRegime(regime);
+      hybridProfile = hybrid.profile;
+      hybridSwitched = hybrid.switched;
+      hybridPendingRegime = hybrid.pendingRegime;
 
       const expert = applyExpertConsensus(
         ensemble.direction,
@@ -268,7 +283,10 @@ export class PredictionEngine {
       }
 
       if (process.env.ZAMBAHOLA_ANALYST_AR !== "0") {
-        analystSummaryAr = explainGateReasonAr(gateReason);
+        const hybridNote = isHybridAuto()
+          ? ` · هجين: ${hybridStatusAr(hybridProfile)}`
+          : "";
+        analystSummaryAr = explainGateReasonAr(gateReason) + hybridNote;
       }
     }
 
@@ -278,7 +296,7 @@ export class PredictionEngine {
       symbol: tick.symbol,
       direction,
       confidence,
-      horizonSec: this.horizonSec,
+      horizonSec: features ? horizonSec : this.horizonSec,
       priceAtPrediction: tick.price,
       timestamp: tick.timestamp,
       meta: {
@@ -313,6 +331,9 @@ export class PredictionEngine {
         metaPnlProb,
         metaPnlEnter,
         analystSummaryAr,
+        hybridProfile: hybridProfile ?? undefined,
+        hybridSwitched,
+        hybridPendingRegime,
       },
     };
   }
