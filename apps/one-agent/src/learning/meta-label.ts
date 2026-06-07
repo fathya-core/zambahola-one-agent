@@ -91,6 +91,8 @@ export async function getMetaLabeler(): Promise<{
 
   const shouldTrust = (f: FeatureVector, confidence: number, agreement: number) => {
     if (process.env.ZAMBAHOLA_META_LABEL === "0") return true;
+    const warmup = Number(process.env.ZAMBAHOLA_META_LABEL_WARMUP ?? 50);
+    if (state!.samples < warmup) return true;
     return score(f, confidence, agreement) >= threshold;
   };
 

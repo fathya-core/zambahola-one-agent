@@ -97,7 +97,7 @@ export async function getMetaPnlModel(): Promise<{
 
   const shouldEnter = (f, confidence, agreement, regime) => {
     if (process.env.ZAMBAHOLA_META_PNL === "0") return true;
-    if (state!.samples < Number(process.env.ZAMBAHOLA_META_PNL_WARMUP ?? 8)) return true;
+    if (state!.samples < Number(process.env.ZAMBAHOLA_META_PNL_WARMUP ?? 50)) return true;
     return score(f, confidence, agreement, regime) >= threshold;
   };
 

@@ -9,6 +9,8 @@ export interface MarketTick {
   tickId: string;
   symbol: string;
   price: number;
+  /** Aggregated trade qty in this tick window (from aggTrade when available) */
+  volume?: number;
   /** Wall-clock ms when the agent received/emitted the tick */
   timestamp: number;
 }

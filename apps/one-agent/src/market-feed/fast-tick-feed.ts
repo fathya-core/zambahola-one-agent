@@ -14,6 +14,7 @@ export class FastTickFeed implements MarketFeed {
   private ws: WebSocket | null = null;
   private handlers = new Set<(tick: MarketTick) => void>();
   private pendingPrice = 0;
+  private pendingQty = 0;
   private pendingTradeMs = 0;
   private lastEmit = 0;
   private tickSeq = 0;
@@ -30,11 +31,13 @@ export class FastTickFeed implements MarketFeed {
       try {
         const msg = JSON.parse(raw.toString()) as {
           p?: string;
+          q?: string;
           T?: number;
           E?: number;
         };
         if (msg.p) {
           this.pendingPrice = Number(msg.p);
+          this.pendingQty += Number(msg.q ?? 0);
           this.pendingTradeMs = Number(msg.T ?? msg.E ?? 0) || 0;
         }
       } catch {
@@ -77,8 +80,10 @@ export class FastTickFeed implements MarketFeed {
       tickId: `ft-${this.tickSeq}-${randomUUID().slice(0, 8)}`,
       symbol: this.symbol,
       price,
+      volume: this.pendingQty > 0 ? this.pendingQty : undefined,
       timestamp: now,
     };
+    this.pendingQty = 0;
     for (const h of this.handlers) h(tick);
   }
 }

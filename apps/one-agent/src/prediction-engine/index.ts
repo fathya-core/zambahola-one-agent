@@ -89,7 +89,9 @@ export class PredictionEngine {
 
   predict(tick: MarketTick): Prediction {
     const prev = this.prices[this.prices.length - 1];
-    const volProxy = prev ? Math.abs(tick.price - prev) * 10 + 1 : tick.price * 0.00001;
+    const volProxy =
+      tick.volume ??
+      (prev ? Math.abs(tick.price - prev) * 10 + 1 : tick.price * 0.00001);
 
     this.prices.push(tick.price);
     this.volumes.push(volProxy);

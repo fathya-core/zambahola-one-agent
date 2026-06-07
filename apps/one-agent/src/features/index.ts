@@ -2,6 +2,9 @@ import type { PredictionDirection } from "../types.js";
 import { getOrderBook } from "../market-feed/orderbook.js";
 import { getMarketSignals, signalsToFeatures } from "../market-signals/index.js";
 import { localHourFraction } from "../lib/time-display.js";
+import { WelfordWindow } from "../lib/welford.js";
+
+const imbZ = new WelfordWindow(Number(process.env.ZAMBAHOLA_IMB_Z_WINDOW ?? 100));
 
 export interface FeatureVector {
   ret1: number;
@@ -63,7 +66,10 @@ export function extractFeatures(
   const momentum = (p - oldest) / oldest;
 
   const book = getOrderBook();
-  const bookImbalance = book?.imbalance ?? 0;
+  const rawImb = book?.imbalance5 ?? book?.imbalance ?? 0;
+  imbZ.push(rawImb);
+  const bookImbalance =
+    imbZ.size() >= 12 ? imbZ.zScore(rawImb) / 3 : rawImb;
   const spreadBps = book ? book.spreadBps / 100 : 0;
 
   const macdHistNorm = computeMacdHistNorm(prices);

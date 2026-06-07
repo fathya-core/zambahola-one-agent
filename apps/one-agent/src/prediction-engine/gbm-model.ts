@@ -97,15 +97,17 @@ function fitStump(x: number[], residual: number): Stump {
   let bestIdx = 1;
   let bestThr = 0;
   let bestErr = Infinity;
+  const thresholds = [-0.35, -0.15, 0, 0.15, 0.35];
   for (let idx = 1; idx < Math.min(FEATURE_DIM, x.length); idx++) {
-    const thr = x[idx]!;
-    const left = residual * (x[idx]! <= thr ? 1 : 0);
-    const right = residual * (x[idx]! > thr ? 1 : 0);
-    const err = Math.abs(left) + Math.abs(right);
-    if (err < bestErr) {
-      bestErr = err;
-      bestIdx = idx;
-      bestThr = thr;
+    for (const thr of thresholds) {
+      const left = residual * (x[idx]! <= thr ? 1 : 0);
+      const right = residual * (x[idx]! > thr ? 1 : 0);
+      const err = Math.abs(left) + Math.abs(right);
+      if (err < bestErr) {
+        bestErr = err;
+        bestIdx = idx;
+        bestThr = thr;
+      }
     }
   }
   return {

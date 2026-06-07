@@ -32,16 +32,13 @@ export function ensemblePredict(
   }
 
   const normalized = weightSum > 0 ? score / weightSum : 0;
-  const agreement =
-    signals.length > 0
-      ? signals.filter((s) => s.direction === pickDirection(normalized, rangeVotes, weightSum))
-          .length / signals.length
-      : 0;
 
   const normThr = getAccuracyTuning().ensembleNorm;
   let direction: PredictionDirection = "range";
   if (normalized > normThr) direction = "up";
   else if (normalized < -normThr) direction = "down";
+
+  const agreement = computeDirectionalAgreement(signals, direction);
 
   const confidence = Number(
     Math.min(0.95, Math.max(0.42, 0.45 + Math.abs(normalized) * 0.9 + agreement * 0.15)).toFixed(4),
@@ -55,16 +52,20 @@ export function ensemblePredict(
   };
 }
 
-function pickDirection(
-  normalized: number,
-  rangeVotes: number,
-  weightSum: number,
-): PredictionDirection {
-  if (rangeVotes / weightSum > 0.55) return "range";
-  const normThr = getAccuracyTuning().ensembleNorm;
-  if (normalized > normThr) return "up";
-  if (normalized < -normThr) return "down";
-  return "range";
+/** Fraction of directional voters agreeing with final up/down (excludes range inflation) */
+export function computeDirectionalAgreement(
+  signals: StrategySignal[],
+  direction: PredictionDirection,
+): number {
+  if (signals.length === 0) return 0;
+  if (direction === "range") {
+    return signals.filter((s) => s.direction === "range").length / signals.length;
+  }
+  const directional = signals.filter((s) => s.direction !== "range");
+  if (directional.length === 0) return 0;
+  return (
+    directional.filter((s) => s.direction === direction).length / directional.length
+  );
 }
 
 export function strategyHitsFromVotes(

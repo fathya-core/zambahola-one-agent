@@ -14,8 +14,9 @@ export const orderImbalanceStrategy: PredictionStrategy = {
         reason: "no fresh book",
       };
     }
-    const imb = book.imbalance;
-    if (imb > 0.15) {
+    const imb = book.imbalance5 ?? book.imbalance;
+    const thr = Number(process.env.ZAMBAHOLA_IMB_THRESHOLD ?? 0.12);
+    if (imb > thr) {
       return {
         strategyId: "order_imbalance",
         direction: "up",
@@ -23,7 +24,7 @@ export const orderImbalanceStrategy: PredictionStrategy = {
         reason: `bid pressure ${(imb * 100).toFixed(1)}%`,
       };
     }
-    if (imb < -0.15) {
+    if (imb < -thr) {
       return {
         strategyId: "order_imbalance",
         direction: "down",

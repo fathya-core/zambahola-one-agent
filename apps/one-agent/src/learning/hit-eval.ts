@@ -3,11 +3,13 @@ import type { PredictionDirection } from "../types.js";
 /** Default ~8bp; reports suggest 2–3bp flat zone — override via ZAMBAHOLA_LABEL_BP=2.5 */
 export const RANGE_BAND_PCT = Number(process.env.ZAMBAHOLA_LABEL_BP ?? 8) / 10_000;
 
-/** Volatility-adaptive band for batch training (optional via env) */
+/** Volatility-adaptive band — on by default (set ZAMBAHOLA_TRAIN_VOL_BAND=0 to disable) */
 export function computeHitBand(price: number, volatility?: number): number {
-  if (process.env.ZAMBAHOLA_TRAIN_VOL_BAND === "1") {
+  if (process.env.ZAMBAHOLA_TRAIN_VOL_BAND !== "0") {
     const vol = volatility ?? 0.0003;
-    return price * (vol > 0.00045 ? 0.0011 : 0.00085);
+    const volBand = price * (vol > 0.00045 ? 0.0011 : 0.00085);
+    const fixedBand = price * RANGE_BAND_PCT;
+    return Math.max(volBand, fixedBand);
   }
   return price * RANGE_BAND_PCT;
 }

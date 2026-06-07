@@ -1,0 +1,155 @@
+{
+  "version": "2",
+  "titleAr": "جلسة بحث عميقة — 30+ دقيقة Cloud + HF + Web + تدقيق كود",
+  "importedAt": "2026-06-07",
+  "telemetrySnapshot": {
+    "source": "LOCAL-TELEMETRY.json",
+    "directionalHitRate": 0.2714,
+    "hitRate": 0.406,
+    "abstainRate": 0.4564,
+    "hybridProfile": "learn",
+    "horizonLearnSec": 25,
+    "falsePositiveRate": 0.594,
+    "diagnosis": "27% directional ليس بالضرورة ضعف نموذج فقط — band ضيق + agreement مضلل + GBM معطّل + volume وهمي"
+  },
+  "rootCauses": [
+    {
+      "id": "gbm-stump-bug",
+      "severity": "critical",
+      "file": "gbm-model.ts:fitStump",
+      "fix": "multi-threshold splits [-0.35..0.35] بدل thr=x[idx] دائماً true"
+    },
+    {
+      "id": "label-band-tight",
+      "severity": "critical",
+      "file": "hit-eval.ts",
+      "fix": "vol-adaptive band افتراضي ON + LABEL_BP=3.2 في phase3"
+    },
+    {
+      "id": "agreement-circular",
+      "severity": "high",
+      "file": "ensemble.ts",
+      "fix": "computeDirectionalAgreement — لا يعدّ range كإجماع اتجاهي"
+    },
+    {
+      "id": "fake-volume",
+      "severity": "high",
+      "file": "prediction-engine/index.ts",
+      "fix": "tick.volume من aggTrade q في fast-tick-feed"
+    },
+    {
+      "id": "meta-early-gate",
+      "severity": "high",
+      "file": "meta-label.ts, meta-pnl.ts",
+      "fix": "warmup 50 عينة قبل gate"
+    },
+    {
+      "id": "l1-imb-noisy",
+      "severity": "medium",
+      "file": "order-imbalance.ts",
+      "fix": "imbalance5 + threshold 0.12 + Welford z-score في features"
+    }
+  ],
+  "papers": [
+    {
+      "id": "2502.15757",
+      "title": "TLOB — LOB transformer + spread-aware labeling",
+      "url": "https://hf.co/papers/2502.15757",
+      "takeaway": "الأداء يتدهور مع كفاءة السوق؛ العتبات يجب أن تشمل spread/تكلفة التنفيذ"
+    },
+    {
+      "id": "2506.07711",
+      "title": "Square-root impact & order imbalance (Bouchaud)",
+      "url": "https://hf.co/papers/2506.07711",
+      "takeaway": "order imbalance يفسّر جزء كبير من التقلب — يدعم وزن order_imbalance العالي"
+    },
+    {
+      "id": "2304.02472",
+      "title": "Order flow image → short-term vol prediction",
+      "url": "https://hf.co/papers/2304.02472",
+      "takeaway": "تمثيل order flow كصورة/CNN يتفوق على GARCH للأفق القصير"
+    },
+    {
+      "id": "2508.02686",
+      "title": "MoE volatility regimes",
+      "url": "https://hf.co/papers/2508.02686",
+      "takeaway": "لا نموذج واحد لكل الأنظمة — يؤكد hybrid learn/signals"
+    },
+    {
+      "id": "2603.14651",
+      "title": "EARCP — online ensemble coherence",
+      "url": "https://hf.co/papers/2603.14651",
+      "takeaway": "أوزان ديناميكية + coherence أفضل من static ensemble عند drift"
+    },
+    {
+      "id": "2302.07869",
+      "title": "Online conformal prediction",
+      "url": "https://hf.co/papers/2302.07869",
+      "takeaway": "abstain تكيفي حسب drift — مرجع لاحق لـ calibration bucket"
+    }
+  ],
+  "webResearch": [
+    {
+      "topic": "OFI Cont et al. 2014",
+      "url": "https://delphicalpha.substack.com/p/hft-secrets-15-order-flow-imbalance",
+      "takeaway": "OFI أقوى مؤشر اتجاه قصير؛ L5-L10 أقل ضوضاء من L1"
+    },
+    {
+      "topic": "Crypto scalping ML features",
+      "url": "https://vadim.blog/ml-features-crypto-scalping-research-papers",
+      "takeaway": "Welford sliding window ~100 عينة؛ MIN_STD floor؛ warm-up بعد restart"
+    },
+    {
+      "topic": "Triple barrier / meta-label",
+      "url": "https://ml4trading.io/docs/engineer/user-guide/labeling/",
+      "takeaway": "عتبات ديناميكية ATR/vol؛ meta بعد primary مستقر؛ calibration قبل sizing"
+    },
+    {
+      "topic": "LOB liquidity MDPI 2025",
+      "url": "https://www.mdpi.com/1911-8074/18/3/124",
+      "takeaway": "ANOBI يستقر عند levels 10-15؛ L1 noisy"
+    }
+  ],
+  "weightAdjustments": {
+    "order_imbalance": 1.4,
+    "momentum": 1.22,
+    "volatility_regime": 1.18,
+    "premium_momentum": 1.14,
+    "volume_breakout": 1.05,
+    "mean_reversion": 0.72,
+    "bollinger": 0.85,
+    "funding_fade": 0.82,
+    "rsi": 0.9
+  },
+  "envRecommendations": {
+    "phase3Learn": {
+      "ZAMBAHOLA_TRAIN_VOL_BAND": "1",
+      "ZAMBAHOLA_META_LABEL_WARMUP": "50",
+      "ZAMBAHOLA_META_PNL_WARMUP": "50",
+      "ZAMBAHOLA_IMB_THRESHOLD": "0.12",
+      "ZAMBAHOLA_IMB_Z_WINDOW": "100"
+    },
+    "beforeBinanceDemo": {
+      "ZAMBAHOLA_META_LABEL": "1",
+      "ZAMBAHOLA_HORIZON_SIGNALS": "45",
+      "ZAMBAHOLA_MIN_AGREEMENT": "0.58",
+      "ZAMBAHOLA_META_LABEL_WARMUP": "200"
+    }
+  },
+  "codeFixesApplied": [
+    "gbm-model.ts fitStump multi-threshold",
+    "ensemble.ts computeDirectionalAgreement",
+    "hit-eval.ts vol-band default on",
+    "fast-tick-feed.ts real aggTrade volume",
+    "order-imbalance.ts imbalance5",
+    "features/index.ts Welford bookImbalance z",
+    "meta-label/meta-pnl warmup 50"
+  ],
+  "targets": {
+    "minDirectionalHit": 0.58,
+    "horizonSec": 45,
+    "abstainRange": [0.4, 0.75],
+    "nextMilestone": "dir rolling > 40% خلال 4-8س بعد pull"
+  },
+  "notes": "لا تفعّل meta-label قبل dir≥50% و200 عينة. turbo-learn مجدول بجانب live. OFI كامل لاحقاً يحتاج تتبع bid/ask size deltas."
+}
