@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import type { MarketTick } from "../types.js";
 import type { MarketFeed } from "./types.js";
+import { startDepthPoller } from "./depth-poller.js";
 
 const WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@aggTrade";
 
@@ -20,12 +21,16 @@ export class FastTickFeed implements MarketFeed {
   private tickSeq = 0;
   private readonly intervalMs: number;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private stopDepth: (() => void) | null = null;
 
   constructor(intervalMs = Number(process.env.ZAMBAHOLA_TICK_MS ?? 400)) {
     this.intervalMs = Math.max(200, Math.min(2000, intervalMs));
   }
 
   start(): void {
+    if (process.env.ZAMBAHOLA_FAST_LOB !== "0") {
+      this.stopDepth = startDepthPoller(1500);
+    }
     this.ws = new WebSocket(WS_URL);
     this.ws.on("message", (raw) => {
       try {
@@ -52,6 +57,8 @@ export class FastTickFeed implements MarketFeed {
   }
 
   stop(): void {
+    this.stopDepth?.();
+    this.stopDepth = null;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.ws?.close();
