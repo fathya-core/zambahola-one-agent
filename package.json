@@ -19,6 +19,8 @@
     "agent:phase2-signals": "node scripts/run-env.mjs --file config/phase2-signals.env -- npm run start -w @zambahola/one-agent",
     "agent:phase2-learn-trade": "node scripts/run-env.mjs --file config/phase2-learn-trade.env -- npm run start -w @zambahola/one-agent",
     "agent:phase2-hybrid": "node scripts/run-env.mjs --file config/phase2-hybrid.env -- npm run start -w @zambahola/one-agent",
+    "agent:phase3-intensive": "node scripts/run-env.mjs --file config/phase3-intensive.env -- npm run start -w @zambahola/one-agent",
+    "agent:phase3-boot": "powershell -ExecutionPolicy Bypass -File scripts/phase3-boot.ps1",
     "agent:overnight-learn": "powershell -ExecutionPolicy Bypass -File scripts/overnight-learn.ps1",
     "agent:overnight-hybrid": "powershell -ExecutionPolicy Bypass -File scripts/overnight-learn.ps1",
     "agent:experiments": "node scripts/run-env.mjs --file config/phase2-live.env ZAMBAHOLA_ACCURACY_FILTER=off -- npm run experiments -w @zambahola/one-agent",

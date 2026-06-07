@@ -14,9 +14,21 @@ import {
   shouldSkipOrchestratorBoost,
   maybeSnapshotOrRestore,
 } from "./hit-rate-guard.js";
+import {
+  isIntensiveLearn,
+  orchestratorMinRolling,
+} from "./intensive-learn.js";
+import { boostFromPatternJournal } from "./pattern-weight-boost.js";
+import { loadStrategyWeights } from "./adaptive-weights.js";
+import { ALL_STRATEGIES } from "../prediction-engine/strategies/index.js";
 
-const WEIGHT_EVERY = Number(process.env.ZAMBAHOLA_LIVE_WEIGHT_EVERY ?? 5);
-const ORCH_EVERY = Number(process.env.ZAMBAHOLA_LIVE_ORCH_EVERY ?? 12);
+const WEIGHT_EVERY = Number(
+  process.env.ZAMBAHOLA_LIVE_WEIGHT_EVERY ?? (isIntensiveLearn() ? 3 : 5),
+);
+const ORCH_EVERY = Number(
+  process.env.ZAMBAHOLA_LIVE_ORCH_EVERY ?? (isIntensiveLearn() ? 6 : 12),
+);
+const PATTERN_BOOST_EVERY = Number(process.env.ZAMBAHOLA_PATTERN_BOOST_EVERY ?? 8);
 const EXPORT_EVERY = Number(process.env.ZAMBAHOLA_LIVE_EXPORT_EVERY ?? 40);
 
 let statePromise: Promise<LearningState> | null = null;
@@ -30,6 +42,7 @@ export interface LiveEvalContext {
   ensembleHit: boolean;
   direction?: "up" | "down" | "range";
   directionalHit?: boolean | null;
+  regime?: string;
   strategyStats: StrategyHitStats[];
   engine: PredictionEngine;
 }
@@ -73,11 +86,12 @@ export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningSt
     });
   }
 
+  const orchMin = orchestratorMinRolling();
   if (
     state.totalEvaluations % ORCH_EVERY === 0 &&
     ctx.strategyStats.length > 0 &&
     !shouldSkipOrchestratorBoost() &&
-    (guard.directionalRolling >= 0.55 || guard.rollingHitRate >= 0.52)
+    (guard.directionalRolling >= orchMin || guard.rollingHitRate >= orchMin - 0.05)
   ) {
     const boosted = await boostTopStrategies(ctx.strategyStats, 10);
     ctx.engine.setWeights(boosted);
@@ -89,6 +103,20 @@ export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningSt
       evaluations: state.totalEvaluations,
       top: ctx.strategyStats.slice(0, 5).map((s) => s.strategyId),
       understandingScore: state.understandingScore,
+    });
+  }
+
+  if (isIntensiveLearn() && state.totalEvaluations % PATTERN_BOOST_EVERY === 0) {
+    const regime = ctx.regime ?? "range";
+    const base = await loadStrategyWeights(ALL_STRATEGIES.map((s) => s.id));
+    const boosted = await boostFromPatternJournal(regime, base);
+    ctx.engine.setWeights(boosted);
+    state.totalLearningUpdates += 1;
+    didUpdate = true;
+    await appendResearchLog({
+      event: "pattern_journal_weight_boost",
+      regime,
+      evaluations: state.totalEvaluations,
     });
   }
 

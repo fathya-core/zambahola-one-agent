@@ -44,6 +44,7 @@ function renderMetrics(m) {
             ? "signals (trend)"
             : "—",
       ],
+      ["Intensive learn", m.intensiveLearn ? "ON (مكثّف)" : "off"],
       ["Rolling hit (60)", m.rollingHitRate != null ? (m.rollingHitRate * 100).toFixed(1) + "%" : "—"],
       ["Dir. rolling (60)", m.directionalRollingHitRate != null ? (m.directionalRollingHitRate * 100).toFixed(1) + "%" : "—"],
       ["Peak hit", m.peakHitRate != null ? (m.peakHitRate * 100).toFixed(1) + "%" : "—"],

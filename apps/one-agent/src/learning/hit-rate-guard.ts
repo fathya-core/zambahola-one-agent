@@ -1,6 +1,7 @@
 import { saveBestWeights, loadBestWeights, restoreBestWeightsToFile } from "./weight-snapshot.js";
 import { appendResearchLog } from "./adaptive-weights.js";
 import type { LearningState } from "./learning-state.js";
+import { guardRelaxed, isIntensiveLearn } from "./intensive-learn.js";
 
 const WINDOW = Number(process.env.ZAMBAHOLA_HIT_WINDOW ?? 60);
 const DROP_TRIGGER = Number(process.env.ZAMBAHOLA_HIT_DROP ?? 0.12);
@@ -60,7 +61,7 @@ export function recordHit(
   const minSamples = guardMetric === "directional" ? 15 : 20;
   const belowFloor = recentDirectional.length >= minSamples && rolling < floor;
 
-  if ((droppedFromPeak || belowFloor) && !stabilizeMode) {
+  if ((droppedFromPeak || belowFloor) && !stabilizeMode && !guardRelaxed()) {
     stabilizeMode = true;
     void appendResearchLog({
       event: "hit_rate_guard_on",
@@ -96,14 +97,17 @@ export function isStabilizeMode(): boolean {
 }
 
 export function shouldPauseMlTrain(): boolean {
+  if (isIntensiveLearn()) return false;
   return isStabilizeMode();
 }
 
 export function shouldSkipOrchestratorBoost(): boolean {
+  if (isIntensiveLearn()) return false;
   return isStabilizeMode();
 }
 
 export function gentleWeightMultipliers(): { hit: number; miss: number } {
+  if (isIntensiveLearn()) return { hit: 1.045, miss: 0.955 };
   if (isStabilizeMode()) return { hit: 1.008, miss: 0.992 };
   return { hit: 1.025, miss: 0.975 };
 }

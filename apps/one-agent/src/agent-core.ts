@@ -31,6 +31,7 @@ import {
   resolveHorizonSec,
   resolveTradeMaxHoldSec,
 } from "./config/hybrid-mode.js";
+import { isIntensiveLearn } from "./learning/intensive-learn.js";
 import {
   appendRun,
   appendTradeLedger,
@@ -347,6 +348,7 @@ export class AgentCore {
           direction: evaluation.direction,
           directionalHit:
             evaluation.direction !== "range" ? evaluation.predictionHit : null,
+          regime: evaluatedPred.meta?.regime ?? "range",
           strategyStats: this.buildMetrics().strategyStats ?? [],
           engine: this.predictionEngine,
         });
@@ -423,6 +425,7 @@ export class AgentCore {
       hybridAuto: isHybridAuto(),
       hybridProfile: getHybridProfile(),
       hybridSwitchCount: this.hybridSwitchTotal,
+      intensiveLearn: isIntensiveLearn(),
       updatedAt: Date.now(),
     };
   }
