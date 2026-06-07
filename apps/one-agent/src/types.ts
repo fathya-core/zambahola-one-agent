@@ -150,6 +150,7 @@ export interface AgentMetrics {
   hybridProfile?: "learn" | "signals" | null;
   hybridSwitchCount?: number;
   intensiveLearn?: boolean;
+  recoveryMode?: boolean;
   updatedAt: number;
 }
 

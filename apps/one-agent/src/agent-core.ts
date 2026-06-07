@@ -32,6 +32,8 @@ import {
   resolveTradeMaxHoldSec,
 } from "./config/hybrid-mode.js";
 import { isIntensiveLearn } from "./learning/intensive-learn.js";
+import { computeHitBand } from "./learning/hit-eval.js";
+import { isRecoveryMode } from "./learning/recovery-mode.js";
 import {
   appendRun,
   appendTradeLedger,
@@ -291,7 +293,11 @@ export class AgentCore {
 
       if (evaluatedPred.meta?.strategyVotes) {
         const change = evaluation.priceAtHorizon - evaluation.priceAtPrediction;
-        const band = evaluation.priceAtPrediction * 0.0008;
+        const fv = evaluatedPred.meta?.features as FeatureVector | undefined;
+        const band = computeHitBand(
+          evaluation.priceAtPrediction,
+          fv?.volatility,
+        );
         const hits = strategyHitsFromVotes(
           evaluatedPred.meta.strategyVotes,
           evaluation.direction,
@@ -322,7 +328,6 @@ export class AgentCore {
           );
         }
 
-        const fv = evaluatedPred.meta?.features as FeatureVector | undefined;
         if (fv && evaluatedPred.meta?.agreement != null) {
           const meta = await getMetaLabeler();
           await meta.train(
@@ -426,6 +431,7 @@ export class AgentCore {
       hybridProfile: getHybridProfile(),
       hybridSwitchCount: this.hybridSwitchTotal,
       intensiveLearn: isIntensiveLearn(),
+      recoveryMode: isRecoveryMode(),
       updatedAt: Date.now(),
     };
   }

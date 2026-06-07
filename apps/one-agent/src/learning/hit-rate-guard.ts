@@ -2,6 +2,7 @@ import { saveBestWeights, loadBestWeights, restoreBestWeightsToFile } from "./we
 import { appendResearchLog } from "./adaptive-weights.js";
 import type { LearningState } from "./learning-state.js";
 import { guardRelaxed, isIntensiveLearn } from "./intensive-learn.js";
+import { isRecoveryMode } from "./recovery-mode.js";
 
 const WINDOW = Number(process.env.ZAMBAHOLA_HIT_WINDOW ?? 60);
 const DROP_TRIGGER = Number(process.env.ZAMBAHOLA_HIT_DROP ?? 0.12);
@@ -61,7 +62,21 @@ export function recordHit(
   const minSamples = guardMetric === "directional" ? 15 : 20;
   const belowFloor = recentDirectional.length >= minSamples && rolling < floor;
 
-  if ((droppedFromPeak || belowFloor) && !stabilizeMode && !guardRelaxed()) {
+  if (isRecoveryMode() && stabilizeMode) {
+    stabilizeMode = false;
+    void appendResearchLog({
+      event: "hit_rate_guard_recovery_off",
+      rolling,
+      directionalRolling: dirRolling,
+    });
+  }
+
+  if (
+    (droppedFromPeak || belowFloor) &&
+    !stabilizeMode &&
+    !guardRelaxed() &&
+    !isRecoveryMode()
+  ) {
     stabilizeMode = true;
     void appendResearchLog({
       event: "hit_rate_guard_on",
@@ -93,6 +108,7 @@ export function recordHit(
 }
 
 export function isStabilizeMode(): boolean {
+  if (isRecoveryMode() && process.env.ZAMBAHOLA_STABILIZE !== "1") return false;
   return stabilizeMode || process.env.ZAMBAHOLA_STABILIZE === "1";
 }
 
@@ -141,6 +157,7 @@ export async function maybeSnapshotOrRestore(
 
   if (
     isStabilizeMode() &&
+    !isRecoveryMode() &&
     Date.now() - lastRestoreAt > 120_000 &&
     metric < (state.peakDirectionalHitRate ?? state.peakHitRate ?? 0.7) - DROP_TRIGGER
   ) {

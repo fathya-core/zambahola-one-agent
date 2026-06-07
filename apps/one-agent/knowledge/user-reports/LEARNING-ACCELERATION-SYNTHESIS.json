@@ -1,0 +1,58 @@
+{
+  "version": "1",
+  "titleAr": "تجميع بحث التسريع — أخطاء شائعة + حلول مدمجة",
+  "entries": [
+    {
+      "source": "cloud-research",
+      "importedAt": "2026-06-07",
+      "query": "Meta-labeling AFML + online learning + abstention",
+      "minDirectionalHitTarget": 0.58,
+      "weightAdjustments": {
+        "order_imbalance": 1.35,
+        "momentum": 1.2,
+        "volatility_regime": 1.15,
+        "premium_momentum": 1.12,
+        "volume_breakout": 1.1,
+        "mean_reversion": 0.75,
+        "bollinger": 0.88,
+        "funding_fade": 0.85
+      },
+      "notes": "Meta-label يفلتر السياق مو الثقة فقط. في range: عطّل meta أثناء التعلّم. order_imbalance+momentum أقوى في BTC سريع."
+    },
+    {
+      "source": "internal-audit",
+      "importedAt": "2026-06-07",
+      "query": "أخطاء أبطأت OMAR-PC عند 27% directional",
+      "topics": [
+        "stabilize-death-spiral",
+        "LABEL_BP-mismatch",
+        "orch-threshold-0.55",
+        "accuracy-filter-in-range",
+        "weight-restore-stale"
+      ],
+      "notes": "إصلاحات v0: recovery-mode, unified LABEL_BP, guard-relax, phase3-intensive. لا تستخدم STABILIZE=1 مع hit<45%."
+    },
+    {
+      "source": "hf-paper-search",
+      "importedAt": "2026-06-07",
+      "query": "financial machine learning meta labeling trading",
+      "papers": [
+        "https://hf.co/papers/2304.13174",
+        "https://hf.co/papers/2312.15730",
+        "https://hf.co/papers/2212.08656"
+      ],
+      "notes": "FinRL-Meta: بيئات ديناميكية. MTMD: debiasing للضوضاء. QTNet: POMDP للتقلب. مفيد لاحقاً لـ turbo-learn مجدول."
+    },
+    {
+      "source": "web-research",
+      "importedAt": "2026-06-07",
+      "query": "meta-labeling calibration abstain threshold",
+      "refs": [
+        "https://docs.jesse.trade/docs/research/ml/meta-labeling",
+        "https://ml4trading.io/docs/engineer/user-guide/labeling/",
+        "https://hudsonthames.org/wp-content/uploads/2022/04/Does-Meta-Labeling-Add-to-Signal-Efficacy.pdf"
+      ],
+      "notes": "فعّل meta بعد dir≥50% و≥200 عينة. استخدم threshold كبوابة abstain لا sizing قبل calibration."
+    }
+  ]
+}
