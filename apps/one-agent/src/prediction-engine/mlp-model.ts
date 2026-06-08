@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { featuresToArray, type FeatureVector, directionFromScore, FEATURE_DIM } from "../features/index.js";
 import type { PredictionDirection } from "../types.js";
+import { safeProb, safeScore } from "../learning/safe-prob.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const MLP_FILE = join(pkgRoot, "data", "learning", "mlp-weights.json");
@@ -49,9 +50,10 @@ export class MLPModel {
   }
 
   predict(f: FeatureVector): { score: number; direction: PredictionDirection; prob: number } {
-    const { prob } = this.forward(featuresToArray(f));
-    const score = (prob - 0.5) * 2;
-    return { score, direction: directionFromScore(score), prob: Number(prob.toFixed(4)) };
+    const { prob: raw } = this.forward(featuresToArray(f));
+    const prob = safeProb(raw);
+    const score = safeScore((prob - 0.5) * 2);
+    return { score, direction: directionFromScore(score), prob };
   }
 
   async train(f: FeatureVector | Record<string, number>, label: number): Promise<void> {

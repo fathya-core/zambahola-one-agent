@@ -9,6 +9,7 @@ import {
   FEATURE_DIM,
 } from "../features/index.js";
 import type { PredictionDirection } from "../types.js";
+import { safeProb, safeScore } from "../learning/safe-prob.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const MODEL_FILE = join(pkgRoot, "data", "learning", "ml-weights.json");
@@ -52,12 +53,12 @@ export class OnlineMLModel {
   predict(features: FeatureVector): { score: number; direction: PredictionDirection; prob: number } {
     const x = featuresToArray(features);
     const z = dot(this.weights, x);
-    const prob = sigmoid(z);
-    const score = (prob - 0.5) * 2;
+    const prob = safeProb(sigmoid(z));
+    const score = safeScore((prob - 0.5) * 2);
     return {
       score,
       direction: directionFromScore(score),
-      prob: Number(prob.toFixed(4)),
+      prob,
     };
   }
 

@@ -9,6 +9,7 @@ import {
   FEATURE_DIM,
 } from "../features/index.js";
 import type { PredictionDirection } from "../types.js";
+import { safeProb, safeScore } from "../learning/safe-prob.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const GBM_FILE = join(pkgRoot, "data", "learning", "gbm-trees.json");
@@ -58,12 +59,12 @@ export class GBMModel {
     for (const t of this.trees) {
       sum += x[t.featureIdx]! <= t.threshold ? t.leftValue : t.rightValue;
     }
-    const prob = sigmoid(sum);
-    const score = (prob - 0.5) * 2;
+    const prob = safeProb(sigmoid(sum));
+    const score = safeScore((prob - 0.5) * 2);
     return {
       score,
       direction: directionFromScore(score),
-      prob: Number(prob.toFixed(4)),
+      prob,
     };
   }
 

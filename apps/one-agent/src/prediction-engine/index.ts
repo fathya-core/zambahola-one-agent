@@ -347,7 +347,7 @@ export class PredictionEngine {
     hit: boolean,
     rawConfidence: number,
   ): Promise<void> {
-    if (features) {
+    if (features && process.env.ZAMBAHOLA_DL_LIVE_TRAIN !== "0") {
       const label =
         direction === "up" ? (hit ? 1 : 0) : direction === "down" ? (hit ? 0 : 1) : 0.5;
       const fv = features as FeatureVector;
