@@ -80,6 +80,13 @@
       "command": "npx -y @skills-hub-ai/mcp"
     }
   },
+  "dualAgent": {
+    "primary": "agent-core + live-learning (predict, train, pattern journal)",
+    "secondary": "log-auditor + log-audit-hook (audit latest.jsonl, cleanup, skill hints)",
+    "integratedEveryEvals": "ZAMBAHOLA_LOG_AUDIT_EVERY default 50",
+    "api": ["/api/log-audit", "/api/skills"],
+    "mcp": ["zambahola_get_log_audit", "zambahola_run_log_audit", "zambahola_get_skills"]
+  },
   "npmCommands": {
     "live": ["agent:phase2-live", "agent:phase4-hit-recover"],
     "bridge": ["agent:local-bridge", "agent:push-telemetry", "agent:remote-watcher"],

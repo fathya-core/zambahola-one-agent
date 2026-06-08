@@ -18,14 +18,22 @@ npm run agent:remote-watcher   # cloud commands
 
 Verify: `npm run agent:health-check` → horizon **45s**, hostname **OMAR-PC**, feed **fast_tick**.
 
-## Second agent — log reviewer
+## Dual agents (primary + log reviewer)
+
+**Primary** predicts/trains live. **Log reviewer** audits `latest.jsonl` every `ZAMBAHOLA_LOG_AUDIT_EVERY` (50) evals — reloads weights in-process when cleanup applies.
 
 ```powershell
-npm run agent:log-review           # dry-run analysis
-npm run agent:log-review:apply     # soften weak weights, prune receipts, fix NaN ML
+npm run agent:log-review           # manual dry-run
+npm run agent:log-review:apply     # manual cleanup
 ```
 
-Reports: `data/learning/LOG-AUDIT-REPORT.json` · `.md` — see `docs/ar/مراجع-السجل.md`
+MCP: `zambahola_get_log_audit` · `zambahola_run_log_audit` · `zambahola_get_skills?q=...`
+
+Remote: queue `{ "action": "log-review:apply" }` in `REMOTE-COMMANDS.json`.
+
+When issues detected, `/api/analyst` returns `skillHintsAr` (Tavily/HF/Zapier/npm suggestions).
+
+Reports: `data/learning/LOG-AUDIT-REPORT.json` — `docs/ar/مراجع-السجل.md`
 
 ## MCP tools (local — `zambahola-local`)
 

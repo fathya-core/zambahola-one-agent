@@ -51,6 +51,27 @@ const TOOLS = [
     description: "Read LOCAL-TELEMETRY.json from disk (offline)",
     inputSchema: { type: "object", properties: {} },
   },
+  {
+    name: "zambahola_get_log_audit",
+    description: "Log reviewer (second agent) — last audit report with hit/miss analysis",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "zambahola_run_log_audit",
+    description: "Run log reviewer on latest.jsonl; set apply=true to clean weak weights",
+    inputSchema: {
+      type: "object",
+      properties: { apply: { type: "boolean" } },
+    },
+  },
+  {
+    name: "zambahola_get_skills",
+    description: "Skills/MCP catalog and suggestions (q=task description)",
+    inputSchema: {
+      type: "object",
+      properties: { q: { type: "string" } },
+    },
+  },
 ];
 
 async function httpGet(base, path) {
@@ -94,6 +115,14 @@ async function handleTool(name, args) {
       const f = join(root, "apps/one-agent/data/bridge/LOCAL-TELEMETRY.json");
       if (!existsSync(f)) return { error: "no telemetry file — run agent:local-bridge" };
       return JSON.parse(await readFile(f, "utf8"));
+    }
+    case "zambahola_get_log_audit":
+      return await httpGet(agentUrl, "/api/log-audit");
+    case "zambahola_run_log_audit":
+      return await httpPost(agentUrl, "/api/log-audit", { apply: Boolean(args.apply) });
+    case "zambahola_get_skills": {
+      const q = args.q ? `?q=${encodeURIComponent(args.q)}` : "";
+      return await httpGet(agentUrl, `/api/skills${q}`);
     }
     default:
       throw new Error(`unknown tool: ${name}`);

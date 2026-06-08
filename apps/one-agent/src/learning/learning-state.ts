@@ -22,6 +22,8 @@ export interface LearningState {
   peakHitRate: number;
   peakDirectionalHitRate: number;
   weightRestores: number;
+  logAudits: number;
+  lastLogAuditAt: number;
   stabilizeMode: boolean;
   lastUpdateAt: number;
   startedAt: number;
@@ -43,6 +45,8 @@ const DEFAULT: LearningState = {
   peakHitRate: 0,
   peakDirectionalHitRate: 0,
   weightRestores: 0,
+  logAudits: 0,
+  lastLogAuditAt: 0,
   stabilizeMode: false,
   lastUpdateAt: 0,
   startedAt: Date.now(),

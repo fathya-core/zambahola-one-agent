@@ -23,6 +23,7 @@ import { updateRecoveryMetrics } from "./recovery-mode.js";
 import { updateHitRecoverRolling } from "./hit-recover-mode.js";
 import { loadStrategyWeights } from "./adaptive-weights.js";
 import { ALL_STRATEGIES } from "../prediction-engine/strategies/index.js";
+import { maybeRunLiveLogAudit, logAuditSkillHints } from "./log-audit-hook.js";
 
 const WEIGHT_EVERY = Number(
   process.env.ZAMBAHOLA_LIVE_WEIGHT_EVERY ?? (isIntensiveLearn() ? 3 : 5),
@@ -136,6 +137,28 @@ export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningSt
       event: "live_model_export",
       evaluations: state.totalEvaluations,
       understandingScore: state.understandingScore,
+    });
+  }
+
+  const auditReport = await maybeRunLiveLogAudit({
+    engine: ctx.engine,
+    totalEvaluations: state.totalEvaluations,
+    directionalRolling: guard.directionalRolling,
+  });
+  if (auditReport) {
+    state.logAudits = (state.logAudits ?? 0) + 1;
+    state.lastLogAuditAt = auditReport.auditedAt;
+    state.totalLearningUpdates += 1;
+    didUpdate = true;
+    await appendResearchLog({
+      event: "live_log_audit",
+      evaluations: state.totalEvaluations,
+      dryRun: auditReport.dryRun,
+      hitRate: auditReport.summary.hitRate,
+      directionalHitRate: auditReport.summary.directionalHitRate,
+      weightsChanged: auditReport.weightsChanged,
+      skillHints: logAuditSkillHints(auditReport),
+      insights: auditReport.insightsAr.slice(0, 4),
     });
   }
 

@@ -50,6 +50,10 @@ export interface LogAuditReport {
   auditedAt: number;
   source: string;
   dryRun: boolean;
+  /** True when strategy-weights.json was updated (caller should reload engine weights). */
+  weightsChanged: boolean;
+  mlReset: boolean;
+  mlpReset: boolean;
   summary: {
     predictions: number;
     evaluations: number;
@@ -305,15 +309,15 @@ async function softenWeakStrategies(
   byStrategy: Record<string, AuditBucket>,
   opts: { weakHitRate: number; minSamples: number },
   dryRun: boolean,
-): Promise<CleanupAction[]> {
+): Promise<{ actions: CleanupAction[]; weightsChanged: boolean; weights?: StrategyWeights }> {
   const actions: CleanupAction[] = [];
-  if (!existsSync(WEIGHTS_FILE)) return actions;
+  if (!existsSync(WEIGHTS_FILE)) return { actions, weightsChanged: false };
 
   let weights: StrategyWeights;
   try {
     weights = JSON.parse(await readFile(WEIGHTS_FILE, "utf8")) as StrategyWeights;
   } catch {
-    return actions;
+    return { actions, weightsChanged: false };
   }
 
   let changed = false;
@@ -336,7 +340,7 @@ async function softenWeakStrategies(
     await mkdir(dirname(WEIGHTS_FILE), { recursive: true });
     await writeFile(WEIGHTS_FILE, JSON.stringify(weights, null, 2), "utf8");
   }
-  return actions;
+  return { actions, weightsChanged: changed && !dryRun, weights: changed ? weights : undefined };
 }
 
 export async function runLogAudit(options: LogAuditOptions = {}): Promise<LogAuditReport> {
@@ -454,13 +458,23 @@ export async function runLogAudit(options: LogAuditOptions = {}): Promise<LogAud
   partial.insightsAr = buildInsights(partial);
 
   const cleanup: CleanupAction[] = [];
-  cleanup.push(...(await softenWeakStrategies(byStrategy, { weakHitRate, minSamples: minStrategySamples }, dryRun)));
-  cleanup.push(...(await sanitizeMlWeights(dryRun)));
-  cleanup.push(...(await sanitizeMlpWeights(dryRun)));
+  const softened = await softenWeakStrategies(
+    byStrategy,
+    { weakHitRate, minSamples: minStrategySamples },
+    dryRun,
+  );
+  cleanup.push(...softened.actions);
+  const mlActions = await sanitizeMlWeights(dryRun);
+  cleanup.push(...mlActions);
+  const mlpActions = await sanitizeMlpWeights(dryRun);
+  cleanup.push(...mlpActions);
   cleanup.push(...(await pruneReceipts(maxReceipts, dryRun)));
   cleanup.push(...(await trimResearchLog(maxResearchLines, dryRun)));
 
   partial.cleanup = cleanup;
+  const weightsChanged = softened.weightsChanged;
+  const mlReset = mlActions.some((a) => a.applied);
+  const mlpReset = mlpActions.some((a) => a.applied);
 
   if (!dryRun) {
     await flushJournal();
@@ -474,7 +488,12 @@ export async function runLogAudit(options: LogAuditOptions = {}): Promise<LogAud
     });
   }
 
-  const report: LogAuditReport = partial;
+  const report: LogAuditReport = {
+    ...partial,
+    weightsChanged,
+    mlReset,
+    mlpReset,
+  };
   await mkdir(dirname(AUDIT_JSON), { recursive: true });
   await writeJsonAtomic(AUDIT_JSON, report);
 
@@ -506,4 +525,9 @@ export async function runLogAudit(options: LogAuditOptions = {}): Promise<LogAud
   await writeFile(AUDIT_MD, md, "utf8");
 
   return report;
+}
+
+export async function getLastLogAuditReport(): Promise<LogAuditReport | null> {
+  const { readJsonSafe } = await import("../storage/json-io.js");
+  return readJsonSafe<LogAuditReport>(AUDIT_JSON);
 }

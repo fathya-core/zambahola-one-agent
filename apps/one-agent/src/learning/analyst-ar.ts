@@ -79,15 +79,21 @@ export function explainPredictionAr(meta?: PredictionMeta): string[] {
 export function buildAnalystReportAr(
   meta?: PredictionMeta,
   patterns?: PatternJournalData,
+  logAuditInsights?: string[],
 ): {
   summaryAr: string;
   bulletsAr: string[];
+  skillHintsAr?: string[];
   updatedAt: number;
 } {
   const bullets = explainPredictionAr(meta);
   if (patterns?.recentInsightsAr?.length) {
     bullets.push("---");
     bullets.push(...patterns.recentInsightsAr.slice(0, 4));
+  }
+  if (logAuditInsights?.length) {
+    bullets.push("--- مراجع السجل ---");
+    bullets.push(...logAuditInsights.slice(0, 4));
   }
 
   const dir = meta?.gateReason?.includes("abstain") || meta?.qualityTier === "abstain"

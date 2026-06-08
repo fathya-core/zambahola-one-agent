@@ -146,12 +146,47 @@ async function route(
         "Strategy weights adjust on every hit/miss",
         `Every ${process.env.ZAMBAHOLA_LIVE_ORCH_EVERY ?? 12} evals: orchestrator boosts top strategies`,
         `Every ${process.env.ZAMBAHOLA_LIVE_EXPORT_EVERY ?? 40} evals: model bundle export`,
+        `Every ${process.env.ZAMBAHOLA_LOG_AUDIT_EVERY ?? 50} evals: log reviewer (second agent) audits latest.jsonl`,
       ],
     });
   }
   if (path === "/api/patterns") {
     const { getPatternJournal } = await import("../learning/pattern-journal.js");
     return sendJson(res, 200, await getPatternJournal());
+  }
+  if (path === "/api/log-audit" && req.method === "GET") {
+    const { getLastLogAuditReport } = await import("../learning/log-auditor.js");
+    const { getLiveLogAuditReport } = await import("../learning/log-audit-hook.js");
+    const cached = getLiveLogAuditReport() ?? (await getLastLogAuditReport());
+    return sendJson(res, 200, cached ?? { note: "no audit yet — wait for evaluations" });
+  }
+  if (path === "/api/log-audit" && req.method === "POST") {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as {
+      apply?: boolean;
+    };
+    const { runLogAudit } = await import("../learning/log-auditor.js");
+    const { loadStrategyWeights } = await import("../learning/adaptive-weights.js");
+    const report = await runLogAudit({ dryRun: !body.apply });
+    if (report.weightsChanged && body.apply) {
+      const { ALL_STRATEGIES } = await import("../prediction-engine/strategies/index.js");
+      const weights = await loadStrategyWeights(ALL_STRATEGIES.map((s) => s.id));
+      agent.predictionEngine.setWeights(weights);
+    }
+    if (body.apply && report.mlReset) await agent.predictionEngine.ml.load();
+    if (body.apply && report.mlpReset) await agent.predictionEngine.mlp.load();
+    return sendJson(res, 200, report);
+  }
+  if (path === "/api/skills") {
+    const { getSkillsCatalogSummary, suggestSkillsForContext } = await import(
+      "../learning/skills-router.js"
+    );
+    const q = url.searchParams.get("q") ?? "";
+    return sendJson(res, 200, {
+      catalog: await getSkillsCatalogSummary(),
+      suggestions: q ? suggestSkillsForContext(q) : [],
+    });
   }
   if (path === "/api/calibration") {
     const cal = agent.predictionEngine.calibrator;
@@ -168,9 +203,20 @@ async function route(
     const { lastPrediction } = agent.getRuntimeState();
     const patterns = await getPatternJournal();
     const metaPnl = await getMetaPnlModel();
-    const report = buildAnalystReportAr(lastPrediction?.meta, patterns);
+    const { getLiveLogAuditReport } = await import("../learning/log-audit-hook.js");
+    const { getLastLogAuditReport } = await import("../learning/log-auditor.js");
+    const { logAuditSkillHints } = await import("../learning/log-audit-hook.js");
+    const audit = getLiveLogAuditReport() ?? (await getLastLogAuditReport());
+    const report = buildAnalystReportAr(
+      lastPrediction?.meta,
+      patterns,
+      audit?.insightsAr,
+    );
+    const skillHints = audit ? logAuditSkillHints(audit) : [];
     return sendJson(res, 200, {
       ...report,
+      skillHintsAr: skillHints,
+      logAuditSummary: audit?.summary ?? null,
       metaPnl: metaPnl.getState(),
       lastPrediction: lastPrediction
         ? {

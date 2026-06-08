@@ -32,12 +32,14 @@ async function fetchAgent(path) {
 }
 
 async function collectTelemetry() {
-  const [status, metrics, analyst, calibration, learning] = await Promise.all([
+  const [status, metrics, analyst, calibration, learning, logAudit, skills] = await Promise.all([
     fetchAgent("/api/status"),
     fetchAgent("/api/metrics"),
     fetchAgent("/api/analyst"),
     fetchAgent("/api/calibration"),
     fetchAgent("/api/learning"),
+    fetchAgent("/api/log-audit"),
+    fetchAgent("/api/skills"),
   ]);
   const snapshot = {
     ...telemetryTimeFields(),
@@ -52,7 +54,11 @@ async function collectTelemetry() {
       metaLabel: learning.body?.metaLabel,
       metaPnl: learning.body?.metaPnl,
       directionalRollingHitRate: learning.body?.guard?.directionalRollingHitRate,
+      logAudits: learning.body?.logAudits,
     },
+    logAudit: logAudit.body,
+    skillsCatalog: skills.body?.catalog ?? null,
+    analystSkillHints: analyst.body?.skillHintsAr ?? [],
   };
   await mkdir(bridgeDir, { recursive: true });
   await writeFile(telemetryFile, JSON.stringify(snapshot, null, 2), "utf8");
