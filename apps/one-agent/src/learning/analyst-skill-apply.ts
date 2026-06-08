@@ -12,6 +12,7 @@ import { boostFromPatternJournal } from "./pattern-weight-boost.js";
 import { restoreBestWeightsToFile, loadBestWeights } from "./weight-snapshot.js";
 import { queueRemoteAction } from "../bridge/queue-command.js";
 import type { SkillSuggestion } from "./skills-router.js";
+import { isHitRecoverMode } from "./hit-recover-mode.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceRoot = join(pkgRoot, "../..");
@@ -104,6 +105,19 @@ function pickActions(ctx: AnalystApplyContext): SkillSuggestion[] {
     });
   }
 
+  if (abstain < 0.35 && dir < 0.5 && evals >= MIN_EVALS) {
+    actions.push({
+      kind: "npm",
+      id: "agent:log-review:apply",
+      use: "إشارات كثيرة ضعيفة — مراجعة السجل",
+    });
+    actions.push({
+      kind: "npm",
+      id: "agent:patterns",
+      use: "تحديث يومية الأنماط بعد overtrading",
+    });
+  }
+
   if (dir < 0.4 && evals >= MIN_EVALS) {
     actions.push({
       kind: "npm",
@@ -115,7 +129,7 @@ function pickActions(ctx: AnalystApplyContext): SkillSuggestion[] {
       id: "agent:patterns",
       use: "تحديث يومية الأنماط",
     });
-    if (dir < 0.32) {
+    if (dir < 0.32 && !isHitRecoverMode()) {
       actions.push({
         kind: "npm",
         id: "agent:restore-weights",

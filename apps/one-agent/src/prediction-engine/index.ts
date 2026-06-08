@@ -8,6 +8,7 @@ import {
   countSTierForDirection,
   shouldPromoteLatentDirection,
 } from "./latent-consensus.js";
+import { applyExpertDirectionalLean } from "./expert-lean.js";
 import { loadStrategyWeights, type StrategyWeights } from "../learning/adaptive-weights.js";
 import { extractFeatures, type FeatureVector } from "../features/index.js";
 import { OnlineMLModel } from "./ml-model.js";
@@ -330,20 +331,20 @@ export class PredictionEngine {
         }
       }
 
-      if (
-        direction === "range" &&
-        isHitRecoverMode() &&
-        process.env.ZAMBAHOLA_HIT_RECOVER_S_LEAN !== "0" &&
-        latent.candidate &&
-        tierSVotes >= Number(process.env.ZAMBAHOLA_LATENT_MIN_S_VOTES ?? 2)
-      ) {
-        direction = latent.candidate;
-        confidence = Math.min(
-          0.64,
-          0.54 + latent.directionalAgreement * 0.12,
-        );
-        qualityTier = "medium";
-        gateReason = `${gateReason} | hit_recover_S_tier_lean`;
+      const expertLean = applyExpertDirectionalLean({
+        direction,
+        latent,
+        tierSVotes,
+        directionalAgreement,
+        mlProb,
+        mlpProb,
+        gbmProb,
+      });
+      if (expertLean) {
+        direction = expertLean.direction;
+        confidence = expertLean.confidence;
+        qualityTier = expertLean.qualityTier;
+        gateReason = `${gateReason} | ${expertLean.reason}`;
       }
 
       if (process.env.ZAMBAHOLA_ANALYST_AR !== "0") {

@@ -14,6 +14,7 @@ const GATE_AR: Record<string, string> = {
   high_vol: "نظام تذبذب عالي — يحتاج إجماع أقوى.",
   expert_block: "خبير الاستراتيجيات حظر الإشارة (مثلاً mean_reversion ضد الترند).",
   range_abstain: "امتناع طبيعي — السوق في نطاق.",
+  expert_lean: "خبير: إشارة اتجاهية بعد توافق S-tier + نماذج.",
 };
 
 function matchGate(reason: string): string | null {

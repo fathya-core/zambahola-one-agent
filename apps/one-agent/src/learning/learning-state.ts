@@ -30,6 +30,9 @@ export interface LearningState {
   sessionSkillApplies: number;
   /** Mirrors agent-core startedAt for uptime gates */
   sessionStartedAt: number;
+  /** Dedup background audit/analyst at same session milestone */
+  lastAuditSessionEval: number;
+  lastAnalystSessionEval: number;
   stabilizeMode: boolean;
   lastUpdateAt: number;
   startedAt: number;
@@ -57,6 +60,8 @@ const DEFAULT: LearningState = {
   sessionLogAudits: 0,
   sessionSkillApplies: 0,
   sessionStartedAt: 0,
+  lastAuditSessionEval: 0,
+  lastAnalystSessionEval: 0,
   stabilizeMode: false,
   lastUpdateAt: 0,
   startedAt: Date.now(),

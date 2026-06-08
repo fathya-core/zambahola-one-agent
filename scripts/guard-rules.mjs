@@ -31,6 +31,18 @@ export function diagnoseSnapshot(snap) {
   const dirCount = metrics.directionalCount ?? 0;
   const uptime = time.uptimeSec ?? 0;
 
+  if (uptime >= 600 && abstain < 0.35 && dirCount > 200) {
+    const dirHit = metrics.directionalHitRate ?? 0;
+    if (dirHit < 0.45) {
+      issues.push({
+        id: "overtrading",
+        severity: "high",
+        ar: `إشارات كثيرة ضعيفة — امتناع ${(abstain * 100).toFixed(0)}% · اتجاهي ${(dirHit * 100).toFixed(1)}%`,
+      });
+      fixes.push({ action: "log-review:apply", via: "api", reason: "expert tighten" });
+    }
+  }
+
   if (uptime >= 600 && abstain >= 0.92 && dirCount < 5) {
     issues.push({
       id: "abstain_lock",

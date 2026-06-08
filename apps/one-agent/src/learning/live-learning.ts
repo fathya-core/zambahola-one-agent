@@ -39,6 +39,15 @@ const ANALYST_APPLY_MIN_EVALS = Number(process.env.ZAMBAHOLA_ANALYST_APPLY_MIN_E
 
 let statePromise: Promise<LearningState> | null = null;
 let dualAgentChain = Promise.resolve();
+const enqueuedDualAt = new Set<number>();
+
+async function patchLearningState(patch: Partial<LearningState>): Promise<LearningState> {
+  const state = await loadLearningState();
+  Object.assign(state, patch);
+  await saveLearningState(state);
+  statePromise = Promise.resolve(state);
+  return state;
+}
 
 interface DualAgentJob {
   engine: PredictionEngine;
@@ -59,8 +68,8 @@ function enqueueDualAgent(job: DualAgentJob): void {
 }
 
 async function runDualAgentJob(job: DualAgentJob): Promise<void> {
-  let state = await loadLearningState();
   let auditReport: Awaited<ReturnType<typeof maybeRunLiveLogAudit>> = null;
+  const patch: Partial<LearningState> = {};
 
   if (job.scheduleAudit) {
     try {
@@ -71,13 +80,15 @@ async function runDualAgentJob(job: DualAgentJob): Promise<void> {
         sessionStartedAt: job.sessionStartedAt,
       });
       if (auditReport) {
-        state.logAudits = (state.logAudits ?? 0) + 1;
-        state.sessionLogAudits = (state.sessionLogAudits ?? 0) + 1;
-        state.lastLogAuditAt = auditReport.auditedAt;
-        state.totalLearningUpdates += 1;
+        const cur = await loadLearningState();
+        patch.logAudits = (cur.logAudits ?? 0) + 1;
+        patch.sessionLogAudits = (cur.sessionLogAudits ?? 0) + 1;
+        patch.lastLogAuditAt = auditReport.auditedAt;
+        patch.lastAuditSessionEval = job.sessionEvaluations;
+        patch.totalLearningUpdates = (cur.totalLearningUpdates ?? 0) + 1;
         await appendResearchLog({
           event: "live_log_audit",
-          evaluations: state.totalEvaluations,
+          evaluations: cur.totalEvaluations,
           sessionEvaluations: job.sessionEvaluations,
           dryRun: auditReport.dryRun,
           hitRate: auditReport.summary.hitRate,
@@ -105,16 +116,20 @@ async function runDualAgentJob(job: DualAgentJob): Promise<void> {
         skipLogReviewApply: auditReport !== null,
       });
       if (skillApplied.length) {
-        state.sessionSkillApplies = (state.sessionSkillApplies ?? 0) + 1;
-        state.totalLearningUpdates += 1;
+        const cur = await loadLearningState();
+        patch.sessionSkillApplies = (cur.sessionSkillApplies ?? 0) + 1;
+        patch.lastAnalystSessionEval = job.sessionEvaluations;
+        patch.totalLearningUpdates =
+          (patch.totalLearningUpdates ?? cur.totalLearningUpdates ?? 0) + 1;
       }
     } catch (err) {
       console.warn("[zambahola] background analyst apply failed:", err);
     }
   }
 
-  await saveLearningState(state);
-  statePromise = Promise.resolve(state);
+  if (Object.keys(patch).length > 0) {
+    await patchLearningState(patch);
+  }
 }
 
 async function getState(): Promise<LearningState> {
@@ -129,6 +144,9 @@ export async function beginLiveLearningSession(agentStartedAt: number): Promise<
   state.sessionLogAudits = 0;
   state.sessionSkillApplies = 0;
   state.sessionStartedAt = agentStartedAt;
+  state.lastAuditSessionEval = 0;
+  state.lastAnalystSessionEval = 0;
+  enqueuedDualAt.clear();
   resetAnalystSession();
   await saveLearningState(state);
   statePromise = Promise.resolve(state);
@@ -288,25 +306,29 @@ export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningSt
   const uptimeSec = sessionStartedAt
     ? Math.floor((Date.now() - sessionStartedAt) / 1000)
     : 0;
-  const scheduleAudit =
+  const sess = state.sessionEvaluations;
+  const auditMilestone =
     auditEvery > 0 &&
-    state.sessionEvaluations >= auditMin &&
-    state.sessionEvaluations % auditEvery === 0 &&
-    uptimeSec >= auditMinUptime;
-  const scheduleAnalyst =
-    state.sessionEvaluations >= ANALYST_APPLY_MIN_EVALS &&
-    (scheduleAudit ||
-      (ANALYST_APPLY_EVERY > 0 && state.sessionEvaluations % ANALYST_APPLY_EVERY === 0));
+    sess >= auditMin &&
+    sess % auditEvery === 0 &&
+    uptimeSec >= auditMinUptime &&
+    sess > (state.lastAuditSessionEval ?? 0);
+  const analystMilestone =
+    sess >= ANALYST_APPLY_MIN_EVALS &&
+    sess > (state.lastAnalystSessionEval ?? 0) &&
+    (auditMilestone ||
+      (ANALYST_APPLY_EVERY > 0 && sess % ANALYST_APPLY_EVERY === 0));
 
-  if (scheduleAudit || scheduleAnalyst) {
+  if ((auditMilestone || analystMilestone) && !enqueuedDualAt.has(sess)) {
+    enqueuedDualAt.add(sess);
     enqueueDualAgent({
       engine: ctx.engine,
       sessionEvaluations: state.sessionEvaluations,
       sessionStartedAt,
       directionalRolling: guard.directionalRolling,
       regime: ctx.regime,
-      scheduleAudit,
-      scheduleAnalyst,
+      scheduleAudit: auditMilestone,
+      scheduleAnalyst: analystMilestone,
     });
   }
 
