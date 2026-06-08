@@ -141,49 +141,43 @@ export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningSt
     });
   }
 
-  const auditReport = await maybeRunLiveLogAudit({
-    engine: ctx.engine,
-    totalEvaluations: state.totalEvaluations,
-    directionalRolling: guard.directionalRolling,
-  });
-  if (auditReport) {
-    state.logAudits = (state.logAudits ?? 0) + 1;
-    state.lastLogAuditAt = auditReport.auditedAt;
-    state.totalLearningUpdates += 1;
-    didUpdate = true;
-
-    const skillApplied = await applyAnalystSkillActions({
+  let auditReport: Awaited<ReturnType<typeof maybeRunLiveLogAudit>> = null;
+  try {
+    auditReport = await maybeRunLiveLogAudit({
       engine: ctx.engine,
-      report: auditReport,
-      regime: ctx.regime,
+      totalEvaluations: state.totalEvaluations,
       directionalRolling: guard.directionalRolling,
-      abstainRate: auditReport.summary.abstainRate,
+      startedAt: state.startedAt,
     });
+    if (auditReport) {
+      state.logAudits = (state.logAudits ?? 0) + 1;
+      state.lastLogAuditAt = auditReport.auditedAt;
+      state.totalLearningUpdates += 1;
+      didUpdate = true;
 
-    await appendResearchLog({
-      event: "live_log_audit",
-      evaluations: state.totalEvaluations,
-      dryRun: auditReport.dryRun,
-      hitRate: auditReport.summary.hitRate,
-      directionalHitRate: auditReport.summary.directionalHitRate,
-      weightsChanged: auditReport.weightsChanged,
-      skillApplied: skillApplied.map((a) => a.id),
-      insights: auditReport.insightsAr.slice(0, 4),
-    });
-  }
+      const skillApplied = await applyAnalystSkillActions({
+        engine: ctx.engine,
+        report: auditReport,
+        regime: ctx.regime,
+        directionalRolling: guard.directionalRolling,
+        abstainRate: auditReport.summary.abstainRate,
+        totalEvaluations: state.totalEvaluations,
+        startedAt: state.startedAt,
+      });
 
-  if (
-    guard.directionalRolling < 0.38 &&
-    state.totalEvaluations >= 20 &&
-    state.totalEvaluations % 25 === 0
-  ) {
-    await applyAnalystSkillActions({
-      engine: ctx.engine,
-      report: auditReport ?? null,
-      regime: ctx.regime,
-      directionalRolling: guard.directionalRolling,
-      abstainRate: undefined,
-    });
+      await appendResearchLog({
+        event: "live_log_audit",
+        evaluations: state.totalEvaluations,
+        dryRun: auditReport.dryRun,
+        hitRate: auditReport.summary.hitRate,
+        directionalHitRate: auditReport.summary.directionalHitRate,
+        weightsChanged: auditReport.weightsChanged,
+        skillApplied: skillApplied.map((a) => a.id),
+        insights: auditReport.insightsAr.slice(0, 4),
+      });
+    }
+  } catch (err) {
+    console.warn("[zambahola] live log audit / analyst apply failed (agent continues):", err);
   }
 
   if (didUpdate) state.totalLearningUpdates += 1;

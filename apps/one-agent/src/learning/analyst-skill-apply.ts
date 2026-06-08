@@ -16,7 +16,10 @@ const workspaceRoot = join(pkgRoot, "../..");
 
 const AUTO_APPLY = process.env.ZAMBAHOLA_ANALYST_AUTO_APPLY !== "0";
 const COOLDOWN_MS = Number(process.env.ZAMBAHOLA_ANALYST_APPLY_COOLDOWN_MS ?? 300_000);
-const SPAWN_NPM = process.env.ZAMBAHOLA_ANALYST_SPAWN_NPM !== "0";
+/** 0 = queue only (safe); spawn can destabilize live agent on Windows */
+const SPAWN_NPM = process.env.ZAMBAHOLA_ANALYST_SPAWN_NPM === "1";
+const MIN_UPTIME_SEC = Number(process.env.ZAMBAHOLA_ANALYST_APPLY_MIN_UPTIME_SEC ?? 180);
+const MIN_EVALS = Number(process.env.ZAMBAHOLA_ANALYST_APPLY_MIN_EVALS ?? 40);
 
 let lastApplyAt = 0;
 let lastApplied: AppliedSkillAction[] = [];
@@ -35,6 +38,8 @@ export interface AnalystApplyContext {
   regime?: string;
   directionalRolling?: number;
   abstainRate?: number;
+  totalEvaluations?: number;
+  startedAt?: number;
   force?: boolean;
 }
 
@@ -43,8 +48,9 @@ function pickActions(ctx: AnalystApplyContext): SkillSuggestion[] {
   const r = ctx.report?.summary;
   const dir = ctx.directionalRolling ?? r?.directionalHitRate ?? 1;
   const abstain = ctx.abstainRate ?? r?.abstainRate ?? 0.5;
+  const evals = ctx.totalEvaluations ?? r?.evaluations ?? 0;
 
-  if (dir < 0.4 && (r?.evaluations ?? 0) >= 12) {
+  if (dir < 0.4 && evals >= MIN_EVALS) {
     actions.push({
       kind: "npm",
       id: "agent:log-review:apply",
@@ -87,7 +93,7 @@ function pickActions(ctx: AnalystApplyContext): SkillSuggestion[] {
     });
   }
 
-  if (dir < 0.38) {
+  if (dir < 0.38 && evals >= MIN_EVALS + 10) {
     actions.push({
       kind: "npm",
       id: "agent:import-hf-research",
@@ -95,7 +101,12 @@ function pickActions(ctx: AnalystApplyContext): SkillSuggestion[] {
     });
   }
 
-  return actions.slice(0, 5);
+  return actions.slice(0, 4);
+}
+
+function uptimeSec(ctx: AnalystApplyContext): number {
+  if (!ctx.startedAt) return 0;
+  return Math.floor((Date.now() - ctx.startedAt) / 1000);
 }
 
 async function execInProcess(
@@ -246,29 +257,47 @@ export async function applyAnalystSkillActions(
     return lastApplied;
   }
 
+  if (!ctx.force && uptimeSec(ctx) < MIN_UPTIME_SEC) {
+    return lastApplied;
+  }
+
   const picks = pickActions(ctx);
   if (!picks.length) return [];
 
   const applied: AppliedSkillAction[] = [];
   for (const pick of picks) {
-    let result: AppliedSkillAction | null = null;
-    if (IN_PROCESS.has(pick.id)) {
-      result = await execInProcess(pick.id, ctx);
-    } else if (pick.id.startsWith("agent:")) {
-      result = await execQueuedOrSpawn(pick.id);
+    try {
+      let result: AppliedSkillAction | null = null;
+      if (IN_PROCESS.has(pick.id)) {
+        result = await execInProcess(pick.id, ctx);
+      } else if (pick.id.startsWith("agent:")) {
+        result = await execQueuedOrSpawn(pick.id);
+      }
+      if (result) applied.push(result);
+    } catch (err) {
+      applied.push({
+        id: pick.id,
+        kind: pick.kind,
+        status: "skipped",
+        detailAr: `فشل آمن — ${String(err).slice(0, 120)}`,
+        at: Date.now(),
+      });
     }
-    if (result) applied.push(result);
   }
 
   if (applied.length) {
     lastApplyAt = now;
     lastApplied = applied;
-    await appendResearchLog({
-      event: "analyst_skill_apply",
-      applied: applied.map((a) => ({ id: a.id, status: a.status, detail: a.detailAr })),
-      directionalRolling: ctx.directionalRolling,
-      regime: ctx.regime,
-    });
+    try {
+      await appendResearchLog({
+        event: "analyst_skill_apply",
+        applied: applied.map((a) => ({ id: a.id, status: a.status, detail: a.detailAr })),
+        directionalRolling: ctx.directionalRolling,
+        regime: ctx.regime,
+      });
+    } catch {
+      /* never crash live agent on log write */
+    }
   }
 
   return applied;

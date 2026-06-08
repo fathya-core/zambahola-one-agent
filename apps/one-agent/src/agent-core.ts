@@ -189,6 +189,8 @@ export class AgentCore {
     this.handlingTick = true;
     try {
       await this.processTick(tick);
+    } catch (err) {
+      console.error("[zambahola] tick error (agent stays up):", err);
     } finally {
       this.handlingTick = false;
     }
@@ -349,15 +351,19 @@ export class AgentCore {
           gateReason: evaluatedPred.meta?.gateReason,
         });
 
-        this.learningState = await onLiveEvaluation({
-          ensembleHit: evaluation.predictionHit,
-          direction: evaluation.direction,
-          directionalHit:
-            evaluation.direction !== "range" ? evaluation.predictionHit : null,
-          regime: evaluatedPred.meta?.regime ?? "range",
-          strategyStats: this.buildMetrics().strategyStats ?? [],
-          engine: this.predictionEngine,
-        });
+        try {
+          this.learningState = await onLiveEvaluation({
+            ensembleHit: evaluation.predictionHit,
+            direction: evaluation.direction,
+            directionalHit:
+              evaluation.direction !== "range" ? evaluation.predictionHit : null,
+            regime: evaluatedPred.meta?.regime ?? "range",
+            strategyStats: this.buildMetrics().strategyStats ?? [],
+            engine: this.predictionEngine,
+          });
+        } catch (err) {
+          console.warn("[zambahola] onLiveEvaluation error (tick continues):", err);
+        }
       }
     }
 
