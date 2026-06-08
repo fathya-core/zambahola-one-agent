@@ -2,7 +2,6 @@ import type { PredictionEngine } from "../prediction-engine/index.js";
 import { ALL_STRATEGIES } from "../prediction-engine/strategies/index.js";
 import { loadStrategyWeights } from "./adaptive-weights.js";
 import { runLogAudit, type LogAuditReport } from "./log-auditor.js";
-import { suggestSkillsForContext } from "./skills-router.js";
 
 const AUDIT_EVERY = Number(process.env.ZAMBAHOLA_LOG_AUDIT_EVERY ?? 50);
 const AUDIT_MIN_EVALS = Number(process.env.ZAMBAHOLA_LOG_AUDIT_MIN_EVALS ?? 15);
@@ -49,22 +48,3 @@ export async function maybeRunLiveLogAudit(ctx: {
   return report;
 }
 
-export function logAuditSkillHints(report: LogAuditReport): string[] {
-  const hints: string[] = [];
-  if (report.summary.directionalHitRate < 0.4) {
-    hints.push(
-      ...suggestSkillsForContext("hit rate low recovery training", { limit: 3 }),
-    );
-  }
-  if (report.mlReset || report.mlpReset) {
-    hints.push(
-      ...suggestSkillsForContext("deep learning nightly retrain", { limit: 2 }),
-    );
-  }
-  if (report.summary.abstainRate < 0.35) {
-    hints.push(
-      ...suggestSkillsForContext("accuracy filter abstain gates", { limit: 2 }),
-    );
-  }
-  return [...new Set(hints)].slice(0, 6);
-}

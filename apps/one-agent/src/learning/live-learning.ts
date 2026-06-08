@@ -23,7 +23,8 @@ import { updateRecoveryMetrics } from "./recovery-mode.js";
 import { updateHitRecoverRolling } from "./hit-recover-mode.js";
 import { loadStrategyWeights } from "./adaptive-weights.js";
 import { ALL_STRATEGIES } from "../prediction-engine/strategies/index.js";
-import { maybeRunLiveLogAudit, logAuditSkillHints } from "./log-audit-hook.js";
+import { maybeRunLiveLogAudit } from "./log-audit-hook.js";
+import { applyAnalystSkillActions } from "./analyst-skill-apply.js";
 
 const WEIGHT_EVERY = Number(
   process.env.ZAMBAHOLA_LIVE_WEIGHT_EVERY ?? (isIntensiveLearn() ? 3 : 5),
@@ -150,6 +151,15 @@ export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningSt
     state.lastLogAuditAt = auditReport.auditedAt;
     state.totalLearningUpdates += 1;
     didUpdate = true;
+
+    const skillApplied = await applyAnalystSkillActions({
+      engine: ctx.engine,
+      report: auditReport,
+      regime: ctx.regime,
+      directionalRolling: guard.directionalRolling,
+      abstainRate: auditReport.summary.abstainRate,
+    });
+
     await appendResearchLog({
       event: "live_log_audit",
       evaluations: state.totalEvaluations,
@@ -157,8 +167,22 @@ export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningSt
       hitRate: auditReport.summary.hitRate,
       directionalHitRate: auditReport.summary.directionalHitRate,
       weightsChanged: auditReport.weightsChanged,
-      skillHints: logAuditSkillHints(auditReport),
+      skillApplied: skillApplied.map((a) => a.id),
       insights: auditReport.insightsAr.slice(0, 4),
+    });
+  }
+
+  if (
+    guard.directionalRolling < 0.38 &&
+    state.totalEvaluations >= 20 &&
+    state.totalEvaluations % 25 === 0
+  ) {
+    await applyAnalystSkillActions({
+      engine: ctx.engine,
+      report: auditReport ?? null,
+      regime: ctx.regime,
+      directionalRolling: guard.directionalRolling,
+      abstainRate: undefined,
     });
   }
 

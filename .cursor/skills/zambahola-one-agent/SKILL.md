@@ -31,7 +31,7 @@ MCP: `zambahola_get_log_audit` · `zambahola_run_log_audit` · `zambahola_get_sk
 
 Remote: queue `{ "action": "log-review:apply" }` in `REMOTE-COMMANDS.json`.
 
-When issues detected, `/api/analyst` returns `skillHintsAr` (Tavily/HF/Zapier/npm suggestions).
+When issues detected, analyst **applies** skills automatically (`skillAppliedAr` in `/api/analyst`). Disable: `ZAMBAHOLA_ANALYST_AUTO_APPLY=0`. MCP: `zambahola_apply_analyst_skills`.
 
 Reports: `data/learning/LOG-AUDIT-REPORT.json` — `docs/ar/مراجع-السجل.md`
 

@@ -205,17 +205,37 @@ async function route(
     const metaPnl = await getMetaPnlModel();
     const { getLiveLogAuditReport } = await import("../learning/log-audit-hook.js");
     const { getLastLogAuditReport } = await import("../learning/log-auditor.js");
-    const { logAuditSkillHints } = await import("../learning/log-audit-hook.js");
+    const {
+      getLastAppliedSkillActions,
+      applyAnalystSkillActions,
+      formatAppliedActionsAr,
+    } = await import("../learning/analyst-skill-apply.js");
+    const guard = getGuardStatus();
     const audit = getLiveLogAuditReport() ?? (await getLastLogAuditReport());
+    const metrics = agent.getRuntimeState().metrics;
+
+    if (req.method === "POST" || url.searchParams.get("apply") === "1") {
+      await applyAnalystSkillActions({
+        engine: agent.predictionEngine,
+        report: audit,
+        regime: lastPrediction?.meta?.regime,
+        directionalRolling: guard.directionalRollingHitRate,
+        abstainRate: metrics.abstainRate,
+        force: true,
+      });
+    }
+
+    const applied = getLastAppliedSkillActions();
     const report = buildAnalystReportAr(
       lastPrediction?.meta,
       patterns,
       audit?.insightsAr,
+      formatAppliedActionsAr(applied),
     );
-    const skillHints = audit ? logAuditSkillHints(audit) : [];
     return sendJson(res, 200, {
       ...report,
-      skillHintsAr: skillHints,
+      skillAppliedAr: formatAppliedActionsAr(applied),
+      autoApplyEnabled: process.env.ZAMBAHOLA_ANALYST_AUTO_APPLY !== "0",
       logAuditSummary: audit?.summary ?? null,
       metaPnl: metaPnl.getState(),
       lastPrediction: lastPrediction

@@ -26,6 +26,7 @@ const ACTION_MAP = {
   "health-check": ["run", "agent:health-check"],
   "phase4-hit-recover": ["run", "agent:phase4-hit-recover"],
   "dl-nightly": ["run", "agent:dl-nightly"],
+  "import-hf-research": ["run", "agent:import-hf-research"],
 };
 
 function runNpm(args) {

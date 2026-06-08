@@ -58,7 +58,7 @@ async function collectTelemetry() {
     },
     logAudit: logAudit.body,
     skillsCatalog: skills.body?.catalog ?? null,
-    analystSkillHints: analyst.body?.skillHintsAr ?? [],
+    analystSkillApplied: analyst.body?.skillAppliedAr ?? [],
   };
   await mkdir(bridgeDir, { recursive: true });
   await writeFile(telemetryFile, JSON.stringify(snapshot, null, 2), "utf8");

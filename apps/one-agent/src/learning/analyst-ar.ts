@@ -80,10 +80,10 @@ export function buildAnalystReportAr(
   meta?: PredictionMeta,
   patterns?: PatternJournalData,
   logAuditInsights?: string[],
+  skillAppliedAr?: string[],
 ): {
   summaryAr: string;
   bulletsAr: string[];
-  skillHintsAr?: string[];
   updatedAt: number;
 } {
   const bullets = explainPredictionAr(meta);
@@ -94,6 +94,10 @@ export function buildAnalystReportAr(
   if (logAuditInsights?.length) {
     bullets.push("--- مراجع السجل ---");
     bullets.push(...logAuditInsights.slice(0, 4));
+  }
+  if (skillAppliedAr?.length) {
+    bullets.push("--- مهارات طُبّقت ---");
+    bullets.push(...skillAppliedAr.slice(0, 6));
   }
 
   const dir = meta?.gateReason?.includes("abstain") || meta?.qualityTier === "abstain"

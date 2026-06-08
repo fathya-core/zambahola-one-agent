@@ -72,6 +72,11 @@ const TOOLS = [
       properties: { q: { type: "string" } },
     },
   },
+  {
+    name: "zambahola_apply_analyst_skills",
+    description: "Analyst auto-apply: run queued skills (log cleanup, restore weights, dl-nightly, etc.)",
+    inputSchema: { type: "object", properties: {} },
+  },
 ];
 
 async function httpGet(base, path) {
@@ -124,6 +129,8 @@ async function handleTool(name, args) {
       const q = args.q ? `?q=${encodeURIComponent(args.q)}` : "";
       return await httpGet(agentUrl, `/api/skills${q}`);
     }
+    case "zambahola_apply_analyst_skills":
+      return await httpPost(agentUrl, "/api/analyst", {});
     default:
       throw new Error(`unknown tool: ${name}`);
   }
