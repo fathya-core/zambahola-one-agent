@@ -153,6 +153,7 @@ export interface AgentMetrics {
   hybridSwitchCount?: number;
   intensiveLearn?: boolean;
   recoveryMode?: boolean;
+  hitRecoverMode?: boolean;
   updatedAt: number;
 }
 

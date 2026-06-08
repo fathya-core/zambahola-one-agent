@@ -27,6 +27,7 @@ import { getMetaPnlModel } from "../learning/meta-pnl.js";
 import { applyMicrostructureGates } from "./microstructure-gates.js";
 import { explainGateReasonAr } from "../learning/analyst-ar.js";
 import { inferLeanFromVotes, isLearnTradeMode } from "./learn-trade.js";
+import { isHitRecoverMode } from "../learning/hit-recover-mode.js";
 import {
   getHybridProfile,
   hybridStatusAr,
@@ -274,7 +275,7 @@ export class PredictionEngine {
         }
       }
 
-      if (isLearnTradeMode() && direction === "range") {
+      if (isLearnTradeMode() && direction === "range" && !isHitRecoverMode()) {
         const lean = inferLeanFromVotes(ensemble.votes);
         if (lean) {
           direction = lean.direction;

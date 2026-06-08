@@ -20,6 +20,7 @@ import {
 } from "./intensive-learn.js";
 import { boostFromPatternJournal } from "./pattern-weight-boost.js";
 import { updateRecoveryMetrics } from "./recovery-mode.js";
+import { updateHitRecoverRolling } from "./hit-recover-mode.js";
 import { loadStrategyWeights } from "./adaptive-weights.js";
 import { ALL_STRATEGIES } from "../prediction-engine/strategies/index.js";
 
@@ -68,6 +69,7 @@ export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningSt
     directionalHit: isDirectional ? (ctx.directionalHit ?? ctx.ensembleHit) : null,
   });
   updateRecoveryMetrics(state.directionalHitRateEma, guard.directionalRolling);
+  updateHitRecoverRolling(guard.directionalRolling);
 
   state = await maybeSnapshotOrRestore(guard.rollingHitRate, state, (w) =>
     ctx.engine.setWeights(w),

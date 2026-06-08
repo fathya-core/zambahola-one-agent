@@ -2,7 +2,8 @@
 
 export type HybridProfile = "learn" | "signals";
 
-let currentProfile: HybridProfile = "learn";
+let currentProfile: HybridProfile =
+  process.env.ZAMBAHOLA_HYBRID_RANGE_LEARN === "0" ? "signals" : "learn";
 let pendingRegime: string | null = null;
 let pendingTicks = 0;
 let lastSwitchAt = 0;
@@ -13,6 +14,7 @@ export function isHybridAuto(): boolean {
 }
 
 function regimeToProfile(regime: string): HybridProfile {
+  if (process.env.ZAMBAHOLA_HYBRID_RANGE_LEARN === "0") return "signals";
   return regime === "range" ? "learn" : "signals";
 }
 

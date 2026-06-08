@@ -34,6 +34,7 @@ import {
 import { isIntensiveLearn } from "./learning/intensive-learn.js";
 import { computeHitBand } from "./learning/hit-eval.js";
 import { isRecoveryMode } from "./learning/recovery-mode.js";
+import { isHitRecoverMode } from "./learning/hit-recover-mode.js";
 import {
   appendRun,
   appendTradeLedger,
@@ -432,6 +433,7 @@ export class AgentCore {
       hybridSwitchCount: this.hybridSwitchTotal,
       intensiveLearn: isIntensiveLearn(),
       recoveryMode: isRecoveryMode(),
+      hitRecoverMode: isHitRecoverMode(),
       updatedAt: Date.now(),
     };
   }

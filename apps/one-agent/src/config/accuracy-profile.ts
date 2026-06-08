@@ -2,6 +2,7 @@
 
 import { isLearnTradeActive, isHybridAuto } from "./hybrid-mode.js";
 import { isRecoveryMode } from "../learning/recovery-mode.js";
+import { isHitRecoverMode } from "../learning/hit-recover-mode.js";
 
 export type AccuracyMode = "normal" | "max";
 
@@ -15,6 +16,7 @@ export function isMaxAccuracy(): boolean {
 
 /** Strict abstain filter — live agent only by default (off during train / hybrid learn) */
 export function isAccuracyFilterActive(): boolean {
+  if (isHitRecoverMode()) return true;
   if (isRecoveryMode()) return false;
   if (isHybridAuto() && isLearnTradeActive()) return false;
   if (!isMaxAccuracy()) return false;
