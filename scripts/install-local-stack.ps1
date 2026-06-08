@@ -26,11 +26,12 @@ if (-not (Test-Path (Join-Path $cursorDir "mcp.json"))) {
 }
 
 Write-Host ""
-Write-Host "Next (3 terminals):" -ForegroundColor Green
-Write-Host "  1) npm run agent:phase2-live"
-Write-Host "  2) npm run agent:local-bridge"
-Write-Host "  3) npm run agent:push-telemetry   (every few minutes)"
-Write-Host "  4) npm run agent:remote-watcher   (cloud commands)"
+Write-Host "Next (2 terminals recommended):" -ForegroundColor Green
+Write-Host "  1) npm run agent:phase4-hit-recover"
+Write-Host "  2) npm run agent:live-stack   (bridge + watcher + guard — auto-fix + telemetry)"
+Write-Host ""
+Write-Host "Or separate:" -ForegroundColor Yellow
+Write-Host "  npm run agent:local-bridge | agent:remote-watcher | agent:guard | agent:push-telemetry:ps1"
 Write-Host ""
 Write-Host "Health: npm run agent:health-check" -ForegroundColor Cyan
 Write-Host "Cursor plugins: .\scripts\install-cursor-marketplace.ps1" -ForegroundColor Cyan

@@ -9,6 +9,7 @@ import {
   appendResearchLog,
 } from "./learning/adaptive-weights.js";
 import { beginLiveLearningSession, onLiveEvaluation } from "./learning/live-learning.js";
+import { maybeSelfHeal } from "./learning/agent-self-guard.js";
 import { getMetaLabeler } from "./learning/meta-label.js";
 import { getMetaPnlModel } from "./learning/meta-pnl.js";
 import { recordPatternEvaluation } from "./learning/pattern-journal.js";
@@ -371,6 +372,13 @@ export class AgentCore {
         }
       }
     }
+
+    maybeSelfHeal({
+      tickCount: this.tickCount,
+      startedAt: this.startedAt,
+      metrics: this.buildMetrics(),
+      engine: this.predictionEngine,
+    });
 
     await this.persistMetrics();
 

@@ -33,6 +33,8 @@
     "agent:fix-git-push": "powershell -ExecutionPolicy Bypass -File scripts/fix-git-push.ps1",
     "agent:health-check": "node scripts/health-check.mjs",
     "agent:remote-watcher": "node scripts/remote-command-watcher.mjs",
+    "agent:guard": "node scripts/agent-guard.mjs",
+    "agent:live-stack": "node scripts/live-stack.mjs",
     "agent:tunnel-bridge": "node scripts/run-env.mjs --file config/bridge.env -- node scripts/tunnel-bridge.mjs",
     "agent:import-hf-research": "npm run agent:research-import -- apps/one-agent/knowledge/hf-research-import.json",
     "agent:export-models": "npm run export-models -w @zambahola/one-agent",
