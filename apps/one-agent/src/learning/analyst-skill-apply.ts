@@ -28,6 +28,11 @@ let lastApplyAt = 0;
 let lastApplied: AppliedSkillAction[] = [];
 let persistedLoaded = false;
 
+/** Fresh session — do not inherit 5min cooldown from disk */
+export function resetAnalystSession(): void {
+  lastApplyAt = 0;
+}
+
 async function ensurePersistedLoaded(): Promise<void> {
   if (persistedLoaded) return;
   persistedLoaded = true;
@@ -66,6 +71,8 @@ export interface AnalystApplyContext {
   totalEvaluations?: number;
   startedAt?: number;
   force?: boolean;
+  /** Skip in-process log-review when audit just ran this eval */
+  skipLogReviewApply?: boolean;
 }
 
 function pickActions(ctx: AnalystApplyContext): SkillSuggestion[] {
@@ -327,6 +334,7 @@ export async function applyAnalystSkillActions(
   const applied: AppliedSkillAction[] = [];
   for (const pick of picks) {
     try {
+      if (ctx.skipLogReviewApply && pick.id === "agent:log-review:apply") continue;
       let result: AppliedSkillAction | null = null;
       if (IN_PROCESS.has(pick.id)) {
         result = await execInProcess(pick.id, ctx);

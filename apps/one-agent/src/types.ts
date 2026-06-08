@@ -46,6 +46,9 @@ export interface PredictionMeta {
   features?: Record<string, number>;
   expertReason?: string;
   tierSVotes?: number;
+  latentSTierUp?: number;
+  latentSTierDown?: number;
+  latentPromoted?: boolean;
   expertMode?: boolean;
   accuracyMode?: string;
   qualityTier?: string;

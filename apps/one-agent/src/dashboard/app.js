@@ -21,7 +21,7 @@ function renderDualAgent(dual, logAudit, analyst, learn) {
 
   pills.innerHTML = [
     `<span class="agent-pill ${primaryOn ? "active" : ""}">① تعلّم مباشر ${primaryOn ? "نشط" : "—"}</span>`,
-    `<span class="agent-pill ${secondaryOn ? "active" : warmed ? "wait" : ""}">② مراجع السجل ${secondaryOn ? "نشط" : warmed ? "جاهز" : "ينتظر"}</span>`,
+    `<span class="agent-pill ${secondaryOn ? "active" : warmed ? "active" : "wait"}">② مراجع السجل ${secondaryOn ? "نشط" : warmed ? "جاهز" : "ينتظر"}</span>`,
     `<span class="agent-pill ${dual?.analystAutoApply ? "active" : ""}">مهارات تلقائية ${dual?.analystAutoApply ? "ON" : "OFF"}</span>`,
   ].join("");
 
@@ -37,7 +37,7 @@ function renderDualAgent(dual, logAudit, analyst, learn) {
     `المراجعة القادمة بعد: ${dual?.nextAuditInEvals ?? "—"} تقييم`,
     `المحلل القادم بعد: ${dual?.nextAnalystApplyInEvals ?? "—"} تقييم`,
   ];
-  if (auditSummary) {
+  if (auditSummary && typeof auditSummary.hitRate === "number") {
     lines.push(
       "",
       `آخر مراجعة — hit ${(auditSummary.hitRate * 100).toFixed(1)}% · dir ${(auditSummary.directionalHitRate * 100).toFixed(1)}% · abstain ${(auditSummary.abstainRate * 100).toFixed(1)}%`,

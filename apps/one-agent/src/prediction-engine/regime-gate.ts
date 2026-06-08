@@ -32,6 +32,7 @@ export function applyRegimeGate(
   agreement: number,
   regime: MarketRegime,
   sentiment: number,
+  opts?: { directionalAgreement?: number; latentSTierVotes?: number },
 ): GatedSignal {
   let d = direction;
   let c = confidence;
@@ -39,8 +40,13 @@ export function applyRegimeGate(
   let reason = "passed";
 
   const t = getAccuracyTuning();
+  const dirAgree = opts?.directionalAgreement ?? agreement;
+  const sTier = opts?.latentSTierVotes ?? 0;
+  const rangeBlock =
+    sTier >= 2 ? Math.max(0.48, t.rangeAgreementBlock - 0.04) : t.rangeAgreementBlock;
+
   if (regime === "range" && direction !== "range") {
-    if (agreement < t.rangeAgreementBlock) {
+    if (dirAgree < rangeBlock && sTier < 2) {
       d = "range";
       c = 0.48;
       blocked = true;

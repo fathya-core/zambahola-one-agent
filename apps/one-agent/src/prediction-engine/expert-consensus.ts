@@ -1,6 +1,7 @@
 import type { PredictionDirection } from "../types.js";
 import type { StrategySignal } from "./strategies/types.js";
 import type { MarketRegime } from "./regime-gate.js";
+import { countSTierForDirection } from "./latent-consensus.js";
 
 export type StrategyTiers = Record<string, string[]>;
 
@@ -41,12 +42,7 @@ export function applyExpertConsensus(
   const sMicro = tiers.S_micro ?? [];
   const bRange = tiers.B_range ?? [];
 
-  const sVotes = votes.filter(
-    (v) =>
-      v.direction === direction &&
-      direction !== "range" &&
-      (sTrend.includes(v.strategyId) || sMicro.includes(v.strategyId)),
-  ).length;
+  const sVotes = countSTierForDirection(votes, direction, tiers);
 
   const bVotes = votes.filter(
     (v) => v.direction === direction && bRange.includes(v.strategyId),
@@ -81,11 +77,14 @@ export function applyExpertConsensus(
     const relax = process.env.ZAMBAHOLA_EXPERT_RELAX === "1";
     const minB = relax ? 1 : 2;
     const minAgree = relax ? 0.52 : 0.65;
-    if (bVotes < minB && agreement < minAgree) {
+    const sBypass = sVotes >= minSTierVotes(agreement) && agreement >= 0.5;
+    if (!sBypass && bVotes < minB && agreement < minAgree) {
       d = "range";
       c = 0.48;
       blocked = true;
       reason = "expert_range_need_B_tier";
+    } else if (sBypass) {
+      reason = "expert_S_tier_range_bypass";
     }
   }
 

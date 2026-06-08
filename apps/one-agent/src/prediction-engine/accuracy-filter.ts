@@ -9,6 +9,7 @@ export interface AccuracyFilterInput {
   direction: PredictionDirection;
   confidence: number;
   agreement: number;
+  directionalAgreement?: number;
   mlProb: number;
   mlpProb: number;
   gbmProb: number;
@@ -16,6 +17,7 @@ export interface AccuracyFilterInput {
   regime: string;
   blocked: boolean;
   mlSamples: number;
+  latentSTierVotes?: number;
 }
 
 export interface AccuracyFilterResult {
@@ -41,7 +43,16 @@ export function applyAccuracyFilter(input: AccuracyFilterInput): AccuracyFilterR
 
   const warmed = input.mlSamples >= 80;
   const minAgreement = warmed ? t.minAgreement : Math.min(t.minAgreement, 0.52);
-  const minVoters = warmed ? t.minModelVoters : 2;
+  const sTier = input.latentSTierVotes ?? 0;
+  const dirAgree = input.directionalAgreement ?? agreement;
+  const minVoters =
+    sTier >= 2
+      ? Math.max(1, (warmed ? t.minModelVoters : 2) - 1)
+      : warmed
+        ? t.minModelVoters
+        : 2;
+  const agreeFloor =
+    sTier >= 2 ? Math.max(0.5, minAgreement - 0.04) : minAgreement;
 
   const modelVotes = countModelAgreement(
     direction,
@@ -50,13 +61,18 @@ export function applyAccuracyFilter(input: AccuracyFilterInput): AccuracyFilterR
     input.gbmProb,
   );
 
-  if (input.blocked) {
+  const sTierFastPath =
+    direction !== "range" && sTier >= 2 && dirAgree >= 0.5 && modelVotes >= 1;
+
+  if (input.blocked && !sTierFastPath) {
     return abstain("gate_blocked");
   }
 
   if (direction !== "range") {
-    if (agreement < minAgreement) {
-      return abstain(`agreement_${agreement}_lt_${minAgreement}`);
+    const agreeUse = sTier >= 2 ? dirAgree : agreement;
+    const agreeMin = sTier >= 2 ? agreeFloor : minAgreement;
+    if (agreeUse < agreeMin) {
+      return abstain(`agreement_${agreeUse}_lt_${agreeMin}`);
     }
     if (modelVotes < minVoters) {
       return abstain(`model_voters_${modelVotes}`);

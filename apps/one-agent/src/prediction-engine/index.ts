@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { MarketTick, Prediction, PredictionDirection } from "../types.js";
 import { ALL_STRATEGIES, STRATEGY_COUNT } from "./strategies/index.js";
 import { loadOrchestratorWeights } from "../learning/strategy-orchestrator.js";
-import { ensemblePredict } from "./ensemble.js";
+import { computeDirectionalAgreement, ensemblePredict } from "./ensemble.js";
+import {
+  computeLatentDirectionalSkew,
+  countSTierForDirection,
+  shouldPromoteLatentDirection,
+} from "./latent-consensus.js";
 import { loadStrategyWeights, type StrategyWeights } from "../learning/adaptive-weights.js";
 import { extractFeatures, type FeatureVector } from "../features/index.js";
 import { OnlineMLModel } from "./ml-model.js";
@@ -133,6 +138,9 @@ export class PredictionEngine {
     let gateReason = "n/a";
     let expertReason = "n/a";
     let tierSVotes = 0;
+    let latentSTierUp = 0;
+    let latentSTierDown = 0;
+    let latentPromoted = false;
     let qualityTier: "high" | "medium" | "abstain" = "medium";
     let metaLabelProb = 0.5;
     let metaTrust = true;
@@ -151,10 +159,37 @@ export class PredictionEngine {
       hybridSwitched = hybrid.switched;
       hybridPendingRegime = hybrid.pendingRegime;
 
-      const expert = applyExpertConsensus(
+      const latent = computeLatentDirectionalSkew(
+        ensemble.votes,
+        this.weights,
+        this.expertTiers,
+      );
+      latentSTierUp = latent.sTierUp;
+      latentSTierDown = latent.sTierDown;
+
+      let signalDirection = ensemble.direction;
+      let signalConfidence = ensemble.confidence;
+      let signalAgreement = ensemble.agreement;
+      let directionalAgreement = computeDirectionalAgreement(
+        ensemble.votes,
         ensemble.direction,
-        ensemble.confidence,
-        ensemble.agreement,
+      );
+
+      if (shouldPromoteLatentDirection(ensemble.direction, latent)) {
+        signalDirection = latent.candidate!;
+        signalConfidence = Math.min(
+          0.72,
+          0.52 + latent.directionalAgreement * 0.22,
+        );
+        signalAgreement = latent.directionalAgreement;
+        directionalAgreement = latent.directionalAgreement;
+        latentPromoted = true;
+      }
+
+      const expert = applyExpertConsensus(
+        signalDirection,
+        signalConfidence,
+        signalAgreement,
         regime,
         ensemble.votes,
         this.expertTiers,
@@ -162,7 +197,11 @@ export class PredictionEngine {
       direction = expert.direction;
       confidence = expert.confidence;
       expertReason = expert.reason;
-      tierSVotes = expert.tierSVotes;
+      tierSVotes = expert.tierSVotes || countSTierForDirection(
+        ensemble.votes,
+        expert.direction,
+        this.expertTiers,
+      );
 
       const logit = this.ml.predict(features);
       const deep = this.mlp.predict(features);
@@ -192,9 +231,13 @@ export class PredictionEngine {
       const gated = applyRegimeGate(
         direction,
         confidence,
-        ensemble.agreement,
+        signalAgreement,
         regime,
         sentiment.score,
+        {
+          directionalAgreement,
+          latentSTierVotes: tierSVotes,
+        },
       );
       direction = gated.direction;
       confidence = this.calibrator.calibrate(gated.confidence);
@@ -203,7 +246,8 @@ export class PredictionEngine {
       const filtered = applyAccuracyFilter({
         direction,
         confidence,
-        agreement: ensemble.agreement,
+        agreement: signalAgreement,
+        directionalAgreement,
         mlProb,
         mlpProb,
         gbmProb,
@@ -211,6 +255,7 @@ export class PredictionEngine {
         regime,
         blocked: gated.blocked || expert.blocked,
         mlSamples: this.ml.getSampleCount(),
+        latentSTierVotes: tierSVotes,
       });
       direction = filtered.direction;
       confidence = filtered.confidence;
@@ -285,6 +330,22 @@ export class PredictionEngine {
         }
       }
 
+      if (
+        direction === "range" &&
+        isHitRecoverMode() &&
+        process.env.ZAMBAHOLA_HIT_RECOVER_S_LEAN !== "0" &&
+        latent.candidate &&
+        tierSVotes >= Number(process.env.ZAMBAHOLA_LATENT_MIN_S_VOTES ?? 2)
+      ) {
+        direction = latent.candidate;
+        confidence = Math.min(
+          0.64,
+          0.54 + latent.directionalAgreement * 0.12,
+        );
+        qualityTier = "medium";
+        gateReason = `${gateReason} | hit_recover_S_tier_lean`;
+      }
+
       if (process.env.ZAMBAHOLA_ANALYST_AR !== "0") {
         const hybridNote = isHybridAuto()
           ? ` · هجين: ${hybridStatusAr(hybridProfile)}`
@@ -314,6 +375,9 @@ export class PredictionEngine {
         gateReason,
         expertReason,
         tierSVotes,
+        latentSTierUp,
+        latentSTierDown,
+        latentPromoted,
         expertMode: process.env.ZAMBAHOLA_EXPERT !== "0",
         mlScore,
         mlProb,

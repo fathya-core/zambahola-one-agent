@@ -1,4 +1,4 @@
-import { readFile, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
+import { open, readFile, stat, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -187,7 +187,25 @@ async function parseRunLog(path: string): Promise<{
 
   if (!existsSync(path)) return { predictions, decisions, evaluations };
 
-  const raw = await readFile(path, "utf8");
+  const tailBytes = Number(process.env.ZAMBAHOLA_LOG_AUDIT_TAIL_BYTES ?? 3_000_000);
+  let raw = "";
+  try {
+    const st = await stat(path);
+    const readSize = Math.min(st.size, tailBytes);
+    const offset = Math.max(0, st.size - readSize);
+    const fh = await open(path, "r");
+    const buf = Buffer.alloc(readSize);
+    await fh.read(buf, 0, readSize, offset);
+    await fh.close();
+    raw = buf.toString("utf8");
+    if (offset > 0) {
+      const nl = raw.indexOf("\n");
+      if (nl >= 0) raw = raw.slice(nl + 1);
+    }
+  } catch {
+    raw = await readFile(path, "utf8");
+  }
+
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
     try {
