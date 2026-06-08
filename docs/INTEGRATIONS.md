@@ -41,3 +41,37 @@ Reads local state via:
 2. File `LOCAL-TELEMETRY.json` in repo
 
 Do not put bridge tokens in committed files — use `config/bridge.env` (gitignored).
+
+## Skills & MCP catalog
+
+Full index (Arabic + JSON):
+
+- `docs/ar/المهارات-والروابط.md`
+- `apps/one-agent/knowledge/SKILLS-AND-LINKS.json`
+
+```bash
+npm run agent:research-import -- apps/one-agent/knowledge/SKILLS-AND-LINKS.json
+```
+
+### Cursor Marketplace plugins
+
+| Plugin | Skills |
+|--------|--------|
+| tavily | tavily-search, tavily-research, tavily-extract, tavily-crawl |
+| zapier | zapier-setup, zapier-status, create-my-tools-profile |
+| huggingface-skills | hf-cli, hugging-face-model-trainer, hugging-face-jobs, … |
+| cli-for-agent | cli-for-agents |
+| cursor-sdk | cursor-sdk |
+| agent-compatibility | check-agent-compatibility |
+| continual-learning | continual-learning |
+
+Install: `docs/ar/تثبيت-اضافات-السوق.md` or `scripts/install-cursor-marketplace.ps1`
+
+### Log reviewer (second agent)
+
+```bash
+npm run agent:log-review          # dry-run
+npm run agent:log-review:apply    # cleanup weights, receipts, NaN ML
+```
+
+See `docs/ar/مراجع-السجل.md`. Overnight: `ZAMBAHOLA_OVERNIGHT_AUDIT_MIN=60` with `agent:overnight-learn`.

@@ -1,0 +1,113 @@
+{
+  "title": "ZAMBAHOLA Skills, MCP & Links Index",
+  "updatedAt": "2026-06-04",
+  "docAr": "docs/ar/المهارات-والروابط.md",
+  "cursorMarketplacePlugins": [
+    { "id": "tavily", "use": "web search, news, extract, crawl, deep research" },
+    { "id": "zapier", "use": "Slack, Sheets, GitHub, Gmail — 9000+ apps" },
+    { "id": "huggingface-skills", "use": "papers, models, datasets, HF Jobs training" },
+    { "id": "cli-for-agent", "use": "agent-friendly npm run agent:* CLIs" },
+    { "id": "cursor-sdk", "use": "programmatic Cloud Agents via @cursor/sdk" },
+    { "id": "agent-compatibility", "use": "repo agent-readiness score" },
+    { "id": "continual-learning", "use": "auto-update AGENTS.md from sessions" }
+  ],
+  "skills": {
+    "tavily": [
+      "tavily-search",
+      "tavily-research",
+      "tavily-extract",
+      "tavily-crawl",
+      "tavily-cli",
+      "tavily-best-practices"
+    ],
+    "huggingface": [
+      "hf-cli",
+      "hugging-face-datasets",
+      "hugging-face-dataset-viewer",
+      "hugging-face-model-trainer",
+      "hugging-face-jobs",
+      "hugging-face-evaluation",
+      "hugging-face-paper-publisher",
+      "hugging-face-trackio",
+      "hugging-face-tool-builder",
+      "huggingface-gradio"
+    ],
+    "zapier": ["zapier-setup", "zapier-status", "create-my-tools-profile"],
+    "cursor": ["cli-for-agents", "cursor-sdk", "check-agent-compatibility", "continual-learning"],
+    "project": ["zambahola-one-agent"]
+  },
+  "mcpServers": {
+    "zambahola-local": {
+      "config": ".cursor/mcp.json.example",
+      "tools": [
+        "zambahola_get_telemetry",
+        "zambahola_get_metrics",
+        "zambahola_get_analyst",
+        "zambahola_get_patterns",
+        "zambahola_queue_command",
+        "zambahola_read_telemetry_file"
+      ]
+    },
+    "zapier": {
+      "url": "https://mcp.zapier.com/api/v1/connect",
+      "metaTools": [
+        "discover_zapier_actions",
+        "enable_zapier_action",
+        "disable_zapier_action",
+        "list_enabled_zapier_actions",
+        "execute_zapier_read_action",
+        "execute_zapier_write_action"
+      ]
+    },
+    "huggingface-skills": {
+      "url": "https://huggingface.co/mcp?login",
+      "tools": [
+        "paper_search",
+        "hub_repo_search",
+        "hub_repo_details",
+        "hf_doc_search",
+        "hf_doc_fetch",
+        "hf_hub_query",
+        "space_search",
+        "dynamic_space",
+        "hf_whoami"
+      ]
+    },
+    "tavily": {
+      "url": "https://mcp.tavily.com/mcp"
+    },
+    "skills-hub": {
+      "command": "npx -y @skills-hub-ai/mcp"
+    }
+  },
+  "npmCommands": {
+    "live": ["agent:phase2-live", "agent:phase4-hit-recover"],
+    "bridge": ["agent:local-bridge", "agent:push-telemetry", "agent:remote-watcher"],
+    "learning": ["agent:omni-train", "agent:dl-nightly", "agent:overnight-learn"],
+    "audit": ["agent:log-review", "agent:log-review:apply", "agent:patterns"],
+    "ops": ["agent:health-check", "agent:status", "agent:stop", "verify"]
+  },
+  "links": {
+    "repo": "https://github.com/fathya-core/zambahola-one-agent",
+    "cursorMcpDocs": "https://cursor.com/docs/context/mcp",
+    "cursorCloudAgents": "https://cursor.com/docs/cloud-agent",
+    "zapierMcp": "https://zapier.com/mcp",
+    "huggingfaceMcp": "https://huggingface.co/mcp",
+    "tavilyDocs": "https://docs.tavily.com",
+    "papers": {
+      "deeplob": "https://arxiv.org/abs/1808.03668",
+      "tlob": "https://arxiv.org/abs/2502.15757",
+      "orderFlowCnn": "https://arxiv.org/abs/2304.02472"
+    }
+  },
+  "arabicDocs": [
+    "docs/ar/المهارات-والروابط.md",
+    "docs/ar/تكاملات-MCP-وزابير.md",
+    "docs/ar/تثبيت-اضافات-السوق.md",
+    "docs/ar/ربط-الجهاز-المحلي.md",
+    "docs/ar/مراجع-السجل.md",
+    "docs/ar/التشغيل-الليلي.md",
+    "docs/ar/تراجع-الدقة-والحل.md",
+    "docs/ar/مسار-التعلم-العميق.md"
+  ]
+}

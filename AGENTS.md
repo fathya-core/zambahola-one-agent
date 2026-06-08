@@ -77,7 +77,9 @@ Do **not** put `npm run agent:start` or `npm run verify` in the VM update script
 - Threshold sweeps (internal replay, not user backtest): `npm run agent:experiments:quick` or `agent:experiments`.
 - **Local PC bridge:** `agent:local-bridge` (:8790) + `agent:push-telemetry` → `apps/one-agent/data/bridge/LOCAL-TELEMETRY.json` for cloud visibility.
 - MCP local server: `mcp-servers/zambahola-local/server.mjs` — see `.cursor/mcp.json.example`.
-- Arabic: `docs/ar/ربط-الجهاز-المحلي.md` · `docs/ar/تثبيت-اضافات-السوق.md` · `docs/INTEGRATIONS.md`.
-- Cursor Marketplace (user desktop): `tavily` · `zapier` · `huggingface-skills` · `cli-for-agent` — see `scripts/install-cursor-marketplace.ps1`.
+- Arabic: `docs/ar/ربط-الجهاز-المحلي.md` · `docs/ar/تثبيت-اضافات-السوق.md` · `docs/ar/المهارات-والروابط.md` · `docs/INTEGRATIONS.md`.
+- **Skills/MCP index:** `apps/one-agent/knowledge/SKILLS-AND-LINKS.json` — import via `agent:research-import`.
+- Cursor Marketplace (user desktop): `tavily` · `zapier` · `huggingface-skills` · `cli-for-agent` · `cursor-sdk` · `agent-compatibility` · `continual-learning` — see `scripts/install-cursor-marketplace.ps1`.
 - Project skill: `.cursor/skills/zambahola-one-agent/SKILL.md`.
+- Log reviewer: `npm run agent:log-review` / `agent:log-review:apply` — `docs/ar/مراجع-السجل.md`.
 - Research paste: `npm run agent:research-import -- apps/one-agent/knowledge/research-imports.example.json`

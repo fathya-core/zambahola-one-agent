@@ -1,11 +1,13 @@
 ---
 name: zambahola-one-agent
-description: Operate ZAMBAHOLA ONE AGENT — phase2-live, bridge telemetry, Arabic analyst, directional metrics, MCP/Zapier/HF integrations. Use for agent:start, health-check, push-telemetry, Binance readiness, or reading LOCAL-TELEMETRY.json.
+description: Operate ZAMBAHOLA ONE AGENT — phase2-live, bridge telemetry, log reviewer, Arabic analyst, directional metrics, all MCP/Zapier/HF/Tavily skills. Use for agent:start, health-check, push-telemetry, log-review, Binance readiness, or reading LOCAL-TELEMETRY.json.
 ---
 
 # ZAMBAHOLA ONE AGENT
 
-## Live stack (Windows — 4 terminals)
+**Full skills & links index:** `docs/ar/المهارات-والروابط.md` · `apps/one-agent/knowledge/SKILLS-AND-LINKS.json`
+
+## Live stack (Windows — OMAR-PC)
 
 ```powershell
 npm run agent:phase2-live      # :8787 horizon 45s
@@ -16,14 +18,49 @@ npm run agent:remote-watcher   # cloud commands
 
 Verify: `npm run agent:health-check` → horizon **45s**, hostname **OMAR-PC**, feed **fast_tick**.
 
-## MCP tools (local)
+## Second agent — log reviewer
+
+```powershell
+npm run agent:log-review           # dry-run analysis
+npm run agent:log-review:apply     # soften weak weights, prune receipts, fix NaN ML
+```
+
+Reports: `data/learning/LOG-AUDIT-REPORT.json` · `.md` — see `docs/ar/مراجع-السجل.md`
+
+## MCP tools (local — `zambahola-local`)
 
 | Tool | Purpose |
 |------|---------|
 | `zambahola_get_telemetry` | Full snapshot |
+| `zambahola_get_metrics` | Dashboard metrics |
 | `zambahola_get_analyst` | Arabic why abstain/signal |
 | `zambahola_get_patterns` | Regime × strategy journal |
 | `zambahola_queue_command` | Remote npm actions |
+| `zambahola_read_telemetry_file` | Offline LOCAL-TELEMETRY.json |
+
+## Cursor Marketplace plugins (install on desktop)
+
+```
+/add-plugin tavily
+/add-plugin zapier
+/add-plugin huggingface-skills
+/add-plugin cli-for-agent
+/add-plugin cursor-sdk
+/add-plugin agent-compatibility
+/add-plugin continual-learning
+```
+
+| Plugin | Skills / when |
+|--------|----------------|
+| **tavily** | `tavily-search` · `tavily-research` · `tavily-extract` · `tavily-crawl` |
+| **zapier** | `zapier-setup` · `zapier-status` — Slack/Sheets/GitHub |
+| **huggingface-skills** | `hf-cli` · `hugging-face-model-trainer` · `paper_search` MCP |
+| **cli-for-agent** | Fix `npm run agent:*` for automation |
+| **cursor-sdk** | `@cursor/sdk` Cloud Agents |
+| **agent-compatibility** | Repo readiness score |
+| **continual-learning** | Update AGENTS.md |
+
+Setup: `docs/ar/تثبيت-اضافات-السوق.md` · `.cursor/mcp.json.example`
 
 ## Success metrics (pre-Binance)
 
@@ -34,15 +71,17 @@ Verify: `npm run agent:health-check` → horizon **45s**, hostname **OMAR-PC**, 
 | Abstain | 40–75% (not 95%+) |
 | Directional signals | > 0 |
 
-## Research import (no backtest)
+## Research import
 
 ```powershell
-npm run agent:research-import -- apps/one-agent/knowledge/user-reports/AGENT-IMPORT-FINAL.json
+npm run agent:research-import -- apps/one-agent/knowledge/SKILLS-AND-LINKS.json
 npm run agent:import-hf-research
 ```
 
-## Docs
+## Docs (Arabic)
 
-- Arabic bridge: `docs/ar/ربط-الجهاز-المحلي.md`
-- Marketplace: `docs/ar/تثبيت-اضافات-السوق.md`
-- Integrations: `docs/INTEGRATIONS.md`
+- Skills & links: `docs/ar/المهارات-والروابط.md`
+- Bridge: `docs/ar/ربط-الجهاز-المحلي.md`
+- MCP/Zapier: `docs/ar/تكاملات-MCP-وزابير.md`
+- Log reviewer: `docs/ar/مراجع-السجل.md`
+- Integrations (EN): `docs/INTEGRATIONS.md`

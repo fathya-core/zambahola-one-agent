@@ -14,10 +14,12 @@ const agentUrl = process.env.ZAMBAHOLA_AGENT_URL ?? "http://127.0.0.1:8787";
 const hours = Number(process.env.ZAMBAHOLA_OVERNIGHT_HOURS ?? 8);
 const checkSec = Number(process.env.ZAMBAHOLA_OVERNIGHT_CHECK_SEC ?? 90);
 const pushMin = Number(process.env.ZAMBAHOLA_OVERNIGHT_PUSH_MIN ?? 45);
+const auditMin = Number(process.env.ZAMBAHOLA_OVERNIGHT_AUDIT_MIN ?? 60);
 const startCmd = process.env.ZAMBAHOLA_OVERNIGHT_START ?? "agent:phase2-hybrid";
 
 const endAt = Date.now() + hours * 3600_000;
 let lastPush = 0;
+let lastAudit = 0;
 let restarts = 0;
 
 async function log(event, extra = {}) {
@@ -86,8 +88,20 @@ async function maybePushTelemetry() {
   await log(r.ok ? "telemetry_pushed" : "telemetry_push_failed");
 }
 
-console.log(`[overnight] ZAMBAHOLA watchdog — ${hours}h, check every ${checkSec}s, push every ${pushMin}m`);
-await log("watchdog_start", { hours, checkSec, pushMin, startCmd });
+async function maybeLogAudit() {
+  if (auditMin <= 0) return;
+  const now = Date.now();
+  if (now - lastAudit < auditMin * 60_000) return;
+  lastAudit = now;
+  console.log("[overnight] log audit (apply)...");
+  const r = runNpm(["run", "agent:log-review:apply"], { cwd: root, stdio: "pipe" });
+  await log(r.ok ? "log_audit_done" : "log_audit_failed");
+}
+
+console.log(
+  `[overnight] ZAMBAHOLA watchdog — ${hours}h, check every ${checkSec}s, push every ${pushMin}m, audit every ${auditMin}m`,
+);
+await log("watchdog_start", { hours, checkSec, pushMin, auditMin, startCmd });
 
 runNpm(["run", "agent:stop"], { cwd: root, stdio: "pipe" });
 await startAgent();
@@ -95,9 +109,11 @@ await startAgent();
 while (Date.now() < endAt) {
   await ensureAgent();
   await maybePushTelemetry();
+  await maybeLogAudit();
   await new Promise((r) => setTimeout(r, checkSec * 1000));
 }
 
 await maybePushTelemetry();
+await maybeLogAudit();
 await log("watchdog_done", { restarts, note: "agent still running — check dashboard in morning" });
 console.log(`[overnight] Done (${hours}h). Agent still running. Log: apps/one-agent/data/bridge/OVERNIGHT-LOG.jsonl`);

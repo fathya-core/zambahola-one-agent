@@ -49,7 +49,19 @@ npm run agent:import-hf-research
 
 مراجع: DeepLOB · TLOB · order flow CNN — في `hf-research-import.json`
 
+## دليل المهارات الكامل
+
+**كل المهارات + MCP + روابط:** [`docs/ar/المهارات-والروابط.md`](./المهارات-والروابط.md)
+
+استيراد للوكيل:
+
+```powershell
+npm run agent:research-import -- apps/one-agent/knowledge/SKILLS-AND-LINKS.json
+```
+
 ## روابط
 
+- مهارات وروابط (كامل): `docs/ar/المهارات-والروابط.md`
 - ربط محلي: `docs/ar/ربط-الجهاز-المحلي.md`
+- مراجع السجل: `docs/ar/مراجع-السجل.md`
 - إنجليزي: `docs/INTEGRATIONS.md`
