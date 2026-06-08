@@ -6,8 +6,8 @@ Set-Location $Root
 Write-Host "[1] collect telemetry..." -ForegroundColor Cyan
 node scripts/collect-telemetry.mjs
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Failed collect — تأكد الوكيل شغال: npm run agent:phase4-hit-recover" -ForegroundColor Red
-    Write-Host "أو شغّل bridge: npm run agent:local-bridge" -ForegroundColor Yellow
+    Write-Host "Failed collect - start agent: npm run agent:phase4-hit-recover" -ForegroundColor Red
+    Write-Host "Or start bridge: npm run agent:local-bridge" -ForegroundColor Yellow
     exit 1
 }
 
