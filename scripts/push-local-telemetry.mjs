@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { refreshTelemetry } from "./collect-telemetry.mjs";
+import { finishScript } from "./lib/safe-fetch.mjs";
 import { formatLocalNow } from "./time-local.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -42,36 +43,45 @@ function telemetryChanged() {
   }
 }
 
-abortStuckRebase();
+async function main() {
+  abortStuckRebase();
 
-const ok = await refreshTelemetry();
-if (!ok) {
-  console.error("[push-telemetry] start agent: npm run agent:phase2-signals");
-  process.exit(1);
+  const ok = await refreshTelemetry();
+  if (!ok) {
+    console.error("[push-telemetry] start agent: npm run agent:phase4-hit-recover");
+    return 1;
+  }
+
+  if (!telemetryChanged()) {
+    const snap = JSON.parse(readFileSync(telemetry, "utf8"));
+    console.log(
+      `[push-telemetry] nothing new (hostname=${snap.hostname ?? "?"}, ticks=${snap.status?.tickCount ?? "?"})`,
+    );
+    return 0;
+  }
+
+  const ts = formatLocalNow().slice(0, 16);
+  const files = bridgeFiles.filter((f) => existsSync(join(root, f)));
+
+  console.log("[push-telemetry] syncing with origin/main...");
+  git(["fetch", "origin", "main"], { inherit: true });
+  const pull = git(["pull", "--rebase", "--autostash", "origin", "main"], { inherit: true });
+  if (pull.status !== 0) {
+    console.error("[push-telemetry] pull failed — run: npm run agent:fix-git-push");
+    return 1;
+  }
+
+  git(["add", "-f", ...files], { inherit: true });
+  const commit = git(["commit", "-m", `telemetry: ${ts}`], { inherit: true });
+  if (commit.status !== 0) return 1;
+
+  const push = git(["push", "origin", "main"], { inherit: true });
+  return push.status ?? 0;
 }
 
-if (!telemetryChanged()) {
-  const snap = JSON.parse(readFileSync(telemetry, "utf8"));
-  console.log(
-    `[push-telemetry] nothing new (hostname=${snap.hostname ?? "?"}, ticks=${snap.status?.tickCount ?? "?"})`,
-  );
-  process.exit(0);
-}
-
-const ts = formatLocalNow().slice(0, 16);
-const files = bridgeFiles.filter((f) => existsSync(join(root, f)));
-
-console.log("[push-telemetry] syncing with origin/main...");
-git(["fetch", "origin", "main"], { inherit: true });
-const pull = git(["pull", "--rebase", "--autostash", "origin", "main"], { inherit: true });
-if (pull.status !== 0) {
-  console.error("[push-telemetry] pull failed — run: npm run agent:fix-git-push");
-  process.exit(1);
-}
-
-git(["add", "-f", ...files], { inherit: true });
-const commit = git(["commit", "-m", `telemetry: ${ts}`], { inherit: true });
-if (commit.status !== 0) process.exit(1);
-
-const push = git(["push", "origin", "main"], { inherit: true });
-process.exit(push.status ?? 0);
+main()
+  .then((code) => finishScript(code))
+  .catch((err) => {
+    console.error("[push-telemetry] error:", err);
+    finishScript(1);
+  });

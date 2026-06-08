@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { telemetryTimeFields } from "./time-local.mjs";
+import { safeFetchJson, safeFetchOk, finishScript } from "./lib/safe-fetch.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const bridgeDir = join(root, "apps/one-agent/data/bridge");
@@ -11,20 +12,22 @@ const telemetryFile = join(bridgeDir, "LOCAL-TELEMETRY.json");
 const bridgeUrl = process.env.ZAMBAHOLA_BRIDGE_URL ?? "http://127.0.0.1:8790";
 const agentUrl = process.env.ZAMBAHOLA_AGENT_URL ?? "http://127.0.0.1:8787";
 
-async function fetchJson(base, path) {
-  const res = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(10000) });
-  if (!res.ok) throw new Error(`${path} HTTP ${res.status}`);
-  return res.json();
-}
-
 async function fromAgent() {
-  const [status, metrics, analyst, calibration, learning] = await Promise.all([
-    fetchJson(agentUrl, "/api/status"),
-    fetchJson(agentUrl, "/api/metrics"),
-    fetchJson(agentUrl, "/api/analyst"),
-    fetchJson(agentUrl, "/api/calibration"),
-    fetchJson(agentUrl, "/api/learning"),
-  ]);
+  const base = agentUrl;
+  const status = await safeFetchJson(`${base}/api/status`);
+  const metrics = await safeFetchJson(`${base}/api/metrics`);
+  const analyst = await safeFetchJson(`${base}/api/analyst`);
+  const calibration = await safeFetchJson(`${base}/api/calibration`);
+  const learning = await safeFetchJson(`${base}/api/learning`);
+  let logAudit = null;
+  let skills = null;
+  try {
+    logAudit = await safeFetchJson(`${base}/api/log-audit`, 8000);
+    skills = await safeFetchJson(`${base}/api/skills`, 8000);
+  } catch {
+    /* older agent builds */
+  }
+
   return {
     ...telemetryTimeFields(),
     hostname: process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? "local",
@@ -38,22 +41,30 @@ async function fromAgent() {
       metaLabel: learning?.metaLabel,
       metaPnl: learning?.metaPnl,
       directionalRollingHitRate: learning?.guard?.directionalRollingHitRate,
+      logAudits: learning?.logAudits,
     },
+    logAudit,
+    skillsCatalog: skills?.catalog ?? null,
+    analystSkillApplied: analyst?.skillAppliedAr ?? [],
   };
 }
 
 export async function refreshTelemetry() {
   try {
-    const res = await fetch(`${bridgeUrl}/telemetry`, { signal: AbortSignal.timeout(12000) });
-    if (res.ok) {
+    if (await safeFetchOk(`${bridgeUrl}/telemetry`, 12000)) {
+      const snap = await safeFetchJson(`${bridgeUrl}/telemetry`, 12000);
+      await mkdir(bridgeDir, { recursive: true });
+      await writeFile(telemetryFile, JSON.stringify(snap, null, 2), "utf8");
       console.log("[telemetry] refreshed via bridge :8790");
       return true;
     }
   } catch {
-    /* fallback */
+    /* fallback to agent */
   }
 
-  if (!await agentReachable()) {
+  try {
+    await safeFetchJson(`${agentUrl}/api/status`, 8000);
+  } catch {
     console.error("[telemetry] bridge :8790 offline AND agent :8787 unreachable");
     return false;
   }
@@ -65,16 +76,12 @@ export async function refreshTelemetry() {
   return true;
 }
 
-async function agentReachable() {
-  try {
-    await fetchJson(agentUrl, "/api/status");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-if (process.argv[1]?.endsWith("collect-telemetry.mjs")) {
-  const ok = await refreshTelemetry();
-  process.exit(ok ? 0 : 1);
+const isMain = process.argv[1]?.replace(/\\/g, "/").endsWith("collect-telemetry.mjs");
+if (isMain) {
+  refreshTelemetry()
+    .then((ok) => finishScript(ok ? 0 : 1))
+    .catch((err) => {
+      console.error("[telemetry] error:", err);
+      finishScript(1);
+    });
 }
