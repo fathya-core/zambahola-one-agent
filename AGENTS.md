@@ -82,4 +82,5 @@ Do **not** put `npm run agent:start` or `npm run verify` in the VM update script
 - Cursor Marketplace (user desktop): `tavily` · `zapier` · `huggingface-skills` · `cli-for-agent` · `cursor-sdk` · `agent-compatibility` · `continual-learning` — see `scripts/install-cursor-marketplace.ps1`.
 - Project skill: `.cursor/skills/zambahola-one-agent/SKILL.md`.
 - Log reviewer: `npm run agent:log-review` / `agent:log-review:apply` — `docs/ar/مراجع-السجل.md`.
+- **Dual agents (dashboard):** section «الوكيلان» on `:8787` shows session-scoped counters (`sessionEvaluations`, `sessionLogAudits`, `sessionSkillApplies`). Counters reset on each `agent.start()`. Log audit + analyst apply schedule off session evals (not cumulative `totalEvaluations`). Persisted skills: `data/learning/last-skill-applied.json`. APIs: `/api/learning` (`dualAgent`), `/api/log-audit` (`report` + `dualAgent`), `/api/analyst` (`skillAppliedAr`).
 - Research paste: `npm run agent:research-import -- apps/one-agent/knowledge/research-imports.example.json`

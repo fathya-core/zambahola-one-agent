@@ -11,7 +11,7 @@ import { loadKnowledgeIndex } from "../../knowledge/loader.js";
 import { getSentiment } from "../sentiment/index.js";
 import { getOrderBook } from "../market-feed/orderbook.js";
 import { getMarketSignals } from "../market-signals/index.js";
-import { getLiveLearningState } from "../learning/live-learning.js";
+import { buildDualAgentStatus, getLiveLearningState } from "../learning/live-learning.js";
 import { getGuardStatus } from "../learning/hit-rate-guard.js";
 import { loadBestWeights } from "../learning/weight-snapshot.js";
 import { getBrokerPhase } from "../broker/factory.js";
@@ -107,6 +107,7 @@ async function route(
   if (path === "/api/learning") {
     const state = await getLiveLearningState();
     const guard = getGuardStatus();
+    const metrics = agent.getRuntimeState().metrics;
     const best = await loadBestWeights();
     const { getPatternJournal } = await import("../learning/pattern-journal.js");
     const { getMetaLabeler } = await import("../learning/meta-label.js");
@@ -115,8 +116,19 @@ async function route(
     const meta = await getMetaLabeler();
     const metaPnl = await getMetaPnlModel();
     const cal = agent.predictionEngine.calibrator;
+    const { loadPersistedSkillActions } = await import("../learning/analyst-skill-apply.js");
+    const { getLiveLogAuditReport } = await import("../learning/log-audit-hook.js");
+    const { getLastLogAuditReport } = await import("../learning/log-auditor.js");
+    const audit = getLiveLogAuditReport() ?? (await getLastLogAuditReport());
+    const skillApplied = await loadPersistedSkillActions();
     return sendJson(res, 200, {
       ...state,
+      dualAgent: buildDualAgentStatus(state, {
+        directionalRolling: guard.directionalRollingHitRate,
+        abstainRate: metrics.abstainRate,
+      }),
+      skillAppliedAr: skillApplied.map((a) => `${a.status === "applied" ? "✅" : a.status === "queued" ? "📋" : "🚀"} ${a.id}: ${a.detailAr}`),
+      logAuditSummary: audit?.summary ?? null,
       guard,
       bestSnapshot: best?.meta ?? null,
       patternInsightsAr: patterns.recentInsightsAr,
@@ -157,8 +169,15 @@ async function route(
   if (path === "/api/log-audit" && req.method === "GET") {
     const { getLastLogAuditReport } = await import("../learning/log-auditor.js");
     const { getLiveLogAuditReport } = await import("../learning/log-audit-hook.js");
+    const state = await getLiveLearningState();
     const cached = getLiveLogAuditReport() ?? (await getLastLogAuditReport());
-    return sendJson(res, 200, cached ?? { note: "no audit yet — wait for evaluations" });
+    return sendJson(res, 200, {
+      report: cached ?? { note: "no audit yet — wait for session evaluations" },
+      dualAgent: buildDualAgentStatus(state, {
+        directionalRolling: getGuardStatus().directionalRollingHitRate,
+        abstainRate: agent.getRuntimeState().metrics.abstainRate,
+      }),
+    });
   }
   if (path === "/api/log-audit" && req.method === "POST") {
     const chunks: Buffer[] = [];
@@ -206,7 +225,7 @@ async function route(
     const { getLiveLogAuditReport } = await import("../learning/log-audit-hook.js");
     const { getLastLogAuditReport } = await import("../learning/log-auditor.js");
     const {
-      getLastAppliedSkillActions,
+      loadPersistedSkillActions,
       applyAnalystSkillActions,
       formatAppliedActionsAr,
     } = await import("../learning/analyst-skill-apply.js");
@@ -225,7 +244,8 @@ async function route(
       });
     }
 
-    const applied = getLastAppliedSkillActions();
+    const state = await getLiveLearningState();
+    const applied = await loadPersistedSkillActions();
     const report = buildAnalystReportAr(
       lastPrediction?.meta,
       patterns,
@@ -236,6 +256,10 @@ async function route(
       ...report,
       skillAppliedAr: formatAppliedActionsAr(applied),
       autoApplyEnabled: process.env.ZAMBAHOLA_ANALYST_AUTO_APPLY !== "0",
+      dualAgent: buildDualAgentStatus(state, {
+        directionalRolling: guard.directionalRollingHitRate,
+        abstainRate: metrics.abstainRate,
+      }),
       logAuditSummary: audit?.summary ?? null,
       metaPnl: metaPnl.getState(),
       lastPrediction: lastPrediction

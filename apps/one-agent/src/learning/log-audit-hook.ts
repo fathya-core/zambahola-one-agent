@@ -21,16 +21,17 @@ export function getLiveLogAuditReport(): LogAuditReport | null {
  */
 export async function maybeRunLiveLogAudit(ctx: {
   engine: PredictionEngine;
-  totalEvaluations: number;
+  /** Session-scoped counter (resets on agent.start) */
+  sessionEvaluations: number;
   directionalRolling?: number;
-  startedAt?: number;
+  sessionStartedAt?: number;
 }): Promise<LogAuditReport | null> {
   if (AUDIT_EVERY <= 0) return null;
-  if (ctx.totalEvaluations < AUDIT_MIN_EVALS) return null;
-  if (ctx.totalEvaluations % AUDIT_EVERY !== 0) return null;
+  if (ctx.sessionEvaluations < AUDIT_MIN_EVALS) return null;
+  if (ctx.sessionEvaluations % AUDIT_EVERY !== 0) return null;
 
-  const uptimeSec = ctx.startedAt
-    ? Math.floor((Date.now() - ctx.startedAt) / 1000)
+  const uptimeSec = ctx.sessionStartedAt
+    ? Math.floor((Date.now() - ctx.sessionStartedAt) / 1000)
     : 0;
   if (uptimeSec < AUDIT_MIN_UPTIME_SEC) return null;
 
@@ -39,7 +40,7 @@ export async function maybeRunLiveLogAudit(ctx: {
       AUDIT_APPLY_LIVE &&
       (ctx.directionalRolling === undefined ||
         ctx.directionalRolling < 0.45 ||
-        ctx.totalEvaluations % (AUDIT_EVERY * 2) === 0);
+        ctx.sessionEvaluations % (AUDIT_EVERY * 2) === 0);
 
     const report = await runLogAudit({ dryRun: !apply });
     lastReport = report;

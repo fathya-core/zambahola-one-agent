@@ -55,8 +55,12 @@ async function collectTelemetry() {
       metaPnl: learning.body?.metaPnl,
       directionalRollingHitRate: learning.body?.guard?.directionalRollingHitRate,
       logAudits: learning.body?.logAudits,
+      dualAgent: learning.body?.dualAgent,
+      sessionEvaluations: learning.body?.sessionEvaluations,
+      skillAppliedAr: learning.body?.skillAppliedAr,
     },
-    logAudit: logAudit.body,
+    logAudit: logAudit.body?.report ?? logAudit.body,
+    dualAgent: logAudit.body?.dualAgent ?? learning.body?.dualAgent ?? null,
     skillsCatalog: skills.body?.catalog ?? null,
     analystSkillApplied: analyst.body?.skillAppliedAr ?? [],
   };

@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
+import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readJsonSafe, writeJsonAtomic } from "../storage/json-io.js";
 import type { PredictionEngine } from "../prediction-engine/index.js";
 import { ALL_STRATEGIES } from "../prediction-engine/strategies/index.js";
 import { loadStrategyWeights, appendResearchLog } from "./adaptive-weights.js";
@@ -13,6 +15,7 @@ import type { SkillSuggestion } from "./skills-router.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceRoot = join(pkgRoot, "../..");
+export const SKILL_APPLIED_FILE = join(pkgRoot, "data", "learning", "last-skill-applied.json");
 
 const AUTO_APPLY = process.env.ZAMBAHOLA_ANALYST_AUTO_APPLY !== "0";
 const COOLDOWN_MS = Number(process.env.ZAMBAHOLA_ANALYST_APPLY_COOLDOWN_MS ?? 300_000);
@@ -23,6 +26,28 @@ const MIN_EVALS = Number(process.env.ZAMBAHOLA_ANALYST_APPLY_MIN_EVALS ?? 40);
 
 let lastApplyAt = 0;
 let lastApplied: AppliedSkillAction[] = [];
+let persistedLoaded = false;
+
+async function ensurePersistedLoaded(): Promise<void> {
+  if (persistedLoaded) return;
+  persistedLoaded = true;
+  const saved = await readJsonSafe<{ applied?: AppliedSkillAction[]; lastApplyAt?: number }>(
+    SKILL_APPLIED_FILE,
+  );
+  if (saved?.applied?.length) {
+    lastApplied = saved.applied;
+    lastApplyAt = saved.lastApplyAt ?? 0;
+  }
+}
+
+async function persistApplied(actions: AppliedSkillAction[]): Promise<void> {
+  await mkdir(dirname(SKILL_APPLIED_FILE), { recursive: true });
+  await writeJsonAtomic(SKILL_APPLIED_FILE, {
+    applied: actions,
+    lastApplyAt,
+    updatedAt: Date.now(),
+  });
+}
 
 export interface AppliedSkillAction {
   id: string;
@@ -46,9 +71,31 @@ export interface AnalystApplyContext {
 function pickActions(ctx: AnalystApplyContext): SkillSuggestion[] {
   const actions: SkillSuggestion[] = [];
   const r = ctx.report?.summary;
-  const dir = ctx.directionalRolling ?? r?.directionalHitRate ?? 1;
+  const dirRaw = ctx.directionalRolling ?? r?.directionalHitRate;
+  const dir = dirRaw == null || Number.isNaN(dirRaw) ? 0 : dirRaw;
   const abstain = ctx.abstainRate ?? r?.abstainRate ?? 0.5;
   const evals = ctx.totalEvaluations ?? r?.evaluations ?? 0;
+
+  if (abstain >= 0.7 && evals >= MIN_EVALS) {
+    actions.push({
+      kind: "npm",
+      id: "agent:log-review:apply",
+      use: "امتناع مرتفع — مراجعة السجل وتنظيف الأوزان",
+    });
+    actions.push({
+      kind: "npm",
+      id: "agent:patterns",
+      use: "تحديث يومية الأنماط بعد امتناع طويل",
+    });
+  }
+
+  if (abstain >= 0.85 && evals >= MIN_EVALS + 10) {
+    actions.push({
+      kind: "npm",
+      id: "agent:phase4-hit-recover",
+      use: "إعادة معايرة البوابات — امتناع شبه كامل",
+    });
+  }
 
   if (dir < 0.4 && evals >= MIN_EVALS) {
     actions.push({
@@ -101,7 +148,13 @@ function pickActions(ctx: AnalystApplyContext): SkillSuggestion[] {
     });
   }
 
-  return actions.slice(0, 4);
+  const seen = new Set<string>();
+  const unique = actions.filter((a) => {
+    if (seen.has(a.id)) return false;
+    seen.add(a.id);
+    return true;
+  });
+  return unique.slice(0, 4);
 }
 
 function uptimeSec(ctx: AnalystApplyContext): number {
@@ -243,6 +296,12 @@ const IN_PROCESS = new Set([
 ]);
 
 export function getLastAppliedSkillActions(): AppliedSkillAction[] {
+  void ensurePersistedLoaded();
+  return lastApplied;
+}
+
+export async function loadPersistedSkillActions(): Promise<AppliedSkillAction[]> {
+  await ensurePersistedLoaded();
   return lastApplied;
 }
 
@@ -250,6 +309,7 @@ export function getLastAppliedSkillActions(): AppliedSkillAction[] {
 export async function applyAnalystSkillActions(
   ctx: AnalystApplyContext,
 ): Promise<AppliedSkillAction[]> {
+  await ensurePersistedLoaded();
   if (!AUTO_APPLY && !ctx.force) return [];
 
   const now = Date.now();
@@ -289,6 +349,7 @@ export async function applyAnalystSkillActions(
     lastApplyAt = now;
     lastApplied = applied;
     try {
+      await persistApplied(applied);
       await appendResearchLog({
         event: "analyst_skill_apply",
         applied: applied.map((a) => ({ id: a.id, status: a.status, detail: a.detailAr })),

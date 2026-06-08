@@ -34,12 +34,72 @@ const ORCH_EVERY = Number(
 );
 const PATTERN_BOOST_EVERY = Number(process.env.ZAMBAHOLA_PATTERN_BOOST_EVERY ?? 8);
 const EXPORT_EVERY = Number(process.env.ZAMBAHOLA_LIVE_EXPORT_EVERY ?? 40);
+const ANALYST_APPLY_EVERY = Number(process.env.ZAMBAHOLA_ANALYST_APPLY_EVERY ?? 50);
+const ANALYST_APPLY_MIN_EVALS = Number(process.env.ZAMBAHOLA_ANALYST_APPLY_MIN_EVALS ?? 40);
 
 let statePromise: Promise<LearningState> | null = null;
 
 async function getState(): Promise<LearningState> {
   if (!statePromise) statePromise = loadLearningState();
   return statePromise;
+}
+
+/** Reset session counters when primary agent starts — keeps dual-agent schedule in sync with dashboard uptime */
+export async function beginLiveLearningSession(agentStartedAt: number): Promise<LearningState> {
+  const state = await loadLearningState();
+  state.sessionEvaluations = 0;
+  state.sessionLogAudits = 0;
+  state.sessionSkillApplies = 0;
+  state.sessionStartedAt = agentStartedAt;
+  await saveLearningState(state);
+  statePromise = Promise.resolve(state);
+  return state;
+}
+
+export function buildDualAgentStatus(state: LearningState, runtime?: {
+  directionalRolling?: number;
+  abstainRate?: number;
+}): Record<string, unknown> {
+  const auditEvery = Number(process.env.ZAMBAHOLA_LOG_AUDIT_EVERY ?? 50);
+  const auditMin = Number(process.env.ZAMBAHOLA_LOG_AUDIT_MIN_EVALS ?? 40);
+  const auditMinUptime = Number(process.env.ZAMBAHOLA_LOG_AUDIT_MIN_UPTIME_SEC ?? 180);
+  const sess = state.sessionEvaluations ?? 0;
+  const uptimeSec = state.sessionStartedAt
+    ? Math.floor((Date.now() - state.sessionStartedAt) / 1000)
+    : 0;
+  const untilAudit =
+    sess < auditMin
+      ? auditMin - sess
+      : auditEvery - (sess % auditEvery || auditEvery);
+  const untilAnalyst =
+    sess < ANALYST_APPLY_MIN_EVALS
+      ? ANALYST_APPLY_MIN_EVALS - sess
+      : ANALYST_APPLY_EVERY - (sess % ANALYST_APPLY_EVERY || ANALYST_APPLY_EVERY);
+
+  return {
+    primaryAgent: "live-learning",
+    secondaryAgent: "log-auditor + analyst-skill-apply",
+    sessionEvaluations: sess,
+    sessionLogAudits: state.sessionLogAudits ?? 0,
+    sessionSkillApplies: state.sessionSkillApplies ?? 0,
+    totalLogAudits: state.logAudits ?? 0,
+    lastLogAuditAt: state.lastLogAuditAt ?? 0,
+    sessionUptimeSec: uptimeSec,
+    auditEvery,
+    analystApplyEvery: ANALYST_APPLY_EVERY,
+    nextAuditInEvals: untilAudit,
+    nextAnalystApplyInEvals: untilAnalyst,
+    auditWarmedUp: sess >= auditMin && uptimeSec >= auditMinUptime,
+    analystAutoApply: process.env.ZAMBAHOLA_ANALYST_AUTO_APPLY !== "0",
+    directionalRolling: runtime?.directionalRolling,
+    abstainRate: runtime?.abstainRate,
+    statusAr:
+      sess < auditMin
+        ? `الوكيل الثاني ينتظر ${auditMin - sess} تقييم`
+        : uptimeSec < auditMinUptime
+          ? `الوكيل الثاني ينتظر ${auditMinUptime - uptimeSec}ث تشغيل`
+          : `الوكيلان نشطان — مراجعات الجلسة: ${state.sessionLogAudits ?? 0}`,
+  };
 }
 
 export interface LiveEvalContext {
@@ -55,6 +115,7 @@ export interface LiveEvalContext {
 export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningState> {
   let state = await getState();
   state.totalEvaluations += 1;
+  state.sessionEvaluations = (state.sessionEvaluations ?? 0) + 1;
 
   const isDirectional = ctx.direction !== undefined && ctx.direction !== "range";
   const guard = recordHit(ctx.ensembleHit, {
@@ -142,42 +203,60 @@ export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningSt
   }
 
   let auditReport: Awaited<ReturnType<typeof maybeRunLiveLogAudit>> = null;
+  const sessionStartedAt = state.sessionStartedAt || state.startedAt;
   try {
     auditReport = await maybeRunLiveLogAudit({
       engine: ctx.engine,
-      totalEvaluations: state.totalEvaluations,
+      sessionEvaluations: state.sessionEvaluations,
       directionalRolling: guard.directionalRolling,
-      startedAt: state.startedAt,
+      sessionStartedAt,
     });
     if (auditReport) {
       state.logAudits = (state.logAudits ?? 0) + 1;
+      state.sessionLogAudits = (state.sessionLogAudits ?? 0) + 1;
       state.lastLogAuditAt = auditReport.auditedAt;
       state.totalLearningUpdates += 1;
       didUpdate = true;
 
+      await appendResearchLog({
+        event: "live_log_audit",
+        evaluations: state.totalEvaluations,
+        sessionEvaluations: state.sessionEvaluations,
+        dryRun: auditReport.dryRun,
+        hitRate: auditReport.summary.hitRate,
+        directionalHitRate: auditReport.summary.directionalHitRate,
+        weightsChanged: auditReport.weightsChanged,
+        insights: auditReport.insightsAr.slice(0, 4),
+      });
+    }
+  } catch (err) {
+    console.warn("[zambahola] live log audit failed (agent continues):", err);
+  }
+
+  try {
+    const shouldApplyAnalyst =
+      state.sessionEvaluations >= ANALYST_APPLY_MIN_EVALS &&
+      (auditReport !== null ||
+        (ANALYST_APPLY_EVERY > 0 && state.sessionEvaluations % ANALYST_APPLY_EVERY === 0));
+
+    if (shouldApplyAnalyst) {
       const skillApplied = await applyAnalystSkillActions({
         engine: ctx.engine,
         report: auditReport,
         regime: ctx.regime,
         directionalRolling: guard.directionalRolling,
-        abstainRate: auditReport.summary.abstainRate,
-        totalEvaluations: state.totalEvaluations,
-        startedAt: state.startedAt,
+        abstainRate: auditReport?.summary.abstainRate,
+        totalEvaluations: state.sessionEvaluations,
+        startedAt: sessionStartedAt,
       });
-
-      await appendResearchLog({
-        event: "live_log_audit",
-        evaluations: state.totalEvaluations,
-        dryRun: auditReport.dryRun,
-        hitRate: auditReport.summary.hitRate,
-        directionalHitRate: auditReport.summary.directionalHitRate,
-        weightsChanged: auditReport.weightsChanged,
-        skillApplied: skillApplied.map((a) => a.id),
-        insights: auditReport.insightsAr.slice(0, 4),
-      });
+      if (skillApplied.length) {
+        state.sessionSkillApplies = (state.sessionSkillApplies ?? 0) + 1;
+        state.totalLearningUpdates += 1;
+        didUpdate = true;
+      }
     }
   } catch (err) {
-    console.warn("[zambahola] live log audit / analyst apply failed (agent continues):", err);
+    console.warn("[zambahola] analyst skill apply failed (agent continues):", err);
   }
 
   if (didUpdate) state.totalLearningUpdates += 1;

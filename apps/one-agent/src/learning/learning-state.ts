@@ -24,6 +24,12 @@ export interface LearningState {
   weightRestores: number;
   logAudits: number;
   lastLogAuditAt: number;
+  /** Evaluations since last agent.start() — drives log audit + analyst scheduling */
+  sessionEvaluations: number;
+  sessionLogAudits: number;
+  sessionSkillApplies: number;
+  /** Mirrors agent-core startedAt for uptime gates */
+  sessionStartedAt: number;
   stabilizeMode: boolean;
   lastUpdateAt: number;
   startedAt: number;
@@ -47,6 +53,10 @@ const DEFAULT: LearningState = {
   weightRestores: 0,
   logAudits: 0,
   lastLogAuditAt: 0,
+  sessionEvaluations: 0,
+  sessionLogAudits: 0,
+  sessionSkillApplies: 0,
+  sessionStartedAt: 0,
   stabilizeMode: false,
   lastUpdateAt: 0,
   startedAt: Date.now(),

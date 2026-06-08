@@ -11,6 +11,44 @@ function formatCountdown(ms) {
   return s + "s";
 }
 
+function renderDualAgent(dual, logAudit, analyst, learn) {
+  const pills = $("dual-agent-pills");
+  if (!pills) return;
+
+  const primaryOn = dual?.sessionEvaluations > 0;
+  const secondaryOn = (dual?.sessionLogAudits ?? 0) > 0 || (dual?.sessionSkillApplies ?? 0) > 0;
+  const warmed = dual?.auditWarmedUp;
+
+  pills.innerHTML = [
+    `<span class="agent-pill ${primaryOn ? "active" : ""}">① تعلّم مباشر ${primaryOn ? "نشط" : "—"}</span>`,
+    `<span class="agent-pill ${secondaryOn ? "active" : warmed ? "wait" : ""}">② مراجع السجل ${secondaryOn ? "نشط" : warmed ? "جاهز" : "ينتظر"}</span>`,
+    `<span class="agent-pill ${dual?.analystAutoApply ? "active" : ""}">مهارات تلقائية ${dual?.analystAutoApply ? "ON" : "OFF"}</span>`,
+  ].join("");
+
+  const skills = analyst?.skillAppliedAr?.length
+    ? analyst.skillAppliedAr
+    : learn?.skillAppliedAr ?? [];
+  const auditSummary = logAudit?.report?.summary ?? logAudit?.summary ?? learn?.logAuditSummary;
+  const lines = [
+    dual?.statusAr ?? "—",
+    "",
+    `تقييمات الجلسة: ${dual?.sessionEvaluations ?? 0}`,
+    `مراجعات الجلسة: ${dual?.sessionLogAudits ?? 0} · تطبيق مهارات: ${dual?.sessionSkillApplies ?? 0}`,
+    `المراجعة القادمة بعد: ${dual?.nextAuditInEvals ?? "—"} تقييم`,
+    `المحلل القادم بعد: ${dual?.nextAnalystApplyInEvals ?? "—"} تقييم`,
+  ];
+  if (auditSummary) {
+    lines.push(
+      "",
+      `آخر مراجعة — hit ${(auditSummary.hitRate * 100).toFixed(1)}% · dir ${(auditSummary.directionalHitRate * 100).toFixed(1)}% · abstain ${(auditSummary.abstainRate * 100).toFixed(1)}%`,
+    );
+  }
+  if (skills.length) {
+    lines.push("", "مهارات مطبّقة:", ...skills.map((s) => "• " + s));
+  }
+  $("dual-agent").textContent = lines.join("\n");
+}
+
 function renderMetrics(m) {
     const rows = [
       ["Local time", m.nowLocal ?? "—"],
@@ -51,6 +89,9 @@ function renderMetrics(m) {
       ["Dir. rolling (60)", m.directionalRollingHitRate != null ? (m.directionalRollingHitRate * 100).toFixed(1) + "%" : "—"],
       ["Peak hit", m.peakHitRate != null ? (m.peakHitRate * 100).toFixed(1) + "%" : "—"],
       ["Stabilize mode", m.stabilizeMode ? "ON (حماية)" : "off"],
+      ["Session evals", m.sessionEvaluations != null ? String(m.sessionEvaluations) : "—"],
+      ["Session log audits", m.sessionLogAudits != null ? String(m.sessionLogAudits) : "—"],
+      ["Session skill applies", m.sessionSkillApplies != null ? String(m.sessionSkillApplies) : "—"],
     ["Paper PnL", m.paperPnl],
     ["Avg win", m.averageWin],
     ["Avg loss", m.averageLoss],
@@ -135,10 +176,18 @@ async function refresh() {
       2,
     );
 
-    const [analyst, cal] = await Promise.all([
+    const [analyst, cal, logAudit, learn] = await Promise.all([
       fetchJson("/api/analyst"),
       fetchJson("/api/calibration"),
+      fetchJson("/api/log-audit").catch(() => null),
+      fetchJson("/api/learning"),
     ]);
+    renderDualAgent(
+      analyst.dualAgent ?? learn.dualAgent,
+      logAudit,
+      analyst,
+      learn,
+    );
     $("analyst").textContent =
       analyst.summaryAr +
       "\n\n" +
@@ -149,7 +198,6 @@ async function refresh() {
       2,
     );
 
-    const learn = await fetchJson("/api/learning");
     const insights = learn.patternInsightsAr ?? [];
     $("learning").textContent =
       (insights.length
@@ -161,6 +209,10 @@ async function refresh() {
         hitRateEma: learn.hitRateEma,
         metaLabel: learn.metaLabel,
         totalEvaluations: learn.totalEvaluations,
+        sessionEvaluations: learn.sessionEvaluations,
+        sessionLogAudits: learn.sessionLogAudits,
+        sessionSkillApplies: learn.sessionSkillApplies,
+        logAudits: learn.logAudits,
         totalLearningUpdates: learn.totalLearningUpdates,
         orchestratorBoosts: learn.orchestratorBoosts,
         modelExports: learn.modelExports,

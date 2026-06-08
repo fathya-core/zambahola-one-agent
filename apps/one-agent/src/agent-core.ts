@@ -8,7 +8,7 @@ import {
   recordStrategyOutcome,
   appendResearchLog,
 } from "./learning/adaptive-weights.js";
-import { onLiveEvaluation } from "./learning/live-learning.js";
+import { beginLiveLearningSession, onLiveEvaluation } from "./learning/live-learning.js";
 import { getMetaLabeler } from "./learning/meta-label.js";
 import { getMetaPnlModel } from "./learning/meta-pnl.js";
 import { recordPatternEvaluation } from "./learning/pattern-journal.js";
@@ -123,6 +123,11 @@ export class AgentCore {
     }
     this.running = true;
     this.startedAt = Date.now();
+    try {
+      this.learningState = await beginLiveLearningSession(this.startedAt);
+    } catch (err) {
+      console.warn("[zambahola] beginLiveLearningSession failed:", err);
+    }
     await this.predictionEngine.init();
     this.stopSentiment = startSentimentLoop(90_000);
     this.stopMarketSignals = startMarketSignalsLoop(45_000);
@@ -427,6 +432,9 @@ export class AgentCore {
       understandingScore: this.learningState?.understandingScore,
       learningUpdates: this.learningState?.totalLearningUpdates,
       liveEvaluations: this.learningState?.totalEvaluations,
+      sessionEvaluations: this.learningState?.sessionEvaluations,
+      sessionLogAudits: this.learningState?.sessionLogAudits,
+      sessionSkillApplies: this.learningState?.sessionSkillApplies,
       rollingHitRate: getGuardStatus().rollingHitRate,
       directionalRollingHitRate: getGuardStatus().directionalRollingHitRate,
       peakHitRate: getGuardStatus().sessionPeak,

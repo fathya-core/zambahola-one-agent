@@ -138,6 +138,9 @@ export interface AgentMetrics {
   understandingScore?: number;
   learningUpdates?: number;
   liveEvaluations?: number;
+  sessionEvaluations?: number;
+  sessionLogAudits?: number;
+  sessionSkillApplies?: number;
   directionalHitRate?: number;
   directionalCount?: number;
   abstainRate?: number;

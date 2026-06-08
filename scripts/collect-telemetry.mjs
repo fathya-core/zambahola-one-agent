@@ -42,8 +42,12 @@ async function fromAgent() {
       metaPnl: learning?.metaPnl,
       directionalRollingHitRate: learning?.guard?.directionalRollingHitRate,
       logAudits: learning?.logAudits,
+      dualAgent: learning?.dualAgent,
+      sessionEvaluations: learning?.sessionEvaluations,
+      skillAppliedAr: learning?.skillAppliedAr,
     },
-    logAudit,
+    logAudit: logAudit?.report ?? logAudit,
+    dualAgent: logAudit?.dualAgent ?? learning?.dualAgent ?? null,
     skillsCatalog: skills?.catalog ?? null,
     analystSkillApplied: analyst?.skillAppliedAr ?? [],
   };
