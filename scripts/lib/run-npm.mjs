@@ -10,7 +10,8 @@ export function runNpm(args, { cwd, env = process.env, stdio = "inherit" } = {})
     cwd,
     env,
     stdio,
-    shell: isWin,
+    shell: false,
+    windowsHide: true,
   });
   if (r.error) {
     console.error("[zambahola] npm spawn error:", r.error.message);

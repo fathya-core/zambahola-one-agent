@@ -130,8 +130,11 @@ export class AgentCore {
       console.warn("[zambahola] beginLiveLearningSession failed:", err);
     }
     await this.predictionEngine.init();
-    this.stopSentiment = startSentimentLoop(90_000);
-    this.stopMarketSignals = startMarketSignalsLoop(45_000);
+    const ultraLight = process.env.ZAMBAHOLA_ULTRA_LIGHT === "1";
+    if (!ultraLight) {
+      this.stopSentiment = startSentimentLoop(90_000);
+      this.stopMarketSignals = startMarketSignalsLoop(45_000);
+    }
     await writeReceipt("agent-start", {
       symbol: this.feed.symbol,
       feed: this.feed.name,

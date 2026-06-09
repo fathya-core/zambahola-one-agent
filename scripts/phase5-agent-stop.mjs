@@ -38,7 +38,7 @@ async function agentUp() {
 
 export async function forceStopAgent(maxAttempts = 4) {
   for (let i = 0; i < maxAttempts; i++) {
-    runNpm(["run", "agent:stop"], { cwd: root, stdio: "pipe" });
+    runNpm(["run", "agent:stop"], { cwd: root, stdio: "pipe", env: process.env });
 
     if (existsSync(pidFile)) {
       const pid = Number(readFileSync(pidFile, "utf8"));

@@ -71,6 +71,8 @@ async function main(): Promise<void> {
       ...base,
       ZAMBAHOLA_ULTRA_CYCLES: process.env.ZAMBAHOLA_ULTRA_CYCLES ?? "15",
       ZAMBAHOLA_ULTRA_KLINES: String(wfBars),
+      ZAMBAHOLA_ULTRA_SKIP_MEGA: "1",
+      ZAMBAHOLA_ULTRA_LIGHT: "1",
     });
   }
 

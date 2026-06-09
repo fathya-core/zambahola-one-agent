@@ -60,6 +60,11 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function runTrainProfile(trainArgs, label) {
+  console.log(`[phase5-night] trying ${label}...`);
+  return runNpm(trainArgs, { cwd: root, env: process.env });
+}
+
 console.log("[phase5-night] stopping agent...");
 const stopped = await forceStopAgent();
 if (!stopped) {
@@ -75,6 +80,8 @@ console.log(
 );
 
 let cycle = 0;
+let anyTrainOk = false;
+
 while (true) {
   const parts = localParts();
   if (!parts.isNight || parts.minutesUntilDay <= stopBeforeDayMin) {
@@ -86,7 +93,7 @@ while (true) {
 
   cycle += 1;
   const useFull = parts.dow === fullTrainDow && cycle === 1;
-  const trainArgs = useFull
+  const primaryArgs = useFull
     ? ["run", "agent:omni-train"]
     : ["run", "agent:omni-train:night"];
 
@@ -95,10 +102,17 @@ while (true) {
       `(full=${useFull}, ${parts.minutesUntilDay}m until day)...`,
   );
 
-  const train = runNpm(trainArgs, { cwd: root });
+  let train = await runTrainProfile(primaryArgs, useFull ? "omni-train full" : "omni-train:night");
   if (!train.ok) {
-    console.error("[phase5-night] omni-train failed");
-    process.exit(train.status ?? 1);
+    console.error("[phase5-night] primary train failed — fallback quick");
+    train = await runTrainProfile(["run", "agent:omni-train:quick"], "omni-train:quick");
+  }
+
+  if (train.ok) {
+    anyTrainOk = true;
+  } else {
+    console.error("[phase5-night] cycle failed (primary + quick) — stopping train loop");
+    break;
   }
 
   if (!continuous) break;
@@ -108,6 +122,10 @@ while (true) {
 
   console.log(`[phase5-night] cycle ${cycle} done — pause ${cycleGapMin}m then next...`);
   await sleep(cycleGapMin * 60_000);
+}
+
+if (!anyTrainOk) {
+  console.error("[phase5-night] WARN: no train cycle succeeded — starting agent anyway");
 }
 
 console.log("[phase5-night] training complete — starting agent...");
