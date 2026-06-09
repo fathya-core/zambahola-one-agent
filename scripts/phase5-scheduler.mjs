@@ -56,12 +56,31 @@ async function log(event, extra = {}) {
   console.log(`[phase5] ${event}`, Object.keys(extra).length ? extra : "");
 }
 
+const staleNightTrainMs =
+  Number(process.env.ZAMBAHOLA_PHASE5_STALE_TRAIN_MIN ?? 45) * 60_000;
+
+function normalizeState(raw) {
+  const state = {
+    lastNightTrainKey: null,
+    nightTrainInProgress: false,
+    ...(raw && typeof raw === "object" ? raw : {}),
+  };
+  if (state.nightTrainInProgress) {
+    const updated = Number(state.updatedAt ?? 0);
+    if (!updated || Date.now() - updated > staleNightTrainMs) {
+      state.nightTrainInProgress = false;
+      state._staleTrainCleared = true;
+    }
+  }
+  return state;
+}
+
 async function loadState() {
   if (!existsSync(stateFile)) {
     return { lastNightTrainKey: null, nightTrainInProgress: false };
   }
   try {
-    return JSON.parse(await readFile(stateFile, "utf8"));
+    return normalizeState(JSON.parse(await readFile(stateFile, "utf8")));
   } catch {
     return { lastNightTrainKey: null, nightTrainInProgress: false };
   }
@@ -262,6 +281,11 @@ console.log(
 console.log("[phase5] leave this window open — one command for day + night");
 
 let state = await loadState();
+if (state._staleTrainCleared) {
+  delete state._staleTrainCleared;
+  await saveState(state);
+  await log("stale_night_train_cleared");
+}
 await log("scheduler_start", { tz, dayStart, nightStart, agentCmd });
 
 process.on("SIGINT", async () => {
