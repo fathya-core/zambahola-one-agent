@@ -9,13 +9,30 @@
  *   npm run agent:phase5-auto
  */
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runNpm } from "./lib/run-npm.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+function loadPhase5EnvFile() {
+  const path = join(root, "config", "phase5-ready.env");
+  if (!existsSync(path)) return;
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    const eq = t.indexOf("=");
+    if (eq <= 0) continue;
+    const key = t.slice(0, eq).trim();
+    if (process.env[key] === undefined) {
+      process.env[key] = t.slice(eq + 1).trim();
+    }
+  }
+}
+loadPhase5EnvFile();
+
 const logFile = join(root, "apps/one-agent/data/bridge/PHASE5-SCHEDULER.jsonl");
 const stateFile = join(root, "apps/one-agent/data/bridge/PHASE5-STATE.json");
 const agentUrl = process.env.ZAMBAHOLA_AGENT_URL ?? "http://127.0.0.1:8787";
@@ -24,7 +41,7 @@ const npm = isWin ? "npm.cmd" : "npm";
 
 const tz = process.env.ZAMBAHOLA_PHASE5_TZ ?? "Asia/Riyadh";
 const dayStart = Number(process.env.ZAMBAHOLA_PHASE5_DAY_START ?? 6);
-const nightStart = Number(process.env.ZAMBAHOLA_PHASE5_NIGHT_START ?? 23);
+const nightStart = Number(process.env.ZAMBAHOLA_PHASE5_NIGHT_START ?? 20);
 const checkSec = Number(process.env.ZAMBAHOLA_PHASE5_CHECK_SEC ?? 90);
 const pushMin = Number(process.env.ZAMBAHOLA_PHASE5_PUSH_MIN ?? 30);
 const auditMin = Number(process.env.ZAMBAHOLA_PHASE5_AUDIT_MIN ?? 60);
