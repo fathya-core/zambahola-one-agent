@@ -1,12 +1,6 @@
 #!/usr/bin/env node
 /**
- * Phase 5 — أتمتة نهار/ليل بدون أوامر يدوية.
- *
- * نهاراً: وكيل phase5-ready + bridge + watcher + guard + telemetry
- * ليلاً: إيقاف الوكيل → omni-train → export → إعادة phase5
- *
- * شغّل مرة واحدة واترك النافذة مفتوحة:
- *   npm run agent:phase5-auto
+ * Phase 5 — day/night automation (keep window open: npm run agent:phase5-auto)
  */
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
@@ -14,6 +8,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runNpm } from "./lib/run-npm.mjs";
+import { forceStopAgent } from "./phase5-agent-stop.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -45,11 +40,12 @@ const nightStart = Number(process.env.ZAMBAHOLA_PHASE5_NIGHT_START ?? 20);
 const checkSec = Number(process.env.ZAMBAHOLA_PHASE5_CHECK_SEC ?? 90);
 const pushMin = Number(process.env.ZAMBAHOLA_PHASE5_PUSH_MIN ?? 30);
 const auditMin = Number(process.env.ZAMBAHOLA_PHASE5_AUDIT_MIN ?? 60);
-const fullTrainDow = Number(process.env.ZAMBAHOLA_PHASE5_FULL_TRAIN_DOW ?? 5);
 const agentCmd = process.env.ZAMBAHOLA_PHASE5_AGENT_CMD ?? "agent:phase5-ready";
 
 let lastPush = 0;
 let lastAudit = 0;
+let lastMode = "";
+let tickN = 0;
 let sidecarStarted = false;
 const children = [];
 
@@ -81,6 +77,7 @@ function localParts() {
     timeZone: tz,
     hour: "numeric",
     hour12: false,
+    hourCycle: "h23",
     weekday: "short",
     year: "numeric",
     month: "2-digit",
@@ -100,8 +97,9 @@ function localParts() {
 function spawnSidecar(name, args) {
   const child = spawn(npm, args, {
     cwd: root,
-    stdio: "inherit",
+    stdio: "ignore",
     shell: isWin,
+    detached: false,
   });
   child.on("exit", (code) => {
     console.log(`[phase5] sidecar ${name} exited ${code}`);
@@ -110,13 +108,13 @@ function spawnSidecar(name, args) {
   return child;
 }
 
-function ensureSidecars() {
+async function ensureSidecars() {
   if (sidecarStarted) return;
   sidecarStarted = true;
   spawnSidecar("bridge", ["run", "agent:local-bridge"]);
   spawnSidecar("watcher", ["run", "agent:remote-watcher"]);
   spawnSidecar("guard", ["run", "agent:guard"]);
-  log("sidecars_started");
+  await log("sidecars_started");
 }
 
 async function agentHealthy() {
@@ -131,8 +129,9 @@ async function agentHealthy() {
 }
 
 async function stopAgent() {
-  runNpm(["run", "agent:stop"], { cwd: root, stdio: "pipe" });
-  await new Promise((r) => setTimeout(r, 2500));
+  const ok = await forceStopAgent(4);
+  await log(ok ? "agent_stopped" : "agent_stop_incomplete");
+  return ok;
 }
 
 async function startAgent() {
@@ -144,61 +143,55 @@ async function startAgent() {
     shell: isWin,
   });
   child.unref();
-  await new Promise((r) => setTimeout(r, 5000));
+  await new Promise((r) => setTimeout(r, 6000));
   const status = await agentHealthy();
   await log(status ? "agent_up" : "agent_start_no_status", {
     tickCount: status?.tickCount,
+    pid: status?.pid,
     feed: status?.feed,
   });
   return !!status;
 }
 
-async function runNightTrain(state, { dateKey, dow }) {
-  if (state.nightTrainInProgress) return state;
-  if (state.lastNightTrainKey === dateKey) return state;
-
-  state.nightTrainInProgress = true;
-  await saveState(state);
-  await log("night_train_begin", { dateKey, dow });
-
-  await stopAgent();
-
-  spawnSync("git", ["pull", "origin", "main"], { cwd: root, stdio: "pipe" });
-
-  const useFull = dow === fullTrainDow;
-  const trainArgs = useFull
-    ? ["run", "agent:omni-train"]
-    : ["run", "agent:omni-train:quick"];
-  await log("night_train_omni", { full: useFull });
-  const train = runNpm(trainArgs, { cwd: root });
-  if (!train.ok) {
-    await log("night_train_failed", { step: "omni-train" });
-    state.nightTrainInProgress = false;
-    await saveState(state);
-    await startAgent();
+async function runNightTrain(state, parts) {
+  if (state.nightTrainInProgress) {
+    await log("night_train_skip", { reason: "in_progress" });
+    return state;
+  }
+  if (state.lastNightTrainKey === parts.dateKey) {
+    await log("night_train_skip", { reason: "already_done", dateKey: parts.dateKey });
     return state;
   }
 
-  const exp = runNpm(["run", "agent:export-models"], { cwd: root });
-  await log(exp.ok ? "night_train_export_ok" : "night_train_export_failed");
+  state.nightTrainInProgress = true;
+  await saveState(state);
+  await log("night_train_begin", { dateKey: parts.dateKey, hour: parts.hour, dow: parts.dow });
 
-  state.lastNightTrainKey = dateKey;
+  const r = spawnSync(process.execPath, [join(root, "scripts/phase5-night-train.mjs")], {
+    cwd: root,
+    stdio: "inherit",
+    env: process.env,
+  });
+
+  if (r.status === 0) {
+    state.lastNightTrainKey = parts.dateKey;
+    await log("night_train_done", { dateKey: parts.dateKey });
+  } else {
+    await log("night_train_failed", { exit: r.status ?? 1 });
+  }
+
   state.nightTrainInProgress = false;
   await saveState(state);
-  await log("night_train_done", { dateKey });
 
-  await startAgent();
+  if (!(await agentHealthy())) {
+    await startAgent();
+  }
   return state;
 }
 
 async function ensureDayAgent() {
   const status = await agentHealthy();
   if (status) {
-    await log("heartbeat", {
-      tickCount: status.tickCount,
-      uptimeSec: status.time?.uptimeSec,
-      lastTickAgeSec: status.time?.lastTickAgeSec,
-    });
     return true;
   }
   await log("agent_down_restart");
@@ -224,21 +217,60 @@ async function maybeAudit() {
 }
 
 async function tick(state) {
+  tickN += 1;
   const parts = localParts();
-  ensureSidecars();
+  await ensureSidecars();
+
+  if (parts.mode !== lastMode) {
+    lastMode = parts.mode;
+    await log("mode_change", { mode: parts.mode, hour: parts.hour, dateKey: parts.dateKey });
+  }
+
+  if (tickN % 5 === 1) {
+    await log("tick", {
+      n: tickN,
+      mode: parts.mode,
+      hour: parts.hour,
+      isNight: parts.isNight,
+      lastNightTrainKey: state.lastNightTrainKey,
+    });
+  }
 
   if (parts.isNight) {
     state = await runNightTrain(state, parts);
-    if (!state.nightTrainInProgress) {
+    if (!state.nightTrainInProgress && !(await agentHealthy())) {
       await ensureDayAgent();
+    } else if (await agentHealthy()) {
+      const s = await agentHealthy();
+      if (tickN % 5 === 1) {
+        await log("heartbeat", {
+          tickCount: s?.tickCount,
+          uptimeSec: s?.time?.uptimeSec,
+        });
+      }
     }
   } else {
-    await ensureDayAgent();
+    const up = await ensureDayAgent();
+    if (up) {
+      const s = await agentHealthy();
+      if (tickN % 5 === 1 && s) {
+        await log("heartbeat", {
+          tickCount: s.tickCount,
+          uptimeSec: s.time?.uptimeSec,
+          lastTickAgeSec: s.time?.lastTickAgeSec,
+        });
+      }
+    }
     await maybePush();
     await maybeAudit();
   }
 
-  await saveState({ ...state, lastMode: parts.mode, lastHour: parts.hour });
+  await saveState({
+    ...state,
+    lastMode: parts.mode,
+    lastHour: parts.hour,
+    lastDateKey: parts.dateKey,
+  });
   return state;
 }
 
@@ -260,6 +292,14 @@ process.on("SIGINT", async () => {
     }
   }
   process.exit(0);
+});
+
+process.on("uncaughtException", async (err) => {
+  await log("uncaught_exception", { message: String(err) });
+});
+
+process.on("unhandledRejection", async (err) => {
+  await log("unhandled_rejection", { message: String(err) });
 });
 
 while (true) {

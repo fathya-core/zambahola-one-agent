@@ -13,6 +13,8 @@ const bridgeFiles = [
   "apps/one-agent/data/bridge/LOCAL-TELEMETRY.json",
   "apps/one-agent/data/bridge/REMOTE-COMMANDS.json",
   "apps/one-agent/data/bridge/REMOTE-COMMANDS-DONE.json",
+  "apps/one-agent/data/bridge/PHASE5-SCHEDULER.jsonl",
+  "apps/one-agent/data/bridge/PHASE5-STATE.json",
 ];
 
 function git(args, opts = {}) {
