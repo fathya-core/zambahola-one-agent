@@ -136,4 +136,15 @@ if (!started.ok) {
   console.error(`[phase5-night] agent failed to start — run manually: npm run ${agentCmd}`);
   process.exit(1);
 }
-console.log("[phase5-night] done");
+
+console.log("[phase5-night] running post-night verify...");
+const verify = spawnSync(process.execPath, [join(root, "scripts/phase5-night-verify.mjs")], {
+  cwd: root,
+  stdio: "inherit",
+  env: process.env,
+});
+if (verify.status !== 0) {
+  console.error("[phase5-night] verify failed — agent may be up; check: npm run agent:phase5-night-verify");
+  process.exit(verify.status ?? 1);
+}
+console.log("[phase5-night] done — verified OK");

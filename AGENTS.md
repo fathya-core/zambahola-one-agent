@@ -70,6 +70,7 @@ npm run agent:stop
 - **Agent stop (night train):** `phase5-agent-stop.mjs` uses `taskkill /PID /T /F` when graceful stop fails.
 - **Night train:** `agent:phase5-night-now` — stable profile in `config/phase5-night-train.env`; fallback to `omni-train:quick` on crash; always restarts agent at end.
 - **After manual night train:** `npm run agent:phase5-mark-night-done` then restart `agent:phase5-auto`.
+- **Post-night auto-test:** end of `phase5-night-train` runs `agent:phase5-night-verify` (agent up, ticks moving, fresh export, push telemetry). Report: `PHASE5-NIGHT-VERIFY.json`.
 - **Plug laptop to AC**; overnight script disables sleep on AC via `powercfg`.
 
 Headless: `curl http://127.0.0.1:8787/api/status`. Engine id in metrics: `hybrid_v6_ultra`.
