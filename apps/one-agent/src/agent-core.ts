@@ -363,6 +363,7 @@ export class AgentCore {
             direction: evaluation.direction,
             directionalHit:
               evaluation.direction !== "range" ? evaluation.predictionHit : null,
+            directionalCount: this.evaluator.getDirectionalCount(),
             regime: evaluatedPred.meta?.regime ?? "range",
             strategyStats: this.buildMetrics().strategyStats ?? [],
             engine: this.predictionEngine,

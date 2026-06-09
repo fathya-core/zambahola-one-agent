@@ -26,9 +26,15 @@ if (-not (Test-Path (Join-Path $cursorDir "mcp.json"))) {
 }
 
 Write-Host ""
-Write-Host "Next (2 terminals recommended):" -ForegroundColor Green
-Write-Host "  1) npm run agent:phase4-hit-recover"
-Write-Host "  2) npm run agent:live-stack   (bridge + watcher + guard — auto-fix + telemetry)"
+Write-Host "Recommended (ONE window — day + night automatic):" -ForegroundColor Green
+Write-Host "  npm run agent:phase5-auto"
+Write-Host ""
+Write-Host "Or manual (2 terminals):" -ForegroundColor Yellow
+Write-Host "  1) npm run agent:phase5-ready   (or phase4-hit-recover)"
+Write-Host "  2) npm run agent:live-stack   (bridge + watcher + guard)"
+Write-Host ""
+Write-Host "Boot at login (Windows):" -ForegroundColor Cyan
+Write-Host "  npm run agent:phase5-install-task"
 Write-Host ""
 Write-Host "Or separate:" -ForegroundColor Yellow
 Write-Host "  npm run agent:local-bridge | agent:remote-watcher | agent:guard | agent:push-telemetry:ps1"

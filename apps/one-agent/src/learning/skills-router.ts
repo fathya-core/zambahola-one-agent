@@ -59,6 +59,8 @@ const TASK_RULES: Array<{ match: RegExp; picks: SkillSuggestion[] }> = [
     match: /hit|دقة|recover|تراجع|accuracy|abstain|gate|فلتر/i,
     picks: [
       { kind: "npm", id: "agent:phase4-hit-recover", use: "استعادة hit rate" },
+      { kind: "npm", id: "agent:phase5-auto", use: "أتمتة نهار/ليل (phase5)" },
+      { kind: "npm", id: "agent:phase5-ready", use: "جاهزية طويلة المدى" },
       { kind: "npm", id: "agent:log-review:apply", use: "مراجع السجل + تنظيف" },
       { kind: "doc", id: "docs/ar/تراجع-الدقة-والحل.md", use: "دليل التراجع" },
     ],

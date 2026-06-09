@@ -25,6 +25,9 @@ const ACTION_MAP = {
   "push-telemetry": ["run", "agent:push-telemetry"],
   "health-check": ["run", "agent:health-check"],
   "phase4-hit-recover": ["run", "agent:phase4-hit-recover"],
+  "phase5-ready": ["run", "agent:phase5-ready"],
+  "phase5-reload": ["run", "agent:phase5-reload"],
+  "phase5-auto": ["run", "agent:phase5-scheduler"],
   "dl-nightly": ["run", "agent:dl-nightly"],
   "import-hf-research": ["run", "agent:import-hf-research"],
 };

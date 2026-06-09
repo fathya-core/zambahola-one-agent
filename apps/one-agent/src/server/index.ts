@@ -121,8 +121,12 @@ async function route(
     const { getLastLogAuditReport } = await import("../learning/log-auditor.js");
     const audit = getLiveLogAuditReport() ?? (await getLastLogAuditReport());
     const skillApplied = await loadPersistedSkillActions();
+    const { loadDlLiveAutoState } = await import("../learning/dl-live-auto.js");
+    const dlLiveAuto = await loadDlLiveAutoState();
     return sendJson(res, 200, {
       ...state,
+      dlLiveAuto,
+      phase5: process.env.ZAMBAHOLA_PHASE5 === "1",
       dualAgent: buildDualAgentStatus(state, {
         directionalRolling: guard.directionalRollingHitRate,
         abstainRate: metrics.abstainRate,

@@ -9,6 +9,7 @@ import {
   saveLearningState,
   type LearningState,
 } from "./learning-state.js";
+import { syncDlLiveTrain } from "./dl-live-auto.js";
 import {
   recordHit,
   shouldSkipOrchestratorBoost,
@@ -203,6 +204,7 @@ export interface LiveEvalContext {
   ensembleHit: boolean;
   direction?: "up" | "down" | "range";
   directionalHit?: boolean | null;
+  directionalCount?: number;
   regime?: string;
   strategyStats: StrategyHitStats[];
   engine: PredictionEngine;
@@ -230,6 +232,10 @@ export async function onLiveEvaluation(ctx: LiveEvalContext): Promise<LearningSt
   });
   updateRecoveryMetrics(state.directionalHitRateEma, guard.directionalRolling);
   updateHitRecoverRolling(guard.directionalRolling);
+  await syncDlLiveTrain({
+    directionalRolling: guard.directionalRolling,
+    directionalCount: ctx.directionalCount ?? 0,
+  });
 
   state = await maybeSnapshotOrRestore(guard.rollingHitRate, state, (w) =>
     ctx.engine.setWeights(w),

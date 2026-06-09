@@ -17,4 +17,4 @@ Write-Host "[2] export models..." -ForegroundColor Cyan
 npm run agent:export-models
 
 Write-Host ""
-Write-Host "Done. أعد تشغيل الوكيل ليحمّل الأوزان: npm run agent:phase4-hit-recover" -ForegroundColor Green
+Write-Host "Done. أعد تشغيل الوكيل: npm run agent:phase5-reload" -ForegroundColor Green

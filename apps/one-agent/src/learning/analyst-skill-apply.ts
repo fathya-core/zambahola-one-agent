@@ -100,7 +100,10 @@ function pickActions(ctx: AnalystApplyContext): SkillSuggestion[] {
   if (abstain >= 0.85 && evals >= MIN_EVALS + 10) {
     actions.push({
       kind: "npm",
-      id: "agent:phase4-hit-recover",
+      id:
+        process.env.ZAMBAHOLA_PHASE5 === "1"
+          ? "agent:phase5-reload"
+          : "agent:phase4-hit-recover",
       use: "إعادة معايرة البوابات — امتناع شبه كامل",
     });
   }
@@ -261,6 +264,7 @@ const REMOTE_ACTIONS: Record<string, string> = {
   "agent:import-hf-research": "import-hf-research",
   "agent:push-telemetry": "push-telemetry",
   "agent:phase4-hit-recover": "phase4-hit-recover",
+  "agent:phase5-reload": "phase5-reload",
   "agent:log-review": "log-review",
 };
 
