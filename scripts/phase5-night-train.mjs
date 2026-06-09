@@ -110,6 +110,10 @@ while (true) {
 
   if (train.ok) {
     anyTrainOk = true;
+    console.log("[phase5-night] post-cycle skills (export + log-review + patterns)...");
+    runNpm(["run", "agent:export-models"], { cwd: root, env: process.env, stdio: "pipe" });
+    runNpm(["run", "agent:log-review:apply"], { cwd: root, env: process.env, stdio: "pipe" });
+    runNpm(["run", "agent:patterns"], { cwd: root, env: process.env, stdio: "pipe" });
   } else {
     console.error("[phase5-night] cycle failed (primary + quick) — stopping train loop");
     break;
