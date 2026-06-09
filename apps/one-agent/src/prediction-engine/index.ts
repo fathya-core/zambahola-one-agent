@@ -8,7 +8,7 @@ import {
   countSTierForDirection,
   shouldPromoteLatentDirection,
 } from "./latent-consensus.js";
-import { applyExpertDirectionalLean } from "./expert-lean.js";
+import { applyExpertDirectionalLean, explainExpertLeanSkip } from "./expert-lean.js";
 import { loadStrategyWeights, type StrategyWeights } from "../learning/adaptive-weights.js";
 import { extractFeatures, type FeatureVector } from "../features/index.js";
 import { OnlineMLModel } from "./ml-model.js";
@@ -142,6 +142,7 @@ export class PredictionEngine {
     let latentSTierUp = 0;
     let latentSTierDown = 0;
     let latentPromoted = false;
+    let expertLeanSkip: string | undefined;
     let qualityTier: "high" | "medium" | "abstain" = "medium";
     let metaLabelProb = 0.5;
     let metaTrust = true;
@@ -345,6 +346,19 @@ export class PredictionEngine {
         confidence = expertLean.confidence;
         qualityTier = expertLean.qualityTier;
         gateReason = `${gateReason} | ${expertLean.reason}`;
+      } else {
+        expertLeanSkip = explainExpertLeanSkip({
+          direction,
+          latent,
+          tierSVotes,
+          directionalAgreement,
+          mlProb,
+          mlpProb,
+          gbmProb,
+        }) ?? undefined;
+        if (expertLeanSkip) {
+          gateReason = `${gateReason} | ${expertLeanSkip}`;
+        }
       }
 
       if (process.env.ZAMBAHOLA_ANALYST_AR !== "0") {
@@ -379,6 +393,8 @@ export class PredictionEngine {
         latentSTierUp,
         latentSTierDown,
         latentPromoted,
+        expertLeanSkip,
+        expertLeanMinModels: Number(process.env.ZAMBAHOLA_EXPERT_LEAN_MIN_MODELS ?? 2),
         expertMode: process.env.ZAMBAHOLA_EXPERT !== "0",
         mlScore,
         mlProb,

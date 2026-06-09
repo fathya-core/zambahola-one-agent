@@ -21,6 +21,7 @@
     "agent:phase2-hybrid": "node scripts/run-env.mjs --file config/phase2-hybrid.env -- npm run start -w @zambahola/one-agent",
     "agent:phase3-intensive": "node scripts/run-env.mjs --file config/phase3-intensive.env -- npm run start -w @zambahola/one-agent",
     "agent:phase4-hit-recover": "node scripts/run-env.mjs --file config/phase4-hit-recover.env -- npm run start -w @zambahola/one-agent",
+    "agent:phase4-reload": "npm run agent:stop && npm run agent:phase4-hit-recover",
     "agent:dl-nightly": "powershell -ExecutionPolicy Bypass -File scripts/dl-nightly.ps1",
     "agent:phase3-boot": "powershell -ExecutionPolicy Bypass -File scripts/phase3-boot.ps1",
     "agent:overnight-learn": "powershell -ExecutionPolicy Bypass -File scripts/overnight-learn.ps1",

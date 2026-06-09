@@ -49,6 +49,8 @@ export interface PredictionMeta {
   latentSTierUp?: number;
   latentSTierDown?: number;
   latentPromoted?: boolean;
+  expertLeanSkip?: string;
+  expertLeanMinModels?: number;
   expertMode?: boolean;
   accuracyMode?: string;
   qualityTier?: string;

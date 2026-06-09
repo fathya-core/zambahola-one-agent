@@ -45,12 +45,13 @@ export function applyAccuracyFilter(input: AccuracyFilterInput): AccuracyFilterR
   const minAgreement = warmed ? t.minAgreement : Math.min(t.minAgreement, 0.52);
   const sTier = input.latentSTierVotes ?? 0;
   const dirAgree = input.directionalAgreement ?? agreement;
+  const modelFloor = Number(process.env.ZAMBAHOLA_EXPERT_LEAN_MIN_MODELS ?? 2);
   const minVoters =
     sTier >= 2
-      ? Math.max(1, (warmed ? t.minModelVoters : 2) - 1)
+      ? Math.max(modelFloor, warmed ? t.minModelVoters : 2)
       : warmed
-        ? t.minModelVoters
-        : 2;
+        ? Math.max(modelFloor, t.minModelVoters)
+        : Math.max(2, modelFloor);
   const agreeFloor =
     sTier >= 2 ? Math.max(0.5, minAgreement - 0.04) : minAgreement;
 
@@ -62,7 +63,10 @@ export function applyAccuracyFilter(input: AccuracyFilterInput): AccuracyFilterR
   );
 
   const sTierFastPath =
-    direction !== "range" && sTier >= 2 && dirAgree >= 0.5 && modelVotes >= 1;
+    direction !== "range" &&
+    sTier >= 2 &&
+    dirAgree >= 0.5 &&
+    modelVotes >= modelFloor;
 
   if (input.blocked && !sTierFastPath) {
     return abstain("gate_blocked");

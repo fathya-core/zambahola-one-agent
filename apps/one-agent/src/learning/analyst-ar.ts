@@ -15,6 +15,8 @@ const GATE_AR: Record<string, string> = {
   expert_block: "خبير الاستراتيجيات حظر الإشارة (مثلاً mean_reversion ضد الترند).",
   range_abstain: "امتناع طبيعي — السوق في نطاق.",
   expert_lean: "خبير: إشارة اتجاهية بعد توافق S-tier + نماذج.",
+  expert_lean_wait_models: "خبير ينتظر: نموذجين ML على الأقل قبل التداول.",
+  expert_lean_wait_agree: "خبير ينتظر: اتفاق اتجاهي أعلى قبل التداول.",
 };
 
 function matchGate(reason: string): string | null {

@@ -43,8 +43,8 @@ export function applyExpertDirectionalLean(opts: {
   if (opts.direction !== "range" || !opts.latent.candidate) return null;
 
   const minS = Number(process.env.ZAMBAHOLA_EXPERT_LEAN_MIN_S ?? 2);
-  const minModels = Number(process.env.ZAMBAHOLA_EXPERT_LEAN_MIN_MODELS ?? 1);
-  const minAgree = Number(process.env.ZAMBAHOLA_EXPERT_LEAN_MIN_AGREE ?? 0.55);
+  const minModels = Number(process.env.ZAMBAHOLA_EXPERT_LEAN_MIN_MODELS ?? 2);
+  const minAgree = Number(process.env.ZAMBAHOLA_EXPERT_LEAN_MIN_AGREE ?? 0.58);
 
   const candidate = opts.latent.candidate;
   const sCount = candidate === "up" ? opts.latent.sTierUp : opts.latent.sTierDown;
@@ -65,7 +65,11 @@ export function applyExpertDirectionalLean(opts: {
   );
 
   const qualityTier: ExpertLeanResult["qualityTier"] =
-    modelVoters >= 2 && opts.directionalAgreement >= 0.62 ? "high" : "medium";
+    modelVoters >= 3 && opts.directionalAgreement >= 0.65
+      ? "high"
+      : modelVoters >= 2 && opts.directionalAgreement >= 0.6
+        ? "medium"
+        : "medium";
 
   return {
     direction: candidate,
@@ -73,4 +77,34 @@ export function applyExpertDirectionalLean(opts: {
     qualityTier,
     reason: `expert_lean_S${sCount}_models${modelVoters}_agree${opts.directionalAgreement.toFixed(2)}`,
   };
+}
+
+/** Why lean did not fire — surfaced in dashboard meta for transparency */
+export function explainExpertLeanSkip(opts: {
+  direction: PredictionDirection;
+  latent: LatentDirectionalSkew;
+  tierSVotes: number;
+  directionalAgreement: number;
+  mlProb: number;
+  mlpProb: number;
+  gbmProb: number;
+}): string | null {
+  if (process.env.ZAMBAHOLA_HIT_RECOVER_S_LEAN === "0" || !isHitRecoverMode()) return null;
+  if (opts.direction !== "range" || !opts.latent.candidate) return null;
+
+  const minS = Number(process.env.ZAMBAHOLA_EXPERT_LEAN_MIN_S ?? 2);
+  const minModels = Number(process.env.ZAMBAHOLA_EXPERT_LEAN_MIN_MODELS ?? 2);
+  const minAgree = Number(process.env.ZAMBAHOLA_EXPERT_LEAN_MIN_AGREE ?? 0.58);
+  const candidate = opts.latent.candidate;
+  const sCount = candidate === "up" ? opts.latent.sTierUp : opts.latent.sTierDown;
+  const modelVoters = countModelVoters(candidate, opts.mlProb, opts.mlpProb, opts.gbmProb);
+
+  if (sCount < minS && opts.tierSVotes < minS) return null;
+  if (modelVoters < minModels) {
+    return `expert_lean_wait_models_${modelVoters}_need_${minModels}`;
+  }
+  if (opts.directionalAgreement < minAgree) {
+    return `expert_lean_wait_agree_${opts.directionalAgreement.toFixed(2)}_need_${minAgree}`;
+  }
+  return null;
 }
