@@ -40,7 +40,7 @@ function renderDualAgent(dual, logAudit, analyst, learn) {
   if (auditSummary && typeof auditSummary.hitRate === "number") {
     lines.push(
       "",
-      `آخر مراجعة — hit ${(auditSummary.hitRate * 100).toFixed(1)}% · dir ${(auditSummary.directionalHitRate * 100).toFixed(1)}% · abstain ${(auditSummary.abstainRate * 100).toFixed(1)}%`,
+      `آخر مراجعة — hit شامل ${(auditSummary.hitRate * 100).toFixed(1)}% · dir ${(auditSummary.directionalHitRate * 100).toFixed(1)}% (${auditSummary.directionalTotal ?? 0}) · range ${(auditSummary.abstainRate * 100).toFixed(1)}%`,
     );
   }
   if (skills.length) {
@@ -67,10 +67,25 @@ function renderMetrics(m) {
       ["Learning updates", m.learningUpdates ?? 0],
       ["Ticks", m.tickCount],
       ["Predictions", m.predictionCount],
-      ["Hit rate", (m.hitRate * 100).toFixed(1) + "%"],
-      ["Directional hit", m.directionalHitRate != null ? (m.directionalHitRate * 100).toFixed(1) + "%" : "—"],
+      [
+        "Hit (incl. range)",
+        (m.hitRate * 100).toFixed(1) +
+          "%" +
+          (m.directionalCount != null && m.directionalCount < 5 ? " · inflated" : ""),
+      ],
+      [
+        "Directional hit (goal)",
+        m.directionalCount != null && m.directionalCount < 3
+          ? "— (few signals)"
+          : m.directionalHitRate != null
+            ? (m.directionalHitRate * 100).toFixed(1) + "%"
+            : "—",
+      ],
       ["Dir. signals", m.directionalCount != null ? String(m.directionalCount) : "—"],
-      ["Abstain rate", m.abstainRate != null ? (m.abstainRate * 100).toFixed(1) + "%" : "—"],
+      [
+        "Range share",
+        m.abstainRate != null ? (m.abstainRate * 100).toFixed(1) + "%" : "—",
+      ],
       ["Paper trades", m.closedTradeCount != null ? String(m.closedTradeCount) : "—"],
       ["Learn-trade", m.learnTradeMode ? "ON (تعلّم)" : "off"],
       ["Hybrid auto", m.hybridAuto ? "ON" : "off"],

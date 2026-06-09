@@ -139,9 +139,16 @@ function buildInsights(report: Omit<LogAuditReport, "insightsAr" | "cleanup">): 
   const lines: string[] = [];
   const s = report.summary;
 
+  const dirN = s.directionalTotal;
   lines.push(
-    `📊 مراجعة السجل: ${s.evaluations} تقييم · hit ${(s.hitRate * 100).toFixed(1)}% · اتجاهي ${(s.directionalHitRate * 100).toFixed(1)}% · امتناع ${(s.abstainRate * 100).toFixed(1)}%`,
+    `📊 مراجعة السجل: ${s.evaluations} تقييم · hit شامل ${(s.hitRate * 100).toFixed(1)}% · اتجاهي ${(s.directionalHitRate * 100).toFixed(1)}% (${dirN} إشارة) · range ${(s.abstainRate * 100).toFixed(1)}%`,
   );
+
+  if (s.abstainRate >= 0.85 && dirN < 8) {
+    lines.push(
+      "ℹ️ hit الشامل مرتفع لأن أغلب التنبؤات range والسعر هادئ — راقب directional hit فقط (هدف 58%+)",
+    );
+  }
 
   for (const [regime, b] of Object.entries(report.byRegime)) {
     if (b.total < 5) continue;
@@ -149,7 +156,13 @@ function buildInsights(report: Omit<LogAuditReport, "insightsAr" | "cleanup">): 
     if (b.hitRate < 0.4) {
       lines.push(`⚠️ نظام ${regime}: ضعيف ${pct}% (${b.hits}/${b.total})`);
     } else if (b.hitRate >= 0.58) {
-      lines.push(`✅ نظام ${regime}: قوي ${pct}% (${b.hits}/${b.total})`);
+      if (regime === "range" && dirN < 5) {
+        lines.push(
+          `ℹ️ نظام ${regime}: hit تسمية range ${pct}% (${b.hits}/${b.total}) — مو دقة اتجاهية`,
+        );
+      } else {
+        lines.push(`✅ نظام ${regime}: قوي ${pct}% (${b.hits}/${b.total})`);
+      }
     }
   }
 
