@@ -249,6 +249,8 @@ async function tick(state) {
           uptimeSec: s?.time?.uptimeSec,
         });
       }
+      await maybePush();
+      await maybeAudit();
     }
   } else {
     const up = await ensureDayAgent();
