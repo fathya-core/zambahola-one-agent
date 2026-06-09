@@ -20,8 +20,10 @@ const GATE_AR: Record<string, string> = {
 };
 
 function matchGate(reason: string): string | null {
-  for (const [key, ar] of Object.entries(GATE_AR)) {
-    if (reason.includes(key)) return ar;
+  // Longer keys first — "expert_lean" must not shadow "expert_lean_wait_models"
+  const keys = Object.keys(GATE_AR).sort((a, b) => b.length - a.length);
+  for (const key of keys) {
+    if (reason.includes(key)) return GATE_AR[key]!;
   }
   return null;
 }
