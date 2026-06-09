@@ -61,6 +61,17 @@ npm run agent:status
 npm run agent:stop
 ```
 
+### OMAR-PC Windows (primary machine — always assume win32)
+
+- **Path:** `C:\Users\pc\zambahola-one-agent` · **Shell:** PowerShell 7.
+- **One window:** `npm run agent:phase5-auto` (`.ps1` → `phase5-scheduler.mjs`). Do not close; minimize only.
+- **npm on Windows:** all `scripts/lib/run-npm.mjs` calls use `cmd.exe /d /s /c npm …` (direct `npm.cmd` spawn → `EINVAL`).
+- **Agent start:** `agent:phase5-ready` returns to prompt immediately — agent runs detached (`start.ts`). Check with `curl http://127.0.0.1:8787/api/status`.
+- **Agent stop (night train):** `phase5-agent-stop.mjs` uses `taskkill /PID /T /F` when graceful stop fails.
+- **Night train:** `agent:phase5-night-now` — stable profile in `config/phase5-night-train.env`; fallback to `omni-train:quick` on crash; always restarts agent at end.
+- **After manual night train:** `npm run agent:phase5-mark-night-done` then restart `agent:phase5-auto`.
+- **Plug laptop to AC**; overnight script disables sleep on AC via `powercfg`.
+
 Headless: `curl http://127.0.0.1:8787/api/status`. Engine id in metrics: `hybrid_v6_ultra`.
 
 ### Git hygiene

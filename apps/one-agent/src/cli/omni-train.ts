@@ -17,11 +17,14 @@ const root = join(pkgRoot, "../..");
 
 function runNpm(args: string[], env: Record<string, string | undefined>) {
   const isWin = process.platform === "win32";
-  const r = spawnSync(isWin ? "npm.cmd" : "npm", args, {
+  const command = isWin ? "cmd.exe" : "npm";
+  const argv = isWin ? ["/d", "/s", "/c", "npm", ...args] : args;
+  const r = spawnSync(command, argv, {
     cwd: root,
     env: { ...process.env, ...env },
     stdio: "inherit",
-    shell: isWin,
+    windowsHide: isWin,
+    shell: false,
   });
   if (r.status !== 0) process.exit(r.status ?? 1);
 }

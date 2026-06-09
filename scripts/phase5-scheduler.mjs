@@ -32,7 +32,6 @@ loadPhase5EnvFile();
 const logFile = join(root, "apps/one-agent/data/bridge/PHASE5-SCHEDULER.jsonl");
 const stateFile = join(root, "apps/one-agent/data/bridge/PHASE5-STATE.json");
 const isWin = process.platform === "win32";
-const npm = isWin ? "npm.cmd" : "npm";
 
 const tz = process.env.ZAMBAHOLA_PHASE5_TZ ?? "Asia/Riyadh";
 const dayStart = Number(process.env.ZAMBAHOLA_PHASE5_DAY_START ?? 6);
@@ -114,10 +113,13 @@ function localParts() {
 }
 
 function spawnSidecar(name, args) {
-  const child = spawn(npm, args, {
+  const command = isWin ? "cmd.exe" : "npm";
+  const argv = isWin ? ["/d", "/s", "/c", "npm", ...args] : args;
+  const child = spawn(command, argv, {
     cwd: root,
     stdio: "ignore",
-    shell: isWin,
+    windowsHide: isWin,
+    shell: false,
     detached: false,
   });
   child.on("exit", (code) => {
