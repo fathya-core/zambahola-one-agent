@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runNpm } from "./lib/run-npm.mjs";
 import { forceStopAgent } from "./phase5-agent-stop.mjs";
+import { agentHealthy, startAgentDetached } from "./phase5-agent-start.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -30,7 +31,6 @@ loadPhase5EnvFile();
 
 const logFile = join(root, "apps/one-agent/data/bridge/PHASE5-SCHEDULER.jsonl");
 const stateFile = join(root, "apps/one-agent/data/bridge/PHASE5-STATE.json");
-const agentUrl = process.env.ZAMBAHOLA_AGENT_URL ?? "http://127.0.0.1:8787";
 const isWin = process.platform === "win32";
 const npm = isWin ? "npm.cmd" : "npm";
 
@@ -117,17 +117,6 @@ async function ensureSidecars() {
   await log("sidecars_started");
 }
 
-async function agentHealthy() {
-  try {
-    const res = await fetch(`${agentUrl}/api/status`, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return null;
-    const status = await res.json();
-    return status?.running ? status : null;
-  } catch {
-    return null;
-  }
-}
-
 async function stopAgent() {
   const ok = await forceStopAgent(4);
   await log(ok ? "agent_stopped" : "agent_stop_incomplete");
@@ -136,21 +125,14 @@ async function stopAgent() {
 
 async function startAgent() {
   await log("agent_start", { cmd: agentCmd });
-  const child = spawn(npm, ["run", agentCmd], {
-    cwd: root,
-    stdio: "ignore",
-    detached: true,
-    shell: isWin,
-  });
-  child.unref();
-  await new Promise((r) => setTimeout(r, 6000));
-  const status = await agentHealthy();
-  await log(status ? "agent_up" : "agent_start_no_status", {
+  const r = await startAgentDetached(agentCmd);
+  const status = r.status;
+  await log(r.ok ? "agent_up" : "agent_start_no_status", {
     tickCount: status?.tickCount,
     pid: status?.pid,
     feed: status?.feed,
   });
-  return !!status;
+  return r.ok;
 }
 
 async function runNightTrain(state, parts) {

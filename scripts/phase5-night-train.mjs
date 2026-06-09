@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runNpm } from "./lib/run-npm.mjs";
 import { forceStopAgent } from "./phase5-agent-stop.mjs";
+import { startAgentDetached } from "./phase5-agent-start.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -56,15 +57,10 @@ if (!train.ok) {
 
 runNpm(["run", "agent:export-models"], { cwd: root });
 
-console.log("[phase5-night] starting phase5-ready (background)...");
-const isWin = process.platform === "win32";
-const npm = isWin ? "npm.cmd" : "npm";
-const { spawn } = await import("node:child_process");
-const child = spawn(npm, ["run", "agent:phase5-ready"], {
-  cwd: root,
-  detached: true,
-  stdio: "ignore",
-  shell: isWin,
-});
-child.unref();
+const agentCmd = process.env.ZAMBAHOLA_PHASE5_AGENT_CMD ?? "agent:phase5-ready";
+const started = await startAgentDetached(agentCmd);
+if (!started.ok) {
+  console.error(`[phase5-night] agent failed to start — run manually: npm run ${agentCmd}`);
+  process.exit(1);
+}
 console.log("[phase5-night] done");
