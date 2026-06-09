@@ -1,11 +1,11 @@
-# Phase 5 — أمر واحد: نهار live + ليل omni-train (اترك النافذة مفتوحة)
+# Phase 5 - one window: day live + night omni-train (keep window open)
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
 Write-Host "=== ZAMBAHOLA Phase 5 Auto ===" -ForegroundColor Cyan
-Write-Host "نهار: phase5-ready + live-stack" -ForegroundColor Yellow
-Write-Host "ليل: omni-train + export + reload (تلقائي)" -ForegroundColor Yellow
+Write-Host "Day: phase5-ready + bridge + watcher + guard" -ForegroundColor Yellow
+Write-Host "Night: omni-train + export + reload (automatic)" -ForegroundColor Yellow
 Write-Host "Log: apps/one-agent/data/bridge/PHASE5-SCHEDULER.jsonl" -ForegroundColor Gray
 
 Write-Host ""

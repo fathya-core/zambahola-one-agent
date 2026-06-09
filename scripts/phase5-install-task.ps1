@@ -1,4 +1,4 @@
-# تسجيل Phase 5 في Windows Task Scheduler — يشتغل عند تسجيل الدخول
+# Register Phase 5 in Windows Task Scheduler (runs at logon)
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $TaskName = "ZAMBAHOLA-Phase5-Auto"
@@ -12,4 +12,5 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Force
 
-Write-Host "Done. Task runs at logon. To remove: Unregister-ScheduledTask -TaskName $TaskName -Confirm:`$false" -ForegroundColor Green
+Write-Host "Done. Task runs at logon." -ForegroundColor Green
+Write-Host "Remove: Unregister-ScheduledTask -TaskName $TaskName -Confirm:`$false" -ForegroundColor Gray

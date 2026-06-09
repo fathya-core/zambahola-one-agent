@@ -25,6 +25,7 @@
     "agent:phase5-ready": "node scripts/run-env.mjs --file config/phase5-ready.env -- npm run start -w @zambahola/one-agent",
     "agent:phase5-reload": "npm run agent:stop && npm run agent:phase5-ready",
     "agent:phase5-auto": "powershell -ExecutionPolicy Bypass -File scripts/phase5-auto.ps1",
+    "agent:phase5-auto:node": "node scripts/phase5-scheduler.mjs",
     "agent:phase5-scheduler": "node scripts/phase5-scheduler.mjs",
     "agent:phase5-install-task": "powershell -ExecutionPolicy Bypass -File scripts/phase5-install-task.ps1",
     "agent:dl-nightly": "powershell -ExecutionPolicy Bypass -File scripts/dl-nightly.ps1",
