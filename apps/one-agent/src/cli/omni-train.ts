@@ -92,6 +92,7 @@ async function main(): Promise<void> {
   console.log(
     "\n[zambahola] Omni done. If directionalHitRate ≥ 0.58 → Binance demo (docs/ar/ربط-بينانس.md)\n",
   );
+  process.exit(0);
 }
 
 main().catch((e) => {

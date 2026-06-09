@@ -45,6 +45,7 @@ async function main(): Promise<void> {
   const exported = await exportModelBundle("hybrid_v7");
   console.log("\nModel export:", exported.path, exported.files);
   console.log("\n[zambahola] Ultra done — راقب directional hit على اللوحة الحية.\n");
+  process.exit(0);
 }
 
 main().catch((e) => {

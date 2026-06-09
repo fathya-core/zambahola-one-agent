@@ -55,7 +55,8 @@ if (!train.ok) {
   process.exit(train.status ?? 1);
 }
 
-runNpm(["run", "agent:export-models"], { cwd: root });
+// omni-train already exports hybrid_v7 + hybrid_v7_omni bundles
+console.log("[phase5-night] training complete — starting agent...");
 
 const agentCmd = process.env.ZAMBAHOLA_PHASE5_AGENT_CMD ?? "agent:phase5-ready";
 const started = await startAgentDetached(agentCmd);
