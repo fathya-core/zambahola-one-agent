@@ -10,6 +10,13 @@ import {
 } from "../features/index.js";
 import type { PredictionDirection } from "../types.js";
 import { safeProb, safeScore } from "../learning/safe-prob.js";
+import {
+  isDeadMlWeights,
+  ML_DEFAULT_WEIGHTS,
+  normalizeMlWeights,
+} from "../learning/model-weight-health.js";
+
+export { ML_DEFAULT_WEIGHTS };
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const MODEL_FILE = join(pkgRoot, "data", "learning", "ml-weights.json");
@@ -17,12 +24,8 @@ const MODEL_FILE = join(pkgRoot, "data", "learning", "ml-weights.json");
 const LR = 0.1;
 const L2 = 0.001;
 
-const DEFAULT_WEIGHTS = [
-  0, 0.4, 0.25, 0.15, -0.1, -0.2, 0.35, -0.12, 0.2, 0.28, 0.38, -0.06, 0.3, 0.25, 0.2, 0.15, 0.1, 0.05,
-];
-
 export class OnlineMLModel {
-  private weights: number[] = [...DEFAULT_WEIGHTS];
+  private weights: number[] = [...ML_DEFAULT_WEIGHTS];
   private samples = 0;
 
   async load(): Promise<void> {
@@ -32,9 +35,15 @@ export class OnlineMLModel {
         weights: number[];
         samples: number;
       };
-      if (Array.isArray(data.weights) && data.weights.length === FEATURE_DIM) {
-        this.weights = data.weights;
-        this.samples = data.samples ?? 0;
+      const samples = data.samples ?? 0;
+      const normalized = normalizeMlWeights(data.weights);
+      if (normalized && !isDeadMlWeights(normalized, samples)) {
+        this.weights = normalized;
+        this.samples = samples;
+      } else if (existsSync(MODEL_FILE)) {
+        this.weights = [...ML_DEFAULT_WEIGHTS];
+        this.samples = samples;
+        await this.save();
       }
     } catch {
       /* */
@@ -72,8 +81,9 @@ export class OnlineMLModel {
     const pred = sigmoid(z);
     const err = label - pred;
     for (let i = 0; i < this.weights.length; i++) {
-      this.weights[i] =
+      const next =
         this.weights[i]! + LR * (err * x[i]! - L2 * this.weights[i]!);
+      this.weights[i] = Number.isFinite(next) ? next : ML_DEFAULT_WEIGHTS[i]!;
     }
     this.samples += 1;
     if (this.samples % 3 === 0) await this.save();

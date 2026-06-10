@@ -76,6 +76,17 @@ npm run agent:stop
 
 Headless: `curl http://127.0.0.1:8787/api/status`. Engine id in metrics: `hybrid_v6_ultra`.
 
+### ML / MLP stuck at 50% (dead weights)
+
+If telemetry shows `mlProb=0.5` and `mlpProb=0.5` every tick, on-disk weights are likely **all zero** or **NaN→null** in `apps/one-agent/data/learning/ml-weights.json` / `mlp-weights.json` (logit z=0 → sigmoid 0.5).
+
+```powershell
+npm run agent:restore-ml-models
+npm run agent:phase5-reload
+```
+
+New loads auto-detect dead weights and reset; `agent:log-review:apply` also fixes them during audit cleanup.
+
 ### Git hygiene
 
 `apps/one-agent/knowledge/research-log.jsonl` is runtime-only (ignored after `!apps/one-agent/knowledge/**/*` negation — ignore rule must come **after** that line in `.gitignore`).

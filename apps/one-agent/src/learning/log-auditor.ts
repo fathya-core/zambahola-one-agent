@@ -19,8 +19,18 @@ import type {
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 export const AUDIT_JSON = join(pkgRoot, "data", "learning", "LOG-AUDIT-REPORT.json");
 export const AUDIT_MD = join(pkgRoot, "data", "learning", "LOG-AUDIT-REPORT.md");
-const ML_FILE = join(pkgRoot, "data", "learning", "ml-weights.json");
-const MLP_FILE = join(pkgRoot, "data", "learning", "mlp-weights.json");
+import {
+  hasBadNumbers,
+  isDeadMlWeights,
+  isDeadMlpWeights,
+  ML_WEIGHTS_FILE,
+  MLP_WEIGHTS_FILE,
+  restoreMlWeightsFile,
+  restoreMlpWeightsFile,
+} from "./model-weight-health.js";
+
+const ML_FILE = ML_WEIGHTS_FILE;
+const MLP_FILE = MLP_WEIGHTS_FILE;
 const RESEARCH_LOG = join(pkgRoot, "knowledge", "research-log.jsonl");
 
 export interface AuditBucket {
@@ -239,35 +249,22 @@ async function parseRunLog(path: string): Promise<{
   return { predictions, decisions, evaluations };
 }
 
-function hasBadNumbers(values: unknown): boolean {
-  const walk = (v: unknown): boolean => {
-    if (typeof v === "number") return !Number.isFinite(v);
-    if (Array.isArray(v)) return v.some(walk);
-    if (v && typeof v === "object") return Object.values(v).some(walk);
-    return false;
-  };
-  return walk(values);
-}
-
-const ML_DEFAULT = [
-  0, 0.4, 0.25, 0.15, -0.1, -0.2, 0.35, -0.12, 0.2, 0.28, 0.38, -0.06, 0.3, 0.25, 0.2, 0.15, 0.1, 0.05,
-];
-
 async function sanitizeMlWeights(dryRun: boolean): Promise<CleanupAction[]> {
   const actions: CleanupAction[] = [];
   if (!existsSync(ML_FILE)) return actions;
   try {
-    const data = JSON.parse(await readFile(ML_FILE, "utf8"));
-    if (hasBadNumbers(data.weights)) {
-      const detail = "ml-weights.json contained NaN/Inf — reset to defaults";
-      if (!dryRun) {
-        await mkdir(dirname(ML_FILE), { recursive: true });
-        await writeFile(
-          ML_FILE,
-          JSON.stringify({ weights: ML_DEFAULT, samples: data.samples ?? 0, dim: ML_DEFAULT.length }, null, 2),
-          "utf8",
-        );
-      }
+    const data = JSON.parse(await readFile(ML_FILE, "utf8")) as {
+      weights?: unknown;
+      samples?: number;
+    };
+    const samples = data.samples ?? 0;
+    const badNumbers = hasBadNumbers(data.weights);
+    const dead = isDeadMlWeights(data.weights, samples);
+    if (badNumbers || dead) {
+      const detail = badNumbers
+        ? "ml-weights.json contained NaN/Inf/null — reset to defaults"
+        : "ml-weights.json dead (all zero) — reset to defaults so ML ≠ 50%";
+      if (!dryRun) await restoreMlWeightsFile(samples);
       actions.push({ kind: "ml_reset", detail, applied: !dryRun });
     }
   } catch {
@@ -281,9 +278,14 @@ async function sanitizeMlpWeights(dryRun: boolean): Promise<CleanupAction[]> {
   if (!existsSync(MLP_FILE)) return actions;
   try {
     const data = JSON.parse(await readFile(MLP_FILE, "utf8"));
-    if (hasBadNumbers(data)) {
-      const detail = "mlp-weights.json corrupted (NaN/Inf) — delete for cold restart";
-      if (!dryRun) await unlink(MLP_FILE);
+    const samples = (data as { samples?: number }).samples ?? 0;
+    const badNumbers = hasBadNumbers(data);
+    const dead = isDeadMlpWeights(data);
+    if (badNumbers || dead) {
+      const detail = badNumbers
+        ? "mlp-weights.json corrupted (NaN/Inf/null) — fresh random init"
+        : "mlp-weights.json dead (output layer zero) — fresh random init";
+      if (!dryRun) await restoreMlpWeightsFile(samples);
       actions.push({ kind: "mlp_reset", detail, applied: !dryRun });
     }
   } catch {

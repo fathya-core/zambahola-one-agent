@@ -1,4 +1,5 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { sanitizeJsonNumbers } from "./model-weight-health.js";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,7 +34,9 @@ export async function exportModelBundle(engineId: string): Promise<{
     const p = join(LEARN_DIR, name);
     if (!existsSync(p)) continue;
     const raw = await readFile(p, "utf8");
-    (bundle.artifacts as Record<string, unknown>)[name] = JSON.parse(raw);
+    (bundle.artifacts as Record<string, unknown>)[name] = sanitizeJsonNumbers(
+      JSON.parse(raw),
+    );
     files.push(name);
   }
 
