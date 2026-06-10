@@ -5,6 +5,13 @@ import { fileURLToPath } from "node:url";
 import { featuresToArray, type FeatureVector, directionFromScore, FEATURE_DIM } from "../features/index.js";
 import type { PredictionDirection } from "../types.js";
 import { safeProb, safeScore } from "../learning/safe-prob.js";
+import {
+  freshMlpState,
+  isDeadMlpWeights,
+  type MlpWeightBlob,
+} from "../learning/model-weight-health.js";
+
+export { freshMlpState };
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const MLP_FILE = join(pkgRoot, "data", "learning", "mlp-weights.json");
@@ -13,20 +20,66 @@ const H1 = 16;
 const H2 = 8;
 const LR = 0.06;
 
+function newMlpParams() {
+  const s = freshMlpState();
+  return { W1: s.W1, b1: s.b1, W2: s.W2, b2: s.b2, W3: s.W3, b3: s.b3 };
+}
+
 export class MLPModel {
-  private W1: number[][] = initW(FEATURE_DIM, H1);
-  private b1: number[] = new Array(H1).fill(0);
-  private W2: number[][] = initW(H1, H2);
-  private b2: number[] = new Array(H2).fill(0);
-  private W3: number[] = initVec(H2);
-  private b3 = 0;
+  private params = newMlpParams();
+  private get W1() {
+    return this.params.W1;
+  }
+  private set W1(v: number[][]) {
+    this.params.W1 = v;
+  }
+  private get b1() {
+    return this.params.b1;
+  }
+  private set b1(v: number[]) {
+    this.params.b1 = v;
+  }
+  private get W2() {
+    return this.params.W2;
+  }
+  private set W2(v: number[][]) {
+    this.params.W2 = v;
+  }
+  private get b2() {
+    return this.params.b2;
+  }
+  private set b2(v: number[]) {
+    this.params.b2 = v;
+  }
+  private get W3() {
+    return this.params.W3;
+  }
+  private set W3(v: number[]) {
+    this.params.W3 = v;
+  }
+  private get b3() {
+    return this.params.b3;
+  }
+  private set b3(v: number) {
+    this.params.b3 = v;
+  }
   private samples = 0;
 
   async load(): Promise<void> {
     if (!existsSync(MLP_FILE)) return;
     try {
-      const d = JSON.parse(await readFile(MLP_FILE, "utf8"));
-      if (d.W1) Object.assign(this, d);
+      const d = JSON.parse(await readFile(MLP_FILE, "utf8")) as MlpWeightBlob & {
+        b1?: number[];
+        b2?: number[];
+      };
+      if (!d.W1) return;
+      if (isDeadMlpWeights(d)) {
+        const fresh = freshMlpState();
+        Object.assign(this, fresh, { samples: d.samples ?? 0 });
+        await this.save();
+        return;
+      }
+      Object.assign(this, d);
     } catch {
       /* */
     }
@@ -93,6 +146,16 @@ export class MLPModel {
       this.b1[j]! += LR * dh1[j]!;
     }
 
+    if (!Number.isFinite(this.b3) || this.W3.some((w) => !Number.isFinite(w))) {
+      const fresh = freshMlpState();
+      this.W1 = fresh.W1;
+      this.b1 = fresh.b1;
+      this.W2 = fresh.W2;
+      this.b2 = fresh.b2;
+      this.W3 = fresh.W3;
+      this.b3 = fresh.b3;
+    }
+
     this.samples += 1;
     if (this.samples % 5 === 0) await this.save();
   }
@@ -110,16 +173,6 @@ export class MLPModel {
     const prob = sigmoid(z);
     return { prob, h1, h2, z1, z2 };
   }
-}
-
-function initW(rows: number, cols: number): number[][] {
-  return Array.from({ length: rows }, () =>
-    Array.from({ length: cols }, () => (Math.random() - 0.5) * 0.08),
-  );
-}
-
-function initVec(n: number): number[] {
-  return Array.from({ length: n }, () => (Math.random() - 0.5) * 0.08);
 }
 
 function dot(a: number[], b: number[]): number {
