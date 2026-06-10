@@ -13,7 +13,10 @@ export function diagnoseSnapshot(snap) {
 
   if (!status.running) {
     issues.push({ id: "agent_stopped", severity: "critical", ar: "الوكيل متوقف" });
-    fixes.push({ action: "phase4-hit-recover", via: "npm", reason: "restart agent" });
+    const restart =
+      process.env.ZAMBAHOLA_GUARD_RESTART ??
+      (process.env.ZAMBAHOLA_PHASE5 === "1" ? "phase5-reload" : "phase4-hit-recover");
+    fixes.push({ action: restart, via: "npm", reason: "restart agent" });
     return { issues, fixes, healthy: false };
   }
 

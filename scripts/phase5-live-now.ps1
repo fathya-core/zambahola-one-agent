@@ -15,6 +15,9 @@ Write-Host "[2] skip tonight long night train..." -ForegroundColor Cyan
 node scripts/phase5-mark-night-done.mjs
 
 Write-Host ""
+Enable-Phase5KeepAwake
+
+Write-Host ""
 Write-Host "[3] start live agent..." -ForegroundColor Cyan
 npm run agent:phase5-ready
 
@@ -29,4 +32,4 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "Live NOW - paper trading on http://127.0.0.1:8787" -ForegroundColor Green
-Write-Host "Optional background: npm run agent:phase5-auto (will NOT re-train tonight)" -ForegroundColor Gray
+Write-Host "To avoid sudden disconnect run: npm run agent:phase5-stable" -ForegroundColor Yellow

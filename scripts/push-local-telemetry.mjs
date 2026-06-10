@@ -16,6 +16,7 @@ const bridgeFiles = [
   "apps/one-agent/data/bridge/PHASE5-SCHEDULER.jsonl",
   "apps/one-agent/data/bridge/PHASE5-STATE.json",
   "apps/one-agent/data/bridge/PHASE5-NIGHT-VERIFY.json",
+  "apps/one-agent/data/bridge/PHASE5-WATCH.jsonl",
 ];
 
 function git(args, opts = {}) {

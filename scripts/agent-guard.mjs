@@ -73,10 +73,14 @@ async function applyApiFix(action) {
 function runNpmScript(script) {
   return new Promise((resolve) => {
     const isWin = process.platform === "win32";
-    const child = spawn(isWin ? "npm.cmd" : "npm", ["run", script], {
+    const command = isWin ? "cmd.exe" : "npm";
+    const argv = isWin ? ["/d", "/s", "/c", "npm", "run", script] : ["run", script];
+    const child = spawn(command, argv, {
       cwd: root,
+      env: process.env,
       stdio: "pipe",
-      shell: isWin,
+      windowsHide: isWin,
+      shell: false,
     });
     child.on("close", (code) => resolve(code ?? 1));
   });
