@@ -3,6 +3,7 @@
  */
 
 export function diagnoseSnapshot(snap) {
+  const passive = process.env.ZAMBAHOLA_GUARD_PASSIVE === "1";
   const issues = [];
   const fixes = [];
   const status = snap?.status ?? {};
@@ -18,6 +19,10 @@ export function diagnoseSnapshot(snap) {
       (process.env.ZAMBAHOLA_PHASE5 === "1" ? "phase5-reload" : "phase4-hit-recover");
     fixes.push({ action: restart, via: "npm", reason: "restart agent" });
     return { issues, fixes, healthy: false };
+  }
+
+  if (passive) {
+    return { issues, fixes, healthy: issues.length === 0 };
   }
 
   const tickAge = time.lastTickAgeSec ?? 999;

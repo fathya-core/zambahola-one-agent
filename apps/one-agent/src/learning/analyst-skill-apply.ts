@@ -97,7 +97,11 @@ function pickActions(ctx: AnalystApplyContext): SkillSuggestion[] {
     });
   }
 
-  if (abstain >= 0.85 && evals >= MIN_EVALS + 10) {
+  if (
+    abstain >= 0.85 &&
+    evals >= MIN_EVALS + 10 &&
+    process.env.ZAMBAHOLA_ANALYST_NO_RELOAD !== "1"
+  ) {
     actions.push({
       kind: "npm",
       id:

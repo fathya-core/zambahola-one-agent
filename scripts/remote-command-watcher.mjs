@@ -13,6 +13,18 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const commandsFile = join(root, "apps/one-agent/data/bridge/REMOTE-COMMANDS.json");
 const doneFile = join(root, "apps/one-agent/data/bridge/REMOTE-COMMANDS-DONE.json");
 
+const BLOCKED_WHEN_SAFE = new Set([
+  "stop",
+  "phase4-hit-recover",
+  "phase5-reload",
+  "phase5-ready",
+  "phase5-auto",
+  "dl-nightly",
+  "phase2-live",
+  "phase2-signals",
+  "experiments",
+]);
+
 const ACTION_MAP = {
   "research-import": ["run", "agent:research-import", "--", "apps/one-agent/knowledge/user-reports/AGENT-IMPORT-FINAL.json"],
   stop: ["run", "agent:stop"],
@@ -32,13 +44,18 @@ const ACTION_MAP = {
   "import-hf-research": ["run", "agent:import-hf-research"],
 };
 
+const watcherSafe = process.env.ZAMBAHOLA_WATCHER_SAFE === "1";
+
 function runNpm(args) {
   return new Promise((resolve) => {
     const isWin = process.platform === "win32";
-    const child = spawn(isWin ? "npm.cmd" : "npm", args, {
+    const command = isWin ? "cmd.exe" : "npm";
+    const argv = isWin ? ["/d", "/s", "/c", "npm", ...args] : args;
+    const child = spawn(command, argv, {
       cwd: root,
       stdio: "inherit",
-      shell: isWin,
+      windowsHide: isWin,
+      shell: false,
     });
     child.on("close", (code) => resolve(code ?? 1));
   });
@@ -57,6 +74,16 @@ async function tick() {
 
   for (const cmd of unprocessed) {
     const args = ACTION_MAP[cmd.action];
+    if (watcherSafe && BLOCKED_WHEN_SAFE.has(cmd.action)) {
+      console.log(`[watcher] SKIP (safe mode) ${cmd.action} (${cmd.id})`);
+      done.push({
+        ...cmd,
+        completedAt: new Date().toISOString(),
+        exit: -1,
+        skipped: "watcher_safe",
+      });
+      continue;
+    }
     console.log(`[watcher] run ${cmd.action} (${cmd.id})`);
     let exit = 0;
     if (args) exit = await runNpm(args);
@@ -67,6 +94,8 @@ async function tick() {
   await writeFile(doneFile, JSON.stringify(done.slice(-100), null, 2), "utf8");
 }
 
-console.log("[watcher] remote commands →", commandsFile);
+console.log(
+  `[watcher] remote commands → ${commandsFile}${watcherSafe ? " (SAFE: no stop/reload)" : ""}`,
+);
 setInterval(() => void tick(), 15_000);
 void tick();

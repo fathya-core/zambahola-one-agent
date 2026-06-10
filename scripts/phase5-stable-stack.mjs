@@ -26,6 +26,9 @@ const childEnv = {
   ...process.env,
   ...phase5Env,
   ZAMBAHOLA_GUARD_RESTART: "phase5-reload",
+  ZAMBAHOLA_WATCHER_SAFE: "1",
+  ZAMBAHOLA_GUARD_PASSIVE: "1",
+  ZAMBAHOLA_ANALYST_NO_RELOAD: "1",
 };
 
 function spawnNpm(name, args) {
