@@ -1,18 +1,43 @@
 {
-  "ts": "2026-06-10T07:09:07.604Z",
+  "ts": "2026-06-10T07:10:36.915Z",
   "dateKey": "2026-06-10",
   "ok": false,
-  "failed": 2,
+  "failed": 3,
   "checks": [
     {
-      "name": "agent_reachable",
+      "name": "agent_running",
+      "ok": true,
+      "detail": "pid=13668 feed=fast_tick"
+    },
+    {
+      "name": "ticks_moving",
+      "ok": true,
+      "detail": "tickCount 4 → 9"
+    },
+    {
+      "name": "metrics_api",
+      "ok": true,
+      "detail": "dirHit=0 preds=9"
+    },
+    {
+      "name": "export_hybrid_v7",
       "ok": false,
-      "detail": "TypeError: fetch failed"
+      "detail": "ageH=12.6 exportedAt=2026-06-09T18:37:14.886Z"
+    },
+    {
+      "name": "export_hybrid_v7_omni",
+      "ok": false,
+      "detail": "ageH=12.6 exportedAt=2026-06-09T18:37:15.270Z"
+    },
+    {
+      "name": "night_train_artifacts",
+      "ok": false,
+      "detail": "no fresh export"
     },
     {
       "name": "telemetry_push",
-      "ok": false,
-      "detail": "failed"
+      "ok": true,
+      "detail": "ok"
     }
   ]
 }
