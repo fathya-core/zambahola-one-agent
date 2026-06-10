@@ -2,6 +2,7 @@
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
+. (Join-Path $PSScriptRoot "phase5-keep-awake.ps1")
 
 Write-Host "=== ZAMBAHOLA Phase 5 Sleep ===" -ForegroundColor Cyan
 Write-Host "Reset night state + strong train + verify + paper trade" -ForegroundColor Yellow
@@ -15,18 +16,10 @@ Write-Host "[2] reset tonight night state..." -ForegroundColor Cyan
 node scripts/phase5-reset-night.mjs
 
 Write-Host ""
-Write-Host "[3] keep PC awake on AC..." -ForegroundColor Cyan
-try {
-    powercfg /change standby-timeout-ac 0 | Out-Null
-    powercfg /change monitor-timeout-ac 120 | Out-Null
-    Write-Host "Sleep disabled on AC." -ForegroundColor Green
-}
-catch {
-    Write-Host "Disable sleep manually if needed." -ForegroundColor Yellow
-}
+Enable-Phase5KeepAwake
 
 Write-Host ""
-Write-Host "[4] preflight..." -ForegroundColor Cyan
+Write-Host "[3] preflight..." -ForegroundColor Cyan
 node scripts/phase5-preflight.mjs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Preflight failed. Fix errors above before sleep." -ForegroundColor Red
@@ -34,6 +27,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
-Write-Host "[5] starting phase5-auto - DO NOT CLOSE this window" -ForegroundColor Cyan
+Write-Host "[4] starting phase5-auto - DO NOT CLOSE this window" -ForegroundColor Cyan
 Write-Host "Log: apps/one-agent/data/bridge/PHASE5-SCHEDULER.jsonl" -ForegroundColor Gray
+Write-Host "If PC sleeps anyway, after wake run: npm run agent:phase5-wake-resume" -ForegroundColor Gray
 npm run agent:phase5-auto:node
