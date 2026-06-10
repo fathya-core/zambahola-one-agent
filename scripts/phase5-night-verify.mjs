@@ -113,6 +113,7 @@ record("telemetry_push", push.ok, push.ok ? "ok" : "failed");
 const report = {
   ts: new Date().toISOString(),
   dateKey: todayKey(),
+  mode: liveOnly ? "live-only" : "post-night",
   ok: failed === 0,
   failed,
   checks,
