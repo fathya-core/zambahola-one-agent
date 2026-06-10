@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { runNpm } from "./lib/run-npm.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const liveOnly =
+  process.argv.includes("--live-only") || process.env.ZAMBAHOLA_PHASE5_VERIFY_LIVE_ONLY === "1";
 const agentUrl = process.env.ZAMBAHOLA_AGENT_URL ?? "http://127.0.0.1:8787";
 const tz = process.env.ZAMBAHOLA_PHASE5_TZ ?? "Asia/Riyadh";
 const reportFile = join(root, "apps/one-agent/data/bridge/PHASE5-NIGHT-VERIFY.json");
@@ -64,7 +66,9 @@ function record(name, ok, detail) {
   if (!ok) failed += 1;
 }
 
-console.log("[phase5-verify] === post-night test ===\n");
+console.log(
+  `[phase5-verify] === ${liveOnly ? "live-now test (no export required)" : "post-night test"} ===\n`,
+);
 
 try {
   const s1 = await fetchStatus();
@@ -85,14 +89,20 @@ try {
     `dirHit=${metrics?.directionalHitRate ?? "?"} preds=${metrics?.predictionCount ?? "?"}`,
   );
 
-  const v7 = checkExport("hybrid_v7-bundle.json");
-  record("export_hybrid_v7", v7.ok, v7.detail);
+  if (liveOnly) {
+    record("export_hybrid_v7", true, "skipped (live-now)");
+    record("export_hybrid_v7_omni", true, "skipped (live-now)");
+    record("night_train_artifacts", true, "skipped — live-now path");
+  } else {
+    const v7 = checkExport("hybrid_v7-bundle.json");
+    record("export_hybrid_v7", v7.ok, v7.detail);
 
-  const omni = checkExport("hybrid_v7_omni-bundle.json");
-  record("export_hybrid_v7_omni", omni.ok, omni.detail);
+    const omni = checkExport("hybrid_v7_omni-bundle.json");
+    record("export_hybrid_v7_omni", omni.ok, omni.detail);
 
-  const trainOk = v7.ok || omni.ok;
-  record("night_train_artifacts", trainOk, trainOk ? "at least one fresh bundle" : "no fresh export");
+    const trainOk = v7.ok || omni.ok;
+    record("night_train_artifacts", trainOk, trainOk ? "at least one fresh bundle" : "no fresh export");
+  }
 } catch (err) {
   record("agent_reachable", false, String(err));
 }
@@ -110,9 +120,10 @@ const report = {
 mkdirSync(dirname(reportFile), { recursive: true });
 writeFileSync(reportFile, JSON.stringify(report, null, 2), "utf8");
 
-console.log(
-  `\n[phase5-verify] ${failed === 0 ? "PASS — الليل خلص والوكيل يتداول paper" : `FAIL — ${failed} check(s)`}`,
-);
+const passMsg = liveOnly
+  ? "PASS — الوكيل شغال ويتداول paper (live-now)"
+  : "PASS — الليل خلص والوكيل يتداول paper";
+console.log(`\n[phase5-verify] ${failed === 0 ? passMsg : `FAIL — ${failed} check(s)`}`);
 console.log(`[phase5-verify] report: ${reportFile}\n`);
 
 process.exit(failed === 0 ? 0 : 1);

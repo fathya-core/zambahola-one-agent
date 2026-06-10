@@ -21,7 +21,7 @@ npm run agent:phase5-ready
 Write-Host ""
 Write-Host "[4] verify..." -ForegroundColor Cyan
 Start-Sleep -Seconds 6
-node scripts/phase5-night-verify.mjs
+node scripts/phase5-night-verify.mjs --live-only
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Verify failed - try: npm run agent:phase5-ready" -ForegroundColor Yellow
     exit $LASTEXITCODE
