@@ -1,13 +1,20 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { featuresToArray, type FeatureVector, directionFromScore, FEATURE_DIM } from "../features/index.js";
+import {
+  featuresToArray,
+  type FeatureVector,
+  directionFromScore,
+  normalizeFeatureVector,
+  INPUT_DIM,
+} from "../features/index.js";
 import type { PredictionDirection } from "../types.js";
 import { safeProb, safeScore } from "../learning/safe-prob.js";
+import { readJsonSafe, writeJsonAtomic } from "../storage/json-io.js";
+import { dot, relu, reluDeriv, sigmoid } from "./math-utils.js";
 import {
   freshMlpState,
   isDeadMlpWeights,
+  isValidMlpShape,
   type MlpWeightBlob,
 } from "../learning/model-weight-health.js";
 
@@ -66,40 +73,36 @@ export class MLPModel {
   private samples = 0;
 
   async load(): Promise<void> {
-    if (!existsSync(MLP_FILE)) return;
-    try {
-      const d = JSON.parse(await readFile(MLP_FILE, "utf8")) as MlpWeightBlob & {
-        b1?: number[];
-        b2?: number[];
-      };
-      if (!d.W1) return;
-      if (isDeadMlpWeights(d)) {
-        const fresh = freshMlpState();
-        Object.assign(this, fresh, { samples: d.samples ?? 0 });
-        await this.save();
-        return;
-      }
-      Object.assign(this, d);
-    } catch {
-      /* */
+    const d = await readJsonSafe<MlpWeightBlob>(MLP_FILE);
+    if (!d) return;
+    // Reset on wrong shape (e.g. legacy swapped-dimension files) or dead weights.
+    if (!isValidMlpShape(d) || isDeadMlpWeights(d)) {
+      this.params = newMlpParams();
+      this.samples = d.samples ?? 0;
+      await this.save();
+      return;
     }
+    this.params = {
+      W1: d.W1!,
+      b1: d.b1!,
+      W2: d.W2!,
+      b2: d.b2!,
+      W3: d.W3!,
+      b3: d.b3!,
+    };
+    this.samples = d.samples ?? 0;
   }
 
   async save(): Promise<void> {
-    await mkdir(dirname(MLP_FILE), { recursive: true });
-    await writeFile(
-      MLP_FILE,
-      JSON.stringify({
-        W1: this.W1,
-        b1: this.b1,
-        W2: this.W2,
-        b2: this.b2,
-        W3: this.W3,
-        b3: this.b3,
-        samples: this.samples,
-      }),
-      "utf8",
-    );
+    await writeJsonAtomic(MLP_FILE, {
+      W1: this.W1,
+      b1: this.b1,
+      W2: this.W2,
+      b2: this.b2,
+      W3: this.W3,
+      b3: this.b3,
+      samples: this.samples,
+    });
   }
 
   predict(f: FeatureVector): { score: number; direction: PredictionDirection; prob: number } {
@@ -110,7 +113,7 @@ export class MLPModel {
   }
 
   async train(f: FeatureVector | Record<string, number>, label: number): Promise<void> {
-    const feat = normalizeMlpFeatures(f);
+    const feat = normalizeFeatureVector(f);
     const x = featuresToArray(feat);
     const y = label;
     const { prob, h1, h2, z1, z2 } = this.forward(x);
@@ -140,13 +143,13 @@ export class MLPModel {
     }
 
     for (let j = 0; j < H1; j++) {
-      for (let k = 0; k < FEATURE_DIM; k++) {
+      for (let k = 0; k < INPUT_DIM; k++) {
         this.W1[j]![k]! += LR * (dh1[j]! * x[k]!);
       }
       this.b1[j]! += LR * dh1[j]!;
     }
 
-    if (!Number.isFinite(this.b3) || this.W3.some((w) => !Number.isFinite(w))) {
+    if (this.hasNonFiniteParams()) {
       const fresh = freshMlpState();
       this.W1 = fresh.W1;
       this.b1 = fresh.b1;
@@ -164,6 +167,15 @@ export class MLPModel {
     return this.samples;
   }
 
+  private hasNonFiniteParams(): boolean {
+    const bad = (n: number) => !Number.isFinite(n);
+    if (bad(this.b3) || this.W3.some(bad)) return true;
+    if (this.b1.some(bad) || this.b2.some(bad)) return true;
+    if (this.W1.some((row) => row.some(bad))) return true;
+    if (this.W2.some((row) => row.some(bad))) return true;
+    return false;
+  }
+
   private forward(x: number[]) {
     const z1 = this.b1.map((b, j) => b + dot(this.W1[j]!, x));
     const h1 = z1.map(relu);
@@ -173,51 +185,6 @@ export class MLPModel {
     const prob = sigmoid(z);
     return { prob, h1, h2, z1, z2 };
   }
-}
-
-function dot(a: number[], b: number[]): number {
-  let s = 0;
-  for (let i = 0; i < a.length; i++) s += a[i]! * b[i]!;
-  return s;
-}
-
-function relu(z: number): number {
-  return Math.max(0, z);
-}
-
-function reluDeriv(z: number): number {
-  return z > 0 ? 1 : 0;
-}
-
-function sigmoid(z: number): number {
-  if (z > 20) return 1;
-  if (z < -20) return 0;
-  return 1 / (1 + Math.exp(-z));
-}
-
-function normalizeMlpFeatures(
-  f: FeatureVector | Record<string, number>,
-): FeatureVector {
-  return {
-    ret1: f.ret1 ?? 0,
-    ret5: f.ret5 ?? 0,
-    ret10: f.ret10 ?? 0,
-    volatility: f.volatility ?? 0,
-    rsiNorm: f.rsiNorm ?? 0,
-    momentumNorm: f.momentumNorm ?? 0,
-    zScore: f.zScore ?? 0,
-    sentiment: f.sentiment ?? 0,
-    agreement: f.agreement ?? 0,
-    bookImbalance: f.bookImbalance ?? 0,
-    spreadBps: f.spreadBps ?? 0,
-    macdHistNorm: f.macdHistNorm ?? 0,
-    fundingNorm: f.fundingNorm ?? 0,
-    premiumNorm: f.premiumNorm ?? 0,
-    longShortNorm: f.longShortNorm ?? 0,
-    volumeNorm: f.volumeNorm ?? 0,
-    timeSin: f.timeSin ?? 0,
-    timeCos: f.timeCos ?? 0,
-  };
 }
 
 export { MLP_FILE };

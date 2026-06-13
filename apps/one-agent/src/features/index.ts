@@ -144,10 +144,45 @@ export function featuresToArray(f: FeatureVector): number[] {
   ];
 }
 
+/** Number of named features in FeatureVector. */
 export const FEATURE_DIM = 18;
+
+/**
+ * Length of the model input vector produced by featuresToArray():
+ * FEATURE_DIM features + 1 leading bias term. All linear/neural models
+ * must size their weights to INPUT_DIM, not FEATURE_DIM.
+ */
+export const INPUT_DIM = FEATURE_DIM + 1;
 
 export function directionFromScore(score: number): PredictionDirection {
   if (score > 0.12) return "up";
   if (score < -0.12) return "down";
   return "range";
+}
+
+/** Coerce a partial/loose feature map into a complete, NaN-free FeatureVector. */
+export function normalizeFeatureVector(
+  f: FeatureVector | Record<string, number>,
+): FeatureVector {
+  const n = (v: number | undefined): number => (Number.isFinite(v) ? (v as number) : 0);
+  return {
+    ret1: n(f.ret1),
+    ret5: n(f.ret5),
+    ret10: n(f.ret10),
+    volatility: n(f.volatility),
+    rsiNorm: n(f.rsiNorm),
+    momentumNorm: n(f.momentumNorm),
+    zScore: n(f.zScore),
+    sentiment: n(f.sentiment),
+    agreement: n(f.agreement),
+    bookImbalance: n(f.bookImbalance),
+    spreadBps: n(f.spreadBps),
+    macdHistNorm: n(f.macdHistNorm),
+    fundingNorm: n(f.fundingNorm),
+    premiumNorm: n(f.premiumNorm),
+    longShortNorm: n(f.longShortNorm),
+    volumeNorm: n(f.volumeNorm),
+    timeSin: n(f.timeSin),
+    timeCos: n(f.timeCos),
+  };
 }

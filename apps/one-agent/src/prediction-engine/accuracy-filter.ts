@@ -1,7 +1,6 @@
 import type { PredictionDirection } from "../types.js";
 import {
   getAccuracyTuning,
-  isMaxAccuracy,
   isAccuracyFilterActive,
 } from "../config/accuracy-profile.js";
 
@@ -38,7 +37,8 @@ export function applyAccuracyFilter(input: AccuracyFilterInput): AccuracyFilterR
   }
 
   const t = getAccuracyTuning();
-  let { direction, confidence, agreement } = input;
+  const { direction, agreement } = input;
+  let confidence = input.confidence;
   let reason = "max_pass";
 
   const warmed = input.mlSamples >= 80;

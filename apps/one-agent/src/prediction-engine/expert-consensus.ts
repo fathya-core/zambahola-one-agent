@@ -38,8 +38,6 @@ export function applyExpertConsensus(
   votes: StrategySignal[],
   tiers: StrategyTiers = DEFAULT_TIERS,
 ): ExpertConsensusResult {
-  const sTrend = tiers.S_trend ?? [];
-  const sMicro = tiers.S_micro ?? [];
   const bRange = tiers.B_range ?? [];
 
   const sVotes = countSTierForDirection(votes, direction, tiers);

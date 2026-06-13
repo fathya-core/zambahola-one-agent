@@ -2,6 +2,7 @@ import { readJsonSafe, writeJsonAtomic } from "../storage/json-io.js";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FeatureVector } from "../features/index.js";
+import { sigmoid } from "../prediction-engine/math-utils.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const MODEL_FILE = join(pkgRoot, "data", "learning", "meta-pnl-weights.json");
@@ -27,12 +28,6 @@ const DEFAULT: MetaPnlState = {
 
 let state: MetaPnlState | null = null;
 let loadPromise: Promise<MetaPnlState> | null = null;
-
-function sigmoid(z: number): number {
-  if (z > 20) return 1;
-  if (z < -20) return 0;
-  return 1 / (1 + Math.exp(-z));
-}
 
 function featureRow(
   f: FeatureVector,
@@ -86,7 +81,12 @@ export async function getMetaPnlModel(): Promise<{
   const threshold = Number(process.env.ZAMBAHOLA_META_PNL_THRESHOLD ?? 0.55);
   const lr = Number(process.env.ZAMBAHOLA_META_PNL_LR ?? 0.1);
 
-  const score = (f, confidence, agreement, regime) => {
+  const score = (
+    f: FeatureVector,
+    confidence: number,
+    agreement: number,
+    regime: string,
+  ) => {
     const x = featureRow(f, confidence, agreement, regime);
     let z = state!.bias;
     for (let i = 0; i < DIM; i++) z += state!.weights[i]! * x[i]!;
@@ -95,7 +95,12 @@ export async function getMetaPnlModel(): Promise<{
     return p;
   };
 
-  const shouldEnter = (f, confidence, agreement, regime) => {
+  const shouldEnter = (
+    f: FeatureVector,
+    confidence: number,
+    agreement: number,
+    regime: string,
+  ) => {
     if (process.env.ZAMBAHOLA_META_PNL === "0") return true;
     if (state!.samples < Number(process.env.ZAMBAHOLA_META_PNL_WARMUP ?? 50)) return true;
     return score(f, confidence, agreement, regime) >= threshold;

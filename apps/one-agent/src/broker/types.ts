@@ -11,6 +11,8 @@ export interface TradeBroker {
   getMaxDrawdown(): number;
   execute(decision: Decision, tick: MarketTick): PaperTrade | null;
   markToMarket(price: number): void;
+  /** Rotate open positions in learn mode so models learn faster. */
+  forceCloseIfStale(tick: MarketTick, maxHoldSec: number): PaperTrade | null;
 }
 
 export type BrokerMode = "paper" | "binance_demo" | "binance_live" | "bybit_demo";

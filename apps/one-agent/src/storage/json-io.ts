@@ -22,6 +22,7 @@ export async function writeJsonAtomic(path: string, data: unknown): Promise<void
 
 export async function readJsonSafe<T>(path: string, retries = 5): Promise<T | null> {
   if (!existsSync(path)) return null;
+  let lastErr: unknown = null;
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       const raw = await readFile(path, "utf8");
@@ -30,9 +31,13 @@ export async function readJsonSafe<T>(path: string, retries = 5): Promise<T | nu
         continue;
       }
       return JSON.parse(raw) as T;
-    } catch {
+    } catch (err) {
+      lastErr = err;
       await sleep(50 * (attempt + 1));
     }
   }
+  console.warn(
+    `[zambahola] readJsonSafe gave up on ${path} after ${retries} attempts: ${String(lastErr)}`,
+  );
   return null;
 }

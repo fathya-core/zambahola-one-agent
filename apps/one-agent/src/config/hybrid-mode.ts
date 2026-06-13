@@ -6,7 +6,6 @@ let currentProfile: HybridProfile =
   process.env.ZAMBAHOLA_HYBRID_RANGE_LEARN === "0" ? "signals" : "learn";
 let pendingRegime: string | null = null;
 let pendingTicks = 0;
-let lastSwitchAt = 0;
 let switchCount = 0;
 
 export function isHybridAuto(): boolean {
@@ -105,7 +104,6 @@ export function updateHybridRegime(regime: string): HybridUpdate {
   currentProfile = target;
   pendingRegime = null;
   pendingTicks = 0;
-  lastSwitchAt = Date.now();
   switchCount += 1;
 
   return {

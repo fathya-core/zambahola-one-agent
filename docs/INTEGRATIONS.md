@@ -65,7 +65,7 @@ npm run agent:research-import -- apps/one-agent/knowledge/SKILLS-AND-LINKS.json
 | agent-compatibility | check-agent-compatibility |
 | continual-learning | continual-learning |
 
-Install: `docs/ar/تثبيت-اضافات-السوق.md` or `scripts/install-cursor-marketplace.ps1`
+Install: `docs/ar/تثبيت-اضافات-السوق.md` or `scripts/windows/install-cursor-marketplace.ps1`
 
 ### Log reviewer (second agent)
 

@@ -65,7 +65,7 @@ npm run agent:stop
 
 - **Path:** `C:\Users\pc\zambahola-one-agent` · **Shell:** PowerShell 7.
 - **One window:** `npm run agent:phase5-auto` (`.ps1` → `phase5-scheduler.mjs`). Do not close; minimize only.
-- **npm on Windows:** all `scripts/lib/run-npm.mjs` calls use `cmd.exe /d /s /c npm …` (direct `npm.cmd` spawn → `EINVAL`).
+- **npm on Windows:** all `scripts/core/lib/run-npm.mjs` calls use `cmd.exe /d /s /c npm …` (direct `npm.cmd` spawn → `EINVAL`).
 - **Agent start:** `agent:phase5-ready` returns to prompt immediately — agent runs detached (`start.ts`). Check with `curl http://127.0.0.1:8787/api/status`.
 - **Agent stop (night train):** `phase5-agent-stop.mjs` uses `taskkill /PID /T /F` when graceful stop fails.
 - **Night train:** `agent:phase5-night-now` — stable profile in `config/phase5-night-train.env`; fallback to `omni-train:quick` on crash; always restarts agent at end.
@@ -74,7 +74,7 @@ npm run agent:stop
 - **Sleep one-liner (Windows):** `npm run agent:phase5-sleep` — pull → reset night → **keep-awake** (powercfg AC+DC + `SetThreadExecutionState`) → preflight → auto. **After PC slept/wake:** `npm run agent:phase5-wake-resume`. Plug laptop to AC; set Windows Sleep=Never if needed.
 - **Plug laptop to AC**; overnight script disables sleep on AC via `powercfg`.
 
-Headless: `curl http://127.0.0.1:8787/api/status`. Engine id in metrics: `hybrid_v6_ultra`.
+Headless: `curl http://127.0.0.1:8787/api/status`. Engine id in metrics: `hybrid_v7` (`hybrid_v7_max` in max-accuracy profile). The legacy `hybrid_v6_ultra` name in older docs refers to the same multi-layer stack.
 
 ### ML / MLP stuck at 50% (dead weights)
 
@@ -103,7 +103,7 @@ Do **not** put `npm run agent:start` or `npm run verify` in the VM update script
 - MCP local server: `mcp-servers/zambahola-local/server.mjs` — see `.cursor/mcp.json.example`.
 - Arabic: `docs/ar/ربط-الجهاز-المحلي.md` · `docs/ar/تثبيت-اضافات-السوق.md` · `docs/ar/المهارات-والروابط.md` · `docs/INTEGRATIONS.md`.
 - **Skills/MCP index:** `apps/one-agent/knowledge/SKILLS-AND-LINKS.json` — import via `agent:research-import`.
-- Cursor Marketplace (user desktop): `tavily` · `zapier` · `huggingface-skills` · `cli-for-agent` · `cursor-sdk` · `agent-compatibility` · `continual-learning` — see `scripts/install-cursor-marketplace.ps1`.
+- Cursor Marketplace (user desktop): `tavily` · `zapier` · `huggingface-skills` · `cli-for-agent` · `cursor-sdk` · `agent-compatibility` · `continual-learning` — see `scripts/windows/install-cursor-marketplace.ps1`. Script registry: `scripts/README.md`.
 - Project skill: `.cursor/skills/zambahola-one-agent/SKILL.md`.
 - Log reviewer: `npm run agent:log-review` / `agent:log-review:apply` — `docs/ar/مراجع-السجل.md`.
 - **Dual agents (dashboard):** section «الوكيلان» on `:8787` shows session-scoped counters (`sessionEvaluations`, `sessionLogAudits`, `sessionSkillApplies`). Counters reset on each `agent.start()`. Log audit + analyst run **in background** (non-blocking) off session evals. Persisted skills: `data/learning/last-skill-applied.json`. APIs: `/api/learning` (`dualAgent`), `/api/log-audit` (`report` + `dualAgent`), `/api/analyst` (`skillAppliedAr`).

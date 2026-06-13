@@ -22,13 +22,10 @@ export function ensemblePredict(
 ): EnsembleResult {
   let score = 0;
   let weightSum = 0;
-  let rangeVotes = 0;
-
   for (const s of signals) {
     const w = weights[s.strategyId] ?? 1;
     weightSum += w;
     score += DIR_SCORE[s.direction] * w * s.confidence;
-    if (s.direction === "range") rangeVotes += w;
   }
 
   const normalized = weightSum > 0 ? score / weightSum : 0;

@@ -78,6 +78,7 @@ export class AgentCore {
 
   private running = false;
   private tickCount = 0;
+  private droppedTicks = 0;
   private predictionCount = 0;
   private startedAt: number | null = null;
   private lastPrice = 0;
@@ -194,7 +195,12 @@ export class AgentCore {
   }
 
   private async handleTick(tick: MarketTick): Promise<void> {
-    if (this.handlingTick) return;
+    if (this.handlingTick) {
+      // Feed produced a tick while the previous one is still processing.
+      // Count it so backpressure is visible instead of silently lost.
+      this.droppedTicks += 1;
+      return;
+    }
     this.handlingTick = true;
     try {
       await this.processTick(tick);
@@ -418,6 +424,7 @@ export class AgentCore {
 
     return {
       tickCount: this.tickCount,
+      droppedTicks: this.droppedTicks,
       predictionCount: this.predictionCount,
       hitRate: this.evaluator.getHitRate(),
       directionalHitRate: this.evaluator.getDirectionalHitRate(),

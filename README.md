@@ -1,6 +1,16 @@
-# ZAMBAHOLA ONE AGENT v0
+# ZAMBAHOLA ONE AGENT v0.2
 
-Standalone **local paper-trading agent** for BTCUSDT. Mock market feed in v0 (Binance/Bybit websocket-ready architecture). **No real trades. No API keys.**
+Self-learning **local paper-trading agent** for BTCUSDT. Tick-driven hybrid
+engine (`hybrid_v7`): 17 rule strategies + online ML/MLP/GBM + LOB proxy, gated
+by regime/accuracy/meta filters, executed on a **paper broker** and continuously
+trained from horizon evaluations. Live dashboard on **:8787**. **Paper mode by
+default — real exchange keys are opt-in and gated.**
+
+Goal: reach a directional hit rate ≥ ~58% before enabling any real keys.
+
+> Operational runbook (feeds, phase5 automation, Windows/OMAR-PC): see
+> [AGENTS.md](AGENTS.md). Full command reference: [docs/COMMANDS.md](docs/COMMANDS.md).
+> Architecture & next steps: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Requirements
 
@@ -39,38 +49,34 @@ npm run agent:start
 
 (Or `pnpm agent:start` if you use pnpm directly.)
 
-Opens the dashboard at **http://localhost:8787** (paper mode only).  
+Opens the dashboard at **http://localhost:8787** (paper mode by default).  
 **Default feed:** `universal` = Binance + order book + Bybit failover (`ZAMBAHOLA_FEED=mock` for offline).
 
-Other commands:
+Most-used commands (full list in [docs/COMMANDS.md](docs/COMMANDS.md)):
 
 | Command | Description |
 |---------|-------------|
 | `npm run agent:status` | JSON status (pid, ticks, port) |
 | `npm run agent:stop` | Stop background agent |
 | `npm run agent:test-run` | Headless 65s run; requires ≥60 predictions |
-| `npm run agent:learn` | **25** learning cycles (65s each) |
-| `npm run agent:turbo-learn` | Fast learn on mock feed |
-| `npm run agent:power-learn` | **20**-cycle intensive training |
-| `npm run agent:deep-learn` | **25** live learning cycles |
-| `npm run agent:mega-train` | Batch train on **3000** bars |
-| `npm run agent:ultra-learn` | **30** cycles + **5000**-bar train (full pipeline) |
-| `npm run agent:patterns` | Arabic pattern journal (Phase 1) |
-| `npm run agent:directional-live` | Live profile tuned for directional hit |
-| `npm run agent:max-accuracy` | **Max hit-rate** train profile (see `config/max-accuracy.env`) |
+| `npm run agent:phase5-auto` | OMAR-PC one-window day-live + overnight train |
+| `npm run agent:max-accuracy` | **Max hit-rate** train profile (`config/max-accuracy.env`) |
 | `npm run agent:max-accuracy:start` | Live agent with max-accuracy env |
+| `npm run agent:ultra-learn` | 30 cycles + 5000-bar train (full pipeline) |
+| `npm run agent:patterns` | Arabic pattern journal |
 
 Fast ticks: `ZAMBAHOLA_FAST=1 npm run agent:start`
 
-## What v0 does
+## What it does
 
-Every **1 second**:
+Each tick:
 
-1. Reads **BTCUSDT** price from the **mock feed**
-2. Emits prediction: **up** / **down** / **range** (default horizon **30s**)
-3. Emits decision: **paper_long** / **paper_short** / **no_trade** / **paper_close**
-4. Executes **paper trades** only
-5. After horizon, evaluates **prediction_hit** and updates metrics
+1. Reads **BTCUSDT** price from the configured feed (universal / binance / mock / …)
+2. Runs **17 strategies + ensemble + ML/MLP/GBM + LOB proxy**, gated by regime/accuracy/meta filters
+3. Emits prediction: **up** / **down** / **range** (default horizon ~30s)
+4. Emits decision: **paper_long** / **paper_short** / **no_trade** / **paper_close**
+5. Executes **paper trades** (real exchange orders only when explicitly enabled)
+6. After the horizon, evaluates **prediction_hit** and **trains the models online**
 
 ## Data outputs
 
@@ -119,13 +125,18 @@ await agent.stop();
 
 See `apps/one-agent/src/mcp/index.ts`.
 
-## Validation
+## Validation & quality
 
 ```bash
 npm run setup
-npm run agent:test-run   # ≥60 predictions
-npm run agent:start      # dashboard at :8787
+npm run lint         # ESLint (apps/one-agent/src)
+npm run typecheck    # tsc --noEmit
+npm run test         # Vitest unit tests
+npm run agent:test-run   # headless 65s, ≥60 predictions
+npm run verify       # full verification → docs/VERIFICATION_REPORT.json
 ```
+
+CI runs lint + typecheck + test + test-run on every push (`.github/workflows/verify.yml`).
 
 ## License
 

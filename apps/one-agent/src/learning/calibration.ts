@@ -1,7 +1,6 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readJsonSafe, writeJsonAtomic } from "../storage/json-io.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const CAL_FILE = join(pkgRoot, "data", "learning", "calibration.json");
@@ -20,20 +19,12 @@ export class ConfidenceCalibrator {
   }));
 
   async load(): Promise<void> {
-    if (!existsSync(CAL_FILE)) return;
-    try {
-      const data = JSON.parse(await readFile(CAL_FILE, "utf8")) as {
-        buckets: Bucket[];
-      };
-      if (data.buckets?.length === 10) this.buckets = data.buckets;
-    } catch {
-      /* */
-    }
+    const data = await readJsonSafe<{ buckets?: Bucket[] }>(CAL_FILE);
+    if (data?.buckets?.length === 10) this.buckets = data.buckets;
   }
 
   async save(): Promise<void> {
-    await mkdir(dirname(CAL_FILE), { recursive: true });
-    await writeFile(CAL_FILE, JSON.stringify({ buckets: this.buckets }, null, 2));
+    await writeJsonAtomic(CAL_FILE, { buckets: this.buckets });
   }
 
   record(confidence: number, hit: boolean): void {

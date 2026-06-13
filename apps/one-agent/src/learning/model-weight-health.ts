@@ -2,14 +2,16 @@ import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FEATURE_DIM } from "../features/index.js";
+import { FEATURE_DIM, INPUT_DIM } from "../features/index.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 export const ML_WEIGHTS_FILE = join(pkgRoot, "data", "learning", "ml-weights.json");
 export const MLP_WEIGHTS_FILE = join(pkgRoot, "data", "learning", "mlp-weights.json");
 
+// One weight per input dimension (index 0 = bias term, then the 18 features).
 export const ML_DEFAULT_WEIGHTS = [
-  0, 0.4, 0.25, 0.15, -0.1, -0.2, 0.35, -0.12, 0.2, 0.28, 0.38, -0.06, 0.3, 0.25, 0.2, 0.15, 0.1, 0.05,
+  0, 0.4, 0.25, 0.15, -0.1, -0.2, 0.35, -0.12, 0.2, 0.28, 0.38, -0.06, 0.3, 0.25, 0.2, 0.15, 0.1,
+  0.05, 0.05,
 ];
 
 const MLP_H1 = 16;
@@ -35,9 +37,11 @@ export function freshMlpState(): {
   b3: number;
 } {
   return {
-    W1: initW(FEATURE_DIM, MLP_H1),
+    // W1[hidden][input], W2[hidden2][hidden1], W3[hidden2] — matched to the
+    // forward/backward passes in MLPModel (b1 length H1, b2 length H2).
+    W1: initW(MLP_H1, INPUT_DIM),
     b1: new Array(MLP_H1).fill(0),
-    W2: initW(MLP_H1, MLP_H2),
+    W2: initW(MLP_H2, MLP_H1),
     b2: new Array(MLP_H2).fill(0),
     W3: initVec(MLP_H2),
     b3: 0,
@@ -57,8 +61,15 @@ export function sumAbsNumbers(values: unknown): number {
 }
 
 export function normalizeMlWeights(weights: unknown): number[] | null {
-  if (!Array.isArray(weights) || weights.length !== FEATURE_DIM) return null;
-  return weights.map((w) => {
+  if (!Array.isArray(weights)) return null;
+  // Migrate legacy 18-length weights (pre bias/timeCos fix) by padding to
+  // INPUT_DIM so learned weights are preserved instead of reset.
+  let arr = weights;
+  if (arr.length === FEATURE_DIM && INPUT_DIM === FEATURE_DIM + 1) {
+    arr = [...arr, 0];
+  }
+  if (arr.length !== INPUT_DIM) return null;
+  return arr.map((w) => {
     if (w === null || w === undefined || !Number.isFinite(w)) return 0;
     return w;
   });
@@ -75,10 +86,30 @@ export function isDeadMlWeights(weights: unknown, samples = 0): boolean {
 
 export interface MlpWeightBlob {
   W1?: number[][];
+  b1?: number[];
   W2?: number[][];
+  b2?: number[];
   W3?: number[];
   b3?: number;
   samples?: number;
+}
+
+/** Structural validation: matrices must match the MLP topology exactly. */
+export function isValidMlpShape(d: MlpWeightBlob): boolean {
+  const matrixOk = (m: unknown, rows: number, cols: number): boolean =>
+    Array.isArray(m) &&
+    m.length === rows &&
+    m.every((r) => Array.isArray(r) && r.length === cols);
+  const vecOk = (v: unknown, n: number): boolean =>
+    Array.isArray(v) && v.length === n;
+  return (
+    matrixOk(d.W1, MLP_H1, INPUT_DIM) &&
+    matrixOk(d.W2, MLP_H2, MLP_H1) &&
+    vecOk(d.W3, MLP_H2) &&
+    vecOk(d.b1, MLP_H1) &&
+    vecOk(d.b2, MLP_H2) &&
+    typeof d.b3 === "number"
+  );
 }
 
 export function hasBadNumbers(values: unknown): boolean {
@@ -127,7 +158,7 @@ export async function restoreMlWeightsFile(samples = 0): Promise<void> {
   await writeFile(
     ML_WEIGHTS_FILE,
     JSON.stringify(
-      { weights: [...ML_DEFAULT_WEIGHTS], samples, dim: FEATURE_DIM },
+      { weights: [...ML_DEFAULT_WEIGHTS], samples, dim: INPUT_DIM },
       null,
       2,
     ),

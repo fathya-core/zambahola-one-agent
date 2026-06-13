@@ -15,10 +15,10 @@
     "stop": "tsx src/cli/stop.ts",
     "test-run": "tsx src/cli/test-run.ts",
     "learn": "tsx src/cli/learn.ts",
-    "power-learn": "node ../../scripts/run-env.mjs ZAMBAHOLA_LEARN_CYCLES=20 ZAMBAHOLA_FEED=mock -- tsx src/cli/learn.ts",
-    "deep-learn": "node ../../scripts/run-env.mjs ZAMBAHOLA_FEED=mock -- tsx src/cli/deep-learn.ts",
+    "power-learn": "node ../../scripts/core/run-env.mjs ZAMBAHOLA_LEARN_CYCLES=20 ZAMBAHOLA_FEED=mock -- tsx src/cli/learn.ts",
+    "deep-learn": "node ../../scripts/core/run-env.mjs ZAMBAHOLA_FEED=mock -- tsx src/cli/deep-learn.ts",
     "mega-train": "tsx src/cli/mega-train.ts",
-    "ultra-learn": "node ../../scripts/run-env.mjs ZAMBAHOLA_FEED=mock -- tsx src/cli/ultra-learn.ts",
+    "ultra-learn": "node ../../scripts/core/run-env.mjs ZAMBAHOLA_FEED=mock -- tsx src/cli/ultra-learn.ts",
     "export-models": "tsx src/cli/export-models.ts",
     "teach-more": "tsx src/cli/teach-more.ts",
     "restore-weights": "tsx src/cli/restore-weights.ts",
@@ -31,7 +31,10 @@
     "bundle-reports": "tsx src/cli/bundle-reports.ts",
     "patterns": "tsx src/cli/patterns.ts",
     "log-review": "tsx src/cli/log-review.ts",
-    "experiments": "tsx src/cli/experiments.ts"
+    "experiments": "tsx src/cli/experiments.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "open": "^10.1.0",
@@ -41,6 +44,7 @@
     "@types/node": "^22.10.2",
     "@types/ws": "^8.5.13",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FeatureVector } from "../features/index.js";
 import type { PredictionDirection } from "../types.js";
+import { sigmoid } from "../prediction-engine/math-utils.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const MODEL_FILE = join(pkgRoot, "data", "learning", "meta-label-weights.json");
@@ -28,12 +29,6 @@ const DEFAULT: MetaLabelState = {
 
 let state: MetaLabelState | null = null;
 let loadPromise: Promise<MetaLabelState> | null = null;
-
-function sigmoid(z: number): number {
-  if (z > 20) return 1;
-  if (z < -20) return 0;
-  return 1 / (1 + Math.exp(-z));
-}
 
 function featureRow(
   f: FeatureVector,

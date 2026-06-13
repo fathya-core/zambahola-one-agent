@@ -5,8 +5,9 @@ export class PaperBroker {
   readonly mode = "paper" as const;
   private openTrade: PaperTrade | null = null;
   private closedTrades: PaperTrade[] = [];
-  private equityCurve: number[] = [0];
-  private peakEquity = 0;
+  // Live equity peak / max drawdown including unrealized PnL (updated in markToMarket).
+  private equityPeak = 0;
+  private liveMaxDrawdown = 0;
 
   getPosition(): "long" | "short" | null {
     return this.openTrade?.side ?? null;
@@ -43,7 +44,8 @@ export class PaperBroker {
       peak = Math.max(peak, cum);
       maxDd = Math.max(maxDd, peak - cum);
     }
-    return Number(maxDd.toFixed(4));
+    // Include intra-trade (unrealized) drawdown tracked by markToMarket.
+    return Number(Math.max(maxDd, this.liveMaxDrawdown).toFixed(4));
   }
 
   execute(decision: Decision, tick: MarketTick): PaperTrade | null {
@@ -68,11 +70,11 @@ export class PaperBroker {
   }
 
   markToMarket(price: number): void {
-    if (!this.openTrade) return;
-    const unrealized = this.unrealizedPnl(this.openTrade, price);
-    const total = this.closedTrades.reduce((s, t) => s + (t.pnl ?? 0), 0) + unrealized;
-    this.equityCurve.push(total);
-    this.peakEquity = Math.max(this.peakEquity, total);
+    const realized = this.closedTrades.reduce((s, t) => s + (t.pnl ?? 0), 0);
+    const unrealized = this.openTrade ? this.unrealizedPnl(this.openTrade, price) : 0;
+    const total = realized + unrealized;
+    this.equityPeak = Math.max(this.equityPeak, total);
+    this.liveMaxDrawdown = Math.max(this.liveMaxDrawdown, this.equityPeak - total);
   }
 
   /** Rotate open paper positions so meta-PnL / strategy weights learn faster */
@@ -106,7 +108,7 @@ export class PaperBroker {
     };
   }
 
-  private close(tick: MarketTick, decision: Decision): PaperTrade | null {
+  private close(tick: MarketTick, _decision: Decision): PaperTrade | null {
     if (!this.openTrade) return null;
     const trade = this.openTrade;
     trade.exitPrice = tick.price;

@@ -59,28 +59,46 @@ export class BinanceDemoBroker implements TradeBroker {
     this.paper.markToMarket(price);
   }
 
-  execute(decision: Decision, tick: MarketTick): PaperTrade | null {
-    const trade = this.paper.execute(decision, tick);
-    if (trade && this.sendOrders) {
-      void this.placeExchangeOrder(decision, tick);
+  forceCloseIfStale(tick: MarketTick, maxHoldSec: number): PaperTrade | null {
+    const posBefore = this.paper.getPosition();
+    const trade = this.paper.forceCloseIfStale(tick, maxHoldSec);
+    if (trade && this.sendOrders && posBefore) {
+      const side: "BUY" | "SELL" = posBefore === "long" ? "SELL" : "BUY";
+      void this.placeExchangeOrder(trade.decisionId ?? "force-close", tick, side);
     }
     return trade;
   }
 
-  private async placeExchangeOrder(
+  execute(decision: Decision, tick: MarketTick): PaperTrade | null {
+    // Capture position BEFORE the paper broker mutates it, so a close order
+    // can resolve its exchange side correctly.
+    const posBefore = this.paper.getPosition();
+    const trade = this.paper.execute(decision, tick);
+    if (trade && this.sendOrders) {
+      const side = this.resolveExchangeSide(decision, posBefore);
+      if (side) void this.placeExchangeOrder(decision.decisionId, tick, side);
+    }
+    return trade;
+  }
+
+  private resolveExchangeSide(
     decision: Decision,
+    posBefore: "long" | "short" | null,
+  ): "BUY" | "SELL" | null {
+    if (decision.action === "paper_long") return "BUY";
+    if (decision.action === "paper_short") return "SELL";
+    if (decision.action === "paper_close") {
+      return posBefore === "long" ? "SELL" : posBefore === "short" ? "BUY" : null;
+    }
+    return null;
+  }
+
+  private async placeExchangeOrder(
+    decisionId: string,
     tick: MarketTick,
+    side: "BUY" | "SELL",
   ): Promise<void> {
     try {
-      let side: "BUY" | "SELL" | null = null;
-      if (decision.action === "paper_long") side = "BUY";
-      if (decision.action === "paper_short") side = "SELL";
-      if (decision.action === "paper_close") {
-        const pos = this.paper.getPosition();
-        side = pos === "long" ? "SELL" : pos === "short" ? "BUY" : null;
-      }
-      if (!side) return;
-
       const result = await binanceSignedPost(
         "/fapi/v1/order",
         {
@@ -100,14 +118,14 @@ export class BinanceDemoBroker implements TradeBroker {
         side,
         price: tick.price,
         qty: this.qty,
-        decisionId: decision.decisionId,
+        decisionId,
       });
     } catch (err) {
       await appendTradeLedger({
         event: "exchange_error",
         mode: this.mode,
         error: String(err),
-        decisionId: decision.decisionId,
+        decisionId,
       });
     }
   }

@@ -42,7 +42,6 @@ import {
   updateHybridRegime,
 } from "../config/hybrid-mode.js";
 
-const DEFAULT_HORIZON_SEC = 30;
 const MAX_PRICES = 400;
 
 export interface PredictionEngineOptions {
@@ -61,6 +60,7 @@ export class PredictionEngine {
   private weights: StrategyWeights = {};
   private expertTiers: StrategyTiers = {};
   private ready = false;
+  private initPromise: Promise<void> | null = null;
   private metaLabeler: Awaited<ReturnType<typeof getMetaLabeler>> | null = null;
   private metaPnl: Awaited<ReturnType<typeof getMetaPnlModel>> | null = null;
 
@@ -70,7 +70,21 @@ export class PredictionEngine {
       Number(process.env.ZAMBAHOLA_HORIZON_SEC ?? getAccuracyTuning().horizonSec);
   }
 
+  /** Idempotent: concurrent callers share a single in-flight init. */
   async init(): Promise<void> {
+    if (this.ready) return;
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = this.doInit();
+    try {
+      await this.initPromise;
+    } catch (err) {
+      // Allow a later retry if init failed.
+      this.initPromise = null;
+      throw err;
+    }
+  }
+
+  private async doInit(): Promise<void> {
     if (process.env.ZAMBAHOLA_EXPERT !== "0") {
       await applyExpertPresetToDisk();
     }
@@ -134,7 +148,7 @@ export class PredictionEngine {
     let mlpProb = 0.5;
     let gbmScore = 0;
     let gbmProb = 0.5;
-    let lobScore = lob.score;
+    const lobScore = lob.score;
     let regime = "range" as ReturnType<typeof detectRegime>;
     let gateReason = "n/a";
     let expertReason = "n/a";

@@ -120,6 +120,7 @@ export interface StrategyHitStats {
 
 export interface AgentMetrics {
   tickCount: number;
+  droppedTicks?: number;
   predictionCount: number;
   hitRate: number;
   paperPnl: number;

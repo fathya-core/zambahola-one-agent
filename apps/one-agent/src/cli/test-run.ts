@@ -1,5 +1,5 @@
 import { AgentCore } from "../agent-core.js";
-import { ensureDataDirs, readMetrics } from "../storage/index.js";
+import { readMetrics } from "../storage/index.js";
 import { LATEST_RUN_FILE } from "../storage/paths.js";
 import { readFile } from "node:fs/promises";
 

@@ -17,7 +17,7 @@
 راجع: `docs/ar/تثبيت-اضافات-السوق.md` أو شغّل:
 
 ```powershell
-.\scripts\install-cursor-marketplace.ps1
+.\scripts\windows\install-cursor-marketplace.ps1
 ```
 
 ## خطوة واحدة — فعّل Auth

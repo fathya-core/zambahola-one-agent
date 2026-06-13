@@ -1,9 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type {
-  Prediction,
-  PredictionDirection,
-  PredictionEvaluation,
-} from "../types.js";
+import type { Prediction, PredictionEvaluation } from "../types.js";
 
 interface PendingEval {
   prediction: Prediction;
@@ -80,8 +76,9 @@ export class Evaluator {
 
   getConfidenceCalibration(): number {
     if (this.evaluations.length === 0) return 0;
+    const target = Number(process.env.ZAMBAHOLA_CALIBRATION_TARGET ?? 0.65);
     const hitRate = this.getHitRate();
-    return Number((1 - Math.abs(0.65 - hitRate)).toFixed(4));
+    return Number((1 - Math.abs(target - hitRate)).toFixed(4));
   }
 
   private evaluate(
@@ -91,7 +88,10 @@ export class Evaluator {
   ): PredictionEvaluation {
     const { priceAtPrediction, direction } = prediction;
     const change = priceAtHorizon - priceAtPrediction;
-    const band = computeHitBand(priceAtPrediction);
+    // Use the same volatility-aware band as the strategy/weight feedback in
+    // agent-core so overall hit metrics and per-strategy attribution agree.
+    const volatility = prediction.meta?.features?.volatility;
+    const band = computeHitBand(priceAtPrediction, volatility);
 
     const predictionHit = isPredictionHit(direction, change, band);
 

@@ -1,7 +1,7 @@
-import { readFile, writeFile, mkdir, appendFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdir, appendFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readJsonSafe, writeJsonAtomic } from "../storage/json-io.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const WEIGHTS_FILE = join(pkgRoot, "data", "learning", "strategy-weights.json");
@@ -17,14 +17,12 @@ export async function loadStrategyWeights(
   const base: StrategyWeights = {};
   for (const id of strategyIds) base[id] = DEFAULT_WEIGHT;
 
-  if (!existsSync(WEIGHTS_FILE)) return base;
-  try {
-    const raw = JSON.parse(await readFile(WEIGHTS_FILE, "utf8")) as StrategyWeights;
+  const raw = await readJsonSafe<StrategyWeights>(WEIGHTS_FILE);
+  if (raw) {
     for (const id of strategyIds) {
-      if (typeof raw[id] === "number" && raw[id] > 0) base[id] = raw[id];
+      const v = raw[id];
+      if (typeof v === "number" && v > 0) base[id] = v;
     }
-  } catch {
-    /* use defaults */
   }
   return base;
 }
@@ -45,8 +43,7 @@ export async function recordStrategyOutcome(
     );
   }
 
-  await mkdir(dirname(WEIGHTS_FILE), { recursive: true });
-  await writeFile(WEIGHTS_FILE, JSON.stringify(weights, null, 2), "utf8");
+  await writeJsonAtomic(WEIGHTS_FILE, weights);
   return weights;
 }
 

@@ -57,10 +57,9 @@ export function computeLatentDirectionalSkew(
     }
   }
 
-  const directionalAgreement =
-    candidate && candidate !== "range"
-      ? computeDirectionalAgreement(votes, candidate)
-      : 0;
+  const directionalAgreement = candidate
+    ? computeDirectionalAgreement(votes, candidate)
+    : 0;
 
   return {
     candidate,

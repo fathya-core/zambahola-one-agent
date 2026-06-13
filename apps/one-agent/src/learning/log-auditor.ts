@@ -145,7 +145,12 @@ function dominantVoters(meta?: PredictionMeta, direction?: string): string[] {
     .map((v) => `${v.strategyId}(${v.reason.slice(0, 20)})`);
 }
 
-function buildInsights(report: Omit<LogAuditReport, "insightsAr" | "cleanup">): string[] {
+function buildInsights(
+  report: Omit<
+    LogAuditReport,
+    "insightsAr" | "cleanup" | "weightsChanged" | "mlReset" | "mlpReset"
+  >,
+): string[] {
   const lines: string[] = [];
   const s = report.summary;
 

@@ -21,18 +21,30 @@ export class FastTickFeed implements MarketFeed {
   private tickSeq = 0;
   private readonly intervalMs: number;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private stopDepth: (() => void) | null = null;
+  private stopped = false;
 
   constructor(intervalMs = Number(process.env.ZAMBAHOLA_TICK_MS ?? 400)) {
     this.intervalMs = Math.max(200, Math.min(2000, intervalMs));
   }
 
   start(): void {
+    this.stopped = false;
+    this.connect();
+  }
+
+  /** Idempotent: tears down any existing connection/timers before reconnecting. */
+  private connect(): void {
+    if (this.stopped) return;
+    this.teardownConnection();
+
     if (process.env.ZAMBAHOLA_FAST_LOB !== "0") {
       this.stopDepth = startDepthPoller(1500);
     }
-    this.ws = new WebSocket(WS_URL);
-    this.ws.on("message", (raw) => {
+    const ws = new WebSocket(WS_URL);
+    this.ws = ws;
+    ws.on("message", (raw) => {
       try {
         const msg = JSON.parse(raw.toString()) as {
           p?: string;
@@ -45,24 +57,48 @@ export class FastTickFeed implements MarketFeed {
           this.pendingQty += Number(msg.q ?? 0);
           this.pendingTradeMs = Number(msg.T ?? msg.E ?? 0) || 0;
         }
-      } catch {
-        /* */
+      } catch (err) {
+        console.warn(`[zambahola] fast-tick parse failed: ${String(err)}`);
       }
     });
-    this.ws.on("close", () => {
+    ws.on("close", () => {
+      // Only this socket should schedule a reconnect, and never after stop().
+      if (this.ws !== ws || this.stopped) return;
       this.ws = null;
-      setTimeout(() => this.start(), 3000);
+      this.scheduleReconnect();
+    });
+    ws.on("error", (err) => {
+      console.warn(`[zambahola] fast-tick ws error: ${String(err)}`);
     });
     this.timer = setInterval(() => this.emitTick(), this.intervalMs);
   }
 
-  stop(): void {
-    this.stopDepth?.();
-    this.stopDepth = null;
+  private scheduleReconnect(): void {
+    if (this.stopped || this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, 3000);
+  }
+
+  /** Clears timers, depth poller and socket without changing the stopped flag. */
+  private teardownConnection(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    this.ws?.close();
-    this.ws = null;
+    this.stopDepth?.();
+    this.stopDepth = null;
+    if (this.ws) {
+      this.ws.removeAllListeners();
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.teardownConnection();
   }
 
   onTick(handler: (tick: MarketTick) => void): void {

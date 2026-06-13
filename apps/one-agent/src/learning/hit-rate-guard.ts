@@ -60,7 +60,11 @@ export function recordHit(
   const floor =
     guardMetric === "directional" ? DIR_FLOOR : FLOOR;
   const minSamples = guardMetric === "directional" ? 15 : 20;
-  const belowFloor = recentDirectional.length >= minSamples && rolling < floor;
+  // Gate on the sample count of the metric actually being guarded, otherwise
+  // the overall-floor guard never fires when directional signals are sparse.
+  const sampleCount =
+    guardMetric === "directional" ? recentDirectional.length : recentOverall.length;
+  const belowFloor = sampleCount >= minSamples && rolling < floor;
 
   if (isRecoveryMode() && stabilizeMode) {
     stabilizeMode = false;

@@ -1,15 +1,15 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   featuresToArray,
   type FeatureVector,
   directionFromScore,
-  FEATURE_DIM,
+  INPUT_DIM,
 } from "../features/index.js";
 import type { PredictionDirection } from "../types.js";
 import { safeProb, safeScore } from "../learning/safe-prob.js";
+import { readJsonSafe, writeJsonAtomic } from "../storage/json-io.js";
+import { sigmoid } from "./math-utils.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const GBM_FILE = join(pkgRoot, "data", "learning", "gbm-trees.json");
@@ -29,28 +29,27 @@ export class GBMModel {
   private samples = 0;
 
   async load(): Promise<void> {
-    if (!existsSync(GBM_FILE)) return;
-    try {
-      const d = JSON.parse(await readFile(GBM_FILE, "utf8")) as {
-        trees: Stump[];
-        samples: number;
-      };
-      if (d.trees?.length) {
-        this.trees = d.trees;
-        this.samples = d.samples ?? 0;
-      }
-    } catch {
-      /* */
+    const d = await readJsonSafe<{ trees?: Stump[]; samples?: number }>(GBM_FILE);
+    if (!d) return;
+    if (!Array.isArray(d.trees)) return;
+    if (d.trees.length === 0) {
+      this.samples = d.samples ?? 0;
+      return;
     }
+    if (!d.trees.every(isValidStump)) {
+      // Corrupt trees (NaN / bad indices) — drop them, keep sample count.
+      console.warn("[zambahola] GBM trees corrupt, resetting to empty");
+      this.trees = [];
+      this.samples = d.samples ?? 0;
+      await this.save();
+      return;
+    }
+    this.trees = d.trees;
+    this.samples = d.samples ?? 0;
   }
 
   async save(): Promise<void> {
-    await mkdir(dirname(GBM_FILE), { recursive: true });
-    await writeFile(
-      GBM_FILE,
-      JSON.stringify({ trees: this.trees, samples: this.samples }, null, 2),
-      "utf8",
-    );
+    await writeJsonAtomic(GBM_FILE, { trees: this.trees, samples: this.samples });
   }
 
   predict(f: FeatureVector): { score: number; direction: PredictionDirection; prob: number } {
@@ -94,12 +93,29 @@ export class GBMModel {
   }
 }
 
+function isValidStump(t: unknown): t is Stump {
+  if (!t || typeof t !== "object") return false;
+  const s = t as Record<string, unknown>;
+  return (
+    typeof s.featureIdx === "number" &&
+    Number.isInteger(s.featureIdx) &&
+    s.featureIdx >= 0 &&
+    s.featureIdx < INPUT_DIM &&
+    typeof s.threshold === "number" &&
+    Number.isFinite(s.threshold) &&
+    typeof s.leftValue === "number" &&
+    Number.isFinite(s.leftValue) &&
+    typeof s.rightValue === "number" &&
+    Number.isFinite(s.rightValue)
+  );
+}
+
 function fitStump(x: number[], residual: number): Stump {
   let bestIdx = 1;
   let bestThr = 0;
   let bestErr = Infinity;
   const thresholds = [-0.35, -0.15, 0, 0.15, 0.35];
-  for (let idx = 1; idx < Math.min(FEATURE_DIM, x.length); idx++) {
+  for (let idx = 1; idx < Math.min(INPUT_DIM, x.length); idx++) {
     for (const thr of thresholds) {
       const left = residual * (x[idx]! <= thr ? 1 : 0);
       const right = residual * (x[idx]! > thr ? 1 : 0);
@@ -117,12 +133,6 @@ function fitStump(x: number[], residual: number): Stump {
     leftValue: LR * residual,
     rightValue: -LR * residual,
   };
-}
-
-function sigmoid(z: number): number {
-  if (z > 20) return 1;
-  if (z < -20) return 0;
-  return 1 / (1 + Math.exp(-z));
 }
 
 export { GBM_FILE };
