@@ -2,16 +2,18 @@ import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FEATURE_DIM, INPUT_DIM } from "../features/index.js";
+import { INPUT_DIM } from "../features/index.js";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 export const ML_WEIGHTS_FILE = join(pkgRoot, "data", "learning", "ml-weights.json");
 export const MLP_WEIGHTS_FILE = join(pkgRoot, "data", "learning", "mlp-weights.json");
 
-// One weight per input dimension (index 0 = bias term, then the 18 features).
+// One weight per input dimension (index 0 = bias term, then the 24 features).
+// Last 6 are the v0.8 depth features (ret20, deepImbalance, bookImbalanceDelta,
+// vwapDevNorm, oiChangeNorm, volAccel) — order-flow imbalance leans positive (up).
 export const ML_DEFAULT_WEIGHTS = [
   0, 0.4, 0.25, 0.15, -0.1, -0.2, 0.35, -0.12, 0.2, 0.28, 0.38, -0.06, 0.3, 0.25, 0.2, 0.15, 0.1,
-  0.05, 0.05,
+  0.05, 0.05, 0.1, 0.3, 0.3, -0.1, 0.05, 0,
 ];
 
 const MLP_H1 = 16;
@@ -62,13 +64,15 @@ export function sumAbsNumbers(values: unknown): number {
 
 export function normalizeMlWeights(weights: unknown): number[] | null {
   if (!Array.isArray(weights)) return null;
-  // Migrate legacy 18-length weights (pre bias/timeCos fix) by padding to
-  // INPUT_DIM so learned weights are preserved instead of reset.
-  let arr = weights;
-  if (arr.length === FEATURE_DIM && INPUT_DIM === FEATURE_DIM + 1) {
-    arr = [...arr, 0];
+  // Migrate older/shorter weight vectors by padding new feature slots with 0,
+  // or truncating longer ones, so previously-learned weights stay aligned to
+  // their (appended-at-end) feature indices instead of being reset.
+  let arr = weights.slice();
+  if (arr.length < INPUT_DIM) {
+    arr = [...arr, ...new Array(INPUT_DIM - arr.length).fill(0)];
+  } else if (arr.length > INPUT_DIM) {
+    arr = arr.slice(0, INPUT_DIM);
   }
-  if (arr.length !== INPUT_DIM) return null;
   return arr.map((w) => {
     if (w === null || w === undefined || !Number.isFinite(w)) return 0;
     return w;

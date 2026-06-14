@@ -1,5 +1,6 @@
 import type { PredictionDirection } from "../types.js";
 import { getOrderBook } from "../market-feed/orderbook.js";
+import { getLobSeries } from "../market-feed/lob-history.js";
 import { getMarketSignals, signalsToFeatures } from "../market-signals/index.js";
 import { localHourFraction } from "../lib/time-display.js";
 import { WelfordWindow } from "../lib/welford.js";
@@ -25,6 +26,15 @@ export interface FeatureVector {
   volumeNorm: number;
   timeSin: number;
   timeCos: number;
+  // v0.8 depth features (appended at end so existing model weights stay aligned).
+  // Order-book / microstructure features dominate short-horizon crypto direction
+  // (research: ~80% of predictive power), so these are the high-value additions.
+  ret20: number; // multi-timeframe momentum (longer lookback)
+  deepImbalance: number; // top-20 LOB depth imbalance
+  bookImbalanceDelta: number; // order-flow imbalance momentum (change in pressure)
+  vwapDevNorm: number; // VWAP-to-mid deviation
+  oiChangeNorm: number; // open-interest change
+  volAccel: number; // short vs long volatility ratio (regime acceleration)
 }
 
 export function extractFeatures(
@@ -84,6 +94,42 @@ export function extractFeatures(
   const timeSin = Math.sin((hour / 24) * Math.PI * 2);
   const timeCos = Math.cos((hour / 24) * Math.PI * 2);
 
+  // --- v0.8 depth features ---
+  const ret20 = prices.length > 20 ? ret(20) : 0;
+
+  // Deep (top-20) order-book imbalance — already in [-1,1].
+  const deepImbalance = Math.max(-1, Math.min(1, book?.imbalance20 ?? book?.imbalance ?? 0));
+
+  // Order-flow imbalance momentum: change in book pressure over the LOB history.
+  const lobImb = getLobSeries().imbalance;
+  let bookImbalanceDelta = 0;
+  if (lobImb.length >= 8) {
+    const k = 4;
+    const recent = avg(lobImb.slice(-k));
+    const prev = avg(lobImb.slice(-2 * k, -k));
+    bookImbalanceDelta = clamp(-1, 1, (recent - prev) * 3);
+  }
+
+  // VWAP-to-mid deviation (mean-reversion / pressure signal).
+  const vwN = Math.min(20, prices.length);
+  let pv = 0;
+  let vv = 0;
+  for (let i = prices.length - vwN; i < prices.length; i++) {
+    const w = volumes[i] ?? 1;
+    pv += prices[i]! * w;
+    vv += w;
+  }
+  const vwap = vv > 0 ? pv / vv : p;
+  const vwapDevNorm = clamp(-1, 1, ((p - vwap) / (vwap || 1)) * 2000);
+
+  // Open-interest change (derivatives flow).
+  const oiChange = getMarketSignals().openInterestChange ?? 0;
+  const oiChangeNorm = clamp(-1, 1, oiChange * 50);
+
+  // Volatility acceleration: short-window vol vs the 10-tick vol.
+  const shortVol = returns.length >= 5 ? stdOf(returns.slice(-5)) : vol;
+  const volAccel = clamp(-1, 1, vol > 0 ? shortVol / vol - 1 : 0);
+
   return {
     ret1: ret(1),
     ret5: prices.length > 5 ? ret(5) : 0,
@@ -103,7 +149,27 @@ export function extractFeatures(
     volumeNorm,
     timeSin,
     timeCos,
+    ret20,
+    deepImbalance,
+    bookImbalanceDelta,
+    vwapDevNorm,
+    oiChangeNorm,
+    volAccel,
   };
+}
+
+function avg(arr: number[]): number {
+  return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+}
+
+function stdOf(arr: number[]): number {
+  if (arr.length === 0) return 0;
+  const m = avg(arr);
+  return Math.sqrt(arr.reduce((s, r) => s + (r - m) ** 2, 0) / arr.length);
+}
+
+function clamp(lo: number, hi: number, v: number): number {
+  return Math.max(lo, Math.min(hi, Number.isFinite(v) ? v : 0));
 }
 
 function computeMacdHistNorm(prices: number[]): number {
@@ -141,11 +207,17 @@ export function featuresToArray(f: FeatureVector): number[] {
     f.volumeNorm,
     f.timeSin,
     f.timeCos,
+    f.ret20,
+    f.deepImbalance,
+    f.bookImbalanceDelta,
+    f.vwapDevNorm,
+    f.oiChangeNorm,
+    f.volAccel,
   ];
 }
 
 /** Number of named features in FeatureVector. */
-export const FEATURE_DIM = 18;
+export const FEATURE_DIM = 24;
 
 /**
  * Length of the model input vector produced by featuresToArray():
@@ -184,5 +256,11 @@ export function normalizeFeatureVector(
     volumeNorm: n(f.volumeNorm),
     timeSin: n(f.timeSin),
     timeCos: n(f.timeCos),
+    ret20: n(f.ret20),
+    deepImbalance: n(f.deepImbalance),
+    bookImbalanceDelta: n(f.bookImbalanceDelta),
+    vwapDevNorm: n(f.vwapDevNorm),
+    oiChangeNorm: n(f.oiChangeNorm),
+    volAccel: n(f.volAccel),
   };
 }

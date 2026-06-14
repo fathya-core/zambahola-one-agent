@@ -338,11 +338,16 @@ export class AgentCore {
         });
 
         if (evaluatedPred.meta?.features && !shouldPauseMlTrain()) {
+          // Realized market direction at the horizon (independent of whether the
+          // agent abstained) — used to train the directional models truthfully.
+          const realizedDirection =
+            change > band ? "up" : change < -band ? "down" : "range";
           await this.predictionEngine.onEvaluationHit(
             evaluatedPred.meta.features,
             evaluation.direction,
             evaluation.predictionHit,
             evaluatedPred.confidence,
+            realizedDirection,
           );
         }
 

@@ -66,6 +66,30 @@ flowchart LR
 - **Tooling**: Vitest unit tests, ESLint + Prettier, stricter `tsconfig`, CI
   (`.github/workflows/verify.yml`).
 
+## 3b. v0.8 iteration (model depth + calibration + spiral/sign fixes)
+
+Grounded in 2026 microstructure research (order-book features carry ~80% of
+short-horizon predictive power) and isotonic calibration best practice:
+
+- **6 depth features appended** (`features/index.ts`): `ret20`, `deepImbalance`
+  (top-20 LOB), `bookImbalanceDelta` (order-flow imbalance momentum),
+  `vwapDevNorm`, `oiChangeNorm`, `volAccel`. `FEATURE_DIM` 18 → 24 (one central
+  constant; ML weights auto-migrate, MLP reshapes, GBM indices stay valid).
+- **Broke the abstention death spiral**: models now train on the *realized*
+  market direction at the horizon (up=1/down=0, range skipped) instead of the
+  abstaining prediction's hit/miss — which had collapsed MLP to a permanent 0.5.
+- **Fixed a blend sign bug** (`blendMega`): DOWN votes from ML/MLP/GBM were being
+  inverted into UP pushes, crushing directional accuracy in downtrends. Now uses
+  signed model deltas directly.
+- **Isotonic (PAVA) calibration** (`calibration.ts`): non-parametric monotonic
+  recalibration over 780k+ samples, replacing the fixed blend; reliability curve
+  + miscalibration (MCB) exposed on the dashboard and `/api/calibration`.
+- **Test coverage**: 69 unit tests (strategies, hit-eval, calibration, blend,
+  features, models).
+
+Verified live: MLP moved off 0.5 (alive), models produce differentiated probs,
+gates pass; the agent correctly abstains in flat/conflicting markets.
+
 ## 4. Learning phases (resume anytime)
 
 | Phase | Goal | Command | Artifact |

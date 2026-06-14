@@ -141,6 +141,8 @@ async function route(
       metaPnl: metaPnl.getState(),
       calibration: {
         score: cal.getCalibrationScore(),
+        miscalibration: cal.getMiscalibration(),
+        samples: cal.getTotalSamples(),
         curve: cal.getReliabilityCurve(),
       },
       persistsToDisk: true,
@@ -215,6 +217,7 @@ async function route(
     const cal = agent.predictionEngine.calibrator;
     return sendJson(res, 200, {
       score: cal.getCalibrationScore(),
+      miscalibration: cal.getMiscalibration(),
       samples: cal.getTotalSamples(),
       curve: cal.getReliabilityCurve(),
     });

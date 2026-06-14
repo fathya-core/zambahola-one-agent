@@ -65,6 +65,7 @@ export async function runMegaTrain(bars = 3000): Promise<MegaTrainResult> {
     const vol = pred.meta?.features?.volatility ?? 0.0003;
     const band = computeHitBand(tick.price, vol);
     const hit = isPredictionHit(pred.direction, change, band);
+    const realizedDirection = change > band ? "up" : change < -band ? "down" : "range";
 
     if (pred.meta?.features) {
       await engine.onEvaluationHit(
@@ -72,6 +73,7 @@ export async function runMegaTrain(bars = 3000): Promise<MegaTrainResult> {
         pred.direction,
         hit,
         pred.confidence,
+        realizedDirection,
       );
       trainSteps += 1;
     }

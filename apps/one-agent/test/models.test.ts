@@ -34,6 +34,12 @@ const upFeatures: FeatureVector = {
   volumeNorm: 0.4,
   timeSin: 0.5,
   timeCos: 0.5,
+  ret20: 0.4,
+  deepImbalance: 0.5,
+  bookImbalanceDelta: 0.4,
+  vwapDevNorm: 0.3,
+  oiChangeNorm: 0.2,
+  volAccel: 0.1,
 };
 
 describe("feature dimensions", () => {

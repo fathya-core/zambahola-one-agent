@@ -441,14 +441,21 @@ export class PredictionEngine {
     direction: PredictionDirection,
     hit: boolean,
     rawConfidence: number,
+    realizedDirection?: PredictionDirection,
   ): Promise<void> {
     if (features && process.env.ZAMBAHOLA_DL_LIVE_TRAIN !== "0") {
-      const label =
-        direction === "up" ? (hit ? 1 : 0) : direction === "down" ? (hit ? 0 : 1) : 0.5;
-      const fv = features as FeatureVector;
-      await this.ml.train(fv, label);
-      await this.mlp.train(fv, label);
-      await this.gbm.train(fv, label);
+      // Train the directional models on what the market ACTUALLY did, not on
+      // whether the (often abstaining) prediction hit. Training on the
+      // realized move avoids the "everything abstains -> label 0.5 -> models
+      // collapse to 0.5 -> gates block -> everything abstains" death spiral.
+      // Range outcomes are skipped so the models keep a crisp up/down signal.
+      const label = realizedLabel(direction, hit, realizedDirection);
+      if (label !== null) {
+        const fv = features as FeatureVector;
+        await this.ml.train(fv, label);
+        await this.mlp.train(fv, label);
+        await this.gbm.train(fv, label);
+      }
     }
     this.calibrator.record(rawConfidence, hit);
     await this.calibrator.save();
@@ -467,7 +474,25 @@ export class PredictionEngine {
   }
 }
 
-function blendMega(
+/**
+ * Training label for the directional models.
+ * - If we know the realized market direction, use it (up=1, down=0, range=skip).
+ * - Otherwise fall back to the legacy hit-based label.
+ */
+function realizedLabel(
+  predicted: PredictionDirection,
+  hit: boolean,
+  realized?: PredictionDirection,
+): number | null {
+  if (realized !== undefined) {
+    if (realized === "up") return 1;
+    if (realized === "down") return 0;
+    return null; // range -> don't poison the directional models
+  }
+  return predicted === "up" ? (hit ? 1 : 0) : predicted === "down" ? (hit ? 0 : 1) : 0.5;
+}
+
+export function blendMega(
   eDir: PredictionDirection,
   eConf: number,
   lDir: PredictionDirection,
@@ -479,14 +504,19 @@ function blendMega(
   lobDir: PredictionDirection,
   lobConf: number,
 ): { direction: PredictionDirection; confidence: number } {
+  // s() maps a (direction, positive-confidence) pair to a signed contribution.
   const s = (d: PredictionDirection, w: number) =>
     d === "up" ? w : d === "down" ? -w : 0;
+  // Model probs are already signed around 0.5 (>0.5 up, <0.5 down), so the
+  // signed contribution is (prob-0.5)*2 directly. (Wrapping these in s() would
+  // double-apply the sign and invert every DOWN model vote into an UP push.)
+  const modelSigned = (prob: number) => (prob - 0.5) * 2;
 
   const combined =
     s(eDir, eConf) * 0.28 +
-    s(lDir, (lProb - 0.5) * 2) * 0.2 +
-    s(mDir, (mProb - 0.5) * 2) * 0.22 +
-    s(gDir, (gProb - 0.5) * 2) * 0.18 +
+    modelSigned(lProb) * 0.2 +
+    modelSigned(mProb) * 0.22 +
+    modelSigned(gProb) * 0.18 +
     s(lobDir, lobConf) * 0.12;
 
   let direction: PredictionDirection = "range";

@@ -11,6 +11,27 @@ function formatCountdown(ms) {
   return s + "s";
 }
 
+// Text reliability diagram: predicted vs empirical (P→E) with isotonic calibrated value.
+function renderReliability(cal) {
+  if (!cal) return "—";
+  const mcb = cal.miscalibration != null ? (cal.miscalibration * 100).toFixed(1) + "%" : "—";
+  const score = cal.score != null ? (cal.score * 100).toFixed(1) + "%" : "—";
+  const header =
+    `معايرة الثقة (isotonic)\n` +
+    `جودة: ${score} · سوء المعايرة: ${mcb} · عينات: ${cal.samples ?? 0}\n` +
+    `pred → emp | calib   (n)\n`;
+  const rows = (cal.curve ?? [])
+    .filter((b) => b.count > 0)
+    .map((b) => {
+      const bar = "█".repeat(Math.round((b.empirical ?? 0) * 12)).padEnd(12, "·");
+      const p = (b.predicted * 100).toFixed(0).padStart(3);
+      const e = ((b.empirical ?? 0) * 100).toFixed(0).padStart(3);
+      const c = ((b.calibrated ?? 0) * 100).toFixed(0).padStart(3);
+      return `${p}% → ${e}% | ${c}% ${bar} (${b.count})`;
+    });
+  return header + (rows.length ? rows.join("\n") : "لا توجد بيانات بعد");
+}
+
 function renderDualAgent(dual, logAudit, analyst, learn) {
   const pills = $("dual-agent-pills");
   if (!pills) return;
@@ -207,11 +228,7 @@ async function refresh() {
       analyst.summaryAr +
       "\n\n" +
       (analyst.bulletsAr ?? []).map((l) => "• " + l).join("\n");
-    $("calibration").textContent = JSON.stringify(
-      { score: cal.score, samples: cal.samples, curve: cal.curve },
-      null,
-      2,
-    );
+    $("calibration").textContent = renderReliability(cal);
 
     const insights = learn.patternInsightsAr ?? [];
     $("learning").textContent =

@@ -20,12 +20,18 @@ const zeroFeatures: FeatureVector = {
   volumeNorm: 0,
   timeSin: 0,
   timeCos: 0,
+  ret20: 0,
+  deepImbalance: 0,
+  bookImbalanceDelta: 0,
+  vwapDevNorm: 0,
+  oiChangeNorm: 0,
+  volAccel: 0,
 };
 
 describe("features", () => {
   it("featuresToArray prepends a bias term", () => {
     const arr = featuresToArray(zeroFeatures);
-    // 18 features + 1 bias = 19
+    // FEATURE_DIM features + 1 bias term
     expect(arr.length).toBe(FEATURE_DIM + 1);
     expect(arr[0]).toBe(1);
   });
