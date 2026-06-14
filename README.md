@@ -11,6 +11,11 @@ Goal: reach a directional hit rate ≥ ~58% before enabling any real keys.
 > Operational runbook (feeds, phase5 automation, Windows/OMAR-PC): see
 > [AGENTS.md](AGENTS.md). Full command reference: [docs/COMMANDS.md](docs/COMMANDS.md).
 > Architecture & next steps: [docs/ROADMAP.md](docs/ROADMAP.md).
+>
+> **ZAMBAHOLA BETA** ([zambahola-beta/](zambahola-beta/README.md)) is the new
+> offline, validated ML core (Python): data -> features -> labels -> model
+> (purged walk-forward) -> cost-aware backtest, with an honest
+> "edge-after-costs" verdict before any real trading.
 
 ## Requirements
 
