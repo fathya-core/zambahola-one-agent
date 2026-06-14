@@ -1,6 +1,6 @@
 {
-  "ts": "2026-06-14T06:41:11.814Z",
-  "localTs": "2026-06-14 09:41:11",
+  "ts": "2026-06-14T06:42:51.614Z",
+  "localTs": "2026-06-14 09:42:51",
   "timezone": "Asia/Riyadh",
   "hostname": "OMAR-PC",
   "agentUrl": "http://127.0.0.1:8787",
@@ -13,15 +13,15 @@
     "horizonSec": 45,
     "port": 8787,
     "startedAt": 1781418940699,
-    "tickCount": 356,
+    "tickCount": 425,
     "time": {
       "timezone": "Asia/Riyadh",
-      "nowUtc": "2026-06-14T06:41:11.807Z",
-      "nowLocal": "١٤‏/٠٦‏/٢٠٢٦، ٠٩:٤١:١١",
+      "nowUtc": "2026-06-14T06:42:51.607Z",
+      "nowLocal": "١٤‏/٠٦‏/٢٠٢٦، ٠٩:٤٢:٥١",
       "startedAtLocal": "١٤‏/٠٦‏/٢٠٢٦، ٠٩:٣٥:٤٠",
-      "lastTickLocal": "١٤‏/٠٦‏/٢٠٢٦، ٠٩:٤١:١٠",
-      "uptimeSec": 331,
-      "uptimeLabel": "5د 31ث",
+      "lastTickLocal": "١٤‏/٠٦‏/٢٠٢٦، ٠٩:٤٢:٥١",
+      "uptimeSec": 430,
+      "uptimeLabel": "7د 10ث",
       "lastTickAgeSec": 0
     },
     "hybridAuto": true,
@@ -30,9 +30,9 @@
     "horizonSignalsSec": 45
   },
   "metrics": {
-    "tickCount": 355,
-    "droppedTicks": 710,
-    "predictionCount": 355,
+    "tickCount": 424,
+    "droppedTicks": 968,
+    "predictionCount": 424,
     "hitRate": 1,
     "directionalHitRate": 0,
     "directionalCount": 0,
@@ -44,28 +44,28 @@
     "confidenceCalibration": 0.65,
     "maxDrawdown": 0,
     "openPosition": null,
-    "lastPrice": 64272.15,
+    "lastPrice": 64277.41,
     "lastPrediction": {
-      "predictionId": "pred-3e836ee9-5f70-4fc1-9193-1d7a824f7f4e",
-      "tickId": "ft-1064-a6f39d21",
+      "predictionId": "pred-ce49c1df-329f-478b-b4eb-b0e7efd83bc9",
+      "tickId": "ft-1387-04a9e0a8",
       "symbol": "BTCUSDT",
       "direction": "range",
       "confidence": 0.48,
       "horizonSec": 45,
-      "priceAtPrediction": 64272.15,
-      "timestamp": 1781419269988,
+      "priceAtPrediction": 64277.41,
+      "timestamp": 1781419368980,
       "meta": {
         "engine": "hybrid_v7_max",
         "accuracyMode": "max",
         "qualityTier": "abstain",
         "strategyCount": 17,
-        "agreement": 0.5294,
+        "agreement": 0.7059,
         "strategyVotes": [
           {
             "strategyId": "momentum",
-            "direction": "up",
-            "confidence": 0.8681491316272352,
-            "reason": "+0.040% over 8 ticks"
+            "direction": "range",
+            "confidence": 0.52,
+            "reason": "flat momentum"
           },
           {
             "strategyId": "mean_reversion",
@@ -76,8 +76,8 @@
           {
             "strategyId": "rsi",
             "direction": "down",
-            "confidence": 0.7923054070112465,
-            "reason": "RSI overbought 91.4"
+            "confidence": 0.8912177985972971,
+            "reason": "RSI overbought 99.3"
           },
           {
             "strategyId": "ema_cross",
@@ -93,26 +93,26 @@
           },
           {
             "strategyId": "bollinger",
-            "direction": "range",
-            "confidence": 0.52,
-            "reason": "inside bands"
+            "direction": "down",
+            "confidence": 0.5500000387025423,
+            "reason": "at/above upper band"
           },
           {
             "strategyId": "macd",
-            "direction": "up",
-            "confidence": 0.9,
-            "reason": "MACD bullish hist=2.58"
+            "direction": "range",
+            "confidence": 0.5,
+            "reason": "MACD neutral"
           },
           {
             "strategyId": "order_imbalance",
             "direction": "up",
-            "confidence": 0.8258326864826693,
-            "reason": "bid pressure 27.6%"
+            "confidence": 0.88,
+            "reason": "bid pressure 68.7%"
           },
           {
             "strategyId": "funding_fade",
             "direction": "up",
-            "confidence": 0.574432,
+            "confidence": 0.574428,
             "reason": "crowded shorts pay funding"
           },
           {
@@ -141,9 +141,9 @@
           },
           {
             "strategyId": "premium_momentum",
-            "direction": "down",
-            "confidence": 0.7,
-            "reason": "discount+price aligned down"
+            "direction": "range",
+            "confidence": 0.48,
+            "reason": "mixed premium"
           },
           {
             "strategyId": "open_interest",
@@ -159,47 +159,47 @@
           },
           {
             "strategyId": "tick_momentum",
-            "direction": "down",
-            "confidence": 0.5724825215898287,
-            "reason": "3-tick down streak"
+            "direction": "range",
+            "confidence": 0.48,
+            "reason": "choppy ticks"
           }
         ],
         "weights": {
-          "momentum": 3,
-          "mean_reversion": 3,
-          "rsi": 0.3189,
-          "ema_cross": 3,
-          "volatility_regime": 3,
-          "bollinger": 3,
-          "macd": 0.674,
-          "order_imbalance": 0.25,
-          "funding_fade": 0.25,
-          "volume_breakout": 3,
-          "long_short_extreme": 0.25,
-          "atr_breakout": 2.9232,
-          "vwap_proxy": 3,
-          "premium_momentum": 2.3244,
-          "open_interest": 3,
-          "session_bias": 3,
-          "tick_momentum": 3
+          "momentum": 3.5,
+          "mean_reversion": 3.5,
+          "rsi": 0.35,
+          "ema_cross": 3.5,
+          "volatility_regime": 3.5,
+          "bollinger": 3.4820341884000006,
+          "macd": 0.5356240000000001,
+          "order_imbalance": 0.35,
+          "funding_fade": 0.35,
+          "volume_breakout": 3.5,
+          "long_short_extreme": 0.35,
+          "atr_breakout": 2.7600000000000002,
+          "vwap_proxy": 3.5,
+          "premium_momentum": 2.6876880000000005,
+          "open_interest": 3.5,
+          "session_bias": 3.5,
+          "tick_momentum": 3.5
         },
         "regime": "range",
-        "gateReason": "range regime — reduced confidence | negative sentiment | agreement_0.5294_lt_0.56 | expert_lean_wait_models_0_need_2",
+        "gateReason": "range regime — reduced confidence | negative sentiment | model_voters_0 | expert_lean_wait_models_0_need_2",
         "expertReason": "expert_pass",
         "tierSVotes": 0,
-        "latentSTierUp": 4,
-        "latentSTierDown": 1,
+        "latentSTierUp": 2,
+        "latentSTierDown": 0,
         "latentPromoted": false,
         "expertLeanSkip": "expert_lean_wait_models_0_need_2",
         "expertLeanMinModels": 2,
         "expertMode": true,
-        "mlScore": -0.0062,
-        "mlProb": 0.4969,
+        "mlScore": -0.0076,
+        "mlProb": 0.4962,
         "mlpScore": 0,
         "mlpProb": 0.5,
         "gbmScore": -0.6586,
         "gbmProb": 0.1707,
-        "lobScore": 0.38030554447956705,
+        "lobScore": 0.4074015050647462,
         "lobReady": true,
         "mlSamples": 122970,
         "mlpSamples": 131595,
@@ -207,165 +207,165 @@
         "sentiment": -0.416,
         "sentimentLabel": "Extreme Fear",
         "features": {
-          "ret1": -4.6676493622646447e-7,
-          "ret5": -0.000028783022684110912,
-          "ret10": 0.0004336572168514989,
-          "volatility": 0.00012907736746487364,
-          "rsiNorm": 0.8276886512179945,
-          "momentumNorm": 0.0795372829068088,
-          "zScore": 1.2549642793972415,
+          "ret1": 1.5557567670810065e-7,
+          "ret5": 0.00006550163987488414,
+          "ret10": 0.000065657235933072,
+          "volatility": 0.00001969741655189743,
+          "rsiNorm": 0.9859484777556753,
+          "momentumNorm": 0.013100327974976829,
+          "zScore": 2,
           "sentiment": -0.416,
-          "agreement": 0.5294,
-          "bookImbalance": 0.2627020168081458,
-          "spreadBps": 0.0000155588372632554,
-          "macdHistNorm": 0.2591091712764429,
-          "fundingNorm": -0.048864000000000005,
-          "premiumNorm": -0.9813,
+          "agreement": 0.7059,
+          "bookImbalance": 0.48845986265874286,
+          "spreadBps": 0.000015557566460620598,
+          "macdHistNorm": -0.012270130451437527,
+          "fundingNorm": -0.048856,
+          "premiumNorm": -0.94962,
           "longShortNorm": 0.8698000000000001,
-          "volumeNorm": -0.9999247437606851,
-          "timeSin": 0.5699967625963032,
-          "timeCos": -0.8216469379421636
+          "volumeNorm": -0.7624569723155237,
+          "timeSin": 0.5664062369248332,
+          "timeCos": -0.8241261886220155
         },
         "metaLabelProb": 0.5,
         "metaTrust": true,
         "metaPnlProb": 0.5,
         "metaPnlEnter": true,
-        "analystSummaryAr": "بوابة: range regime — reduced confidence · بوابة: negative sentiment · اتفاق الاستراتيجيات غير كافٍ. · خبير ينتظر: نموذجين ML على الأقل قبل التداول. · هجين: إشارات دقيقة (ترند / تذبذب عالي)",
+        "analystSummaryAr": "بوابة: range regime — reduced confidence · بوابة: negative sentiment · نماذج ML ما اتفقت بقوة. · خبير ينتظر: نموذجين ML على الأقل قبل التداول. · هجين: إشارات دقيقة (ترند / تذبذب عالي)",
         "hybridProfile": "signals",
         "hybridSwitched": false,
         "hybridPendingRegime": null
       }
     },
     "lastDecision": {
-      "decisionId": "dec-80bb7ea5-f545-4571-b9c0-c057bf76d861",
-      "tickId": "ft-1064-a6f39d21",
-      "predictionId": "pred-3e836ee9-5f70-4fc1-9193-1d7a824f7f4e",
+      "decisionId": "dec-7263be22-04d7-42d5-a99a-bfd11d1f9765",
+      "tickId": "ft-1387-04a9e0a8",
+      "predictionId": "pred-ce49c1df-329f-478b-b4eb-b0e7efd83bc9",
       "action": "no_trade",
       "reason": "Range — stay flat",
-      "timestamp": 1781419270375
+      "timestamp": 1781419369397
     },
     "strategyStats": [
       {
         "strategyId": "momentum",
-        "hits": 323,
-        "total": 323,
-        "hitRate": 1,
+        "hits": 387,
+        "total": 394,
+        "hitRate": 0.9822,
         "weight": 3
       },
       {
         "strategyId": "mean_reversion",
-        "hits": 323,
-        "total": 323,
+        "hits": 394,
+        "total": 394,
         "hitRate": 1,
         "weight": 3
       },
       {
         "strategyId": "rsi",
-        "hits": 129,
-        "total": 323,
-        "hitRate": 0.3994,
-        "weight": 0.3189
+        "hits": 139,
+        "total": 394,
+        "hitRate": 0.3528,
+        "weight": 0.25
       },
       {
         "strategyId": "ema_cross",
-        "hits": 323,
-        "total": 323,
+        "hits": 394,
+        "total": 394,
         "hitRate": 1,
         "weight": 3
       },
       {
         "strategyId": "volatility_regime",
-        "hits": 323,
-        "total": 323,
+        "hits": 394,
+        "total": 394,
         "hitRate": 1,
         "weight": 3
       },
       {
         "strategyId": "bollinger",
-        "hits": 278,
-        "total": 323,
-        "hitRate": 0.8607,
+        "hits": 340,
+        "total": 394,
+        "hitRate": 0.8629,
         "weight": 3
       },
       {
         "strategyId": "macd",
-        "hits": 146,
-        "total": 323,
-        "hitRate": 0.452,
-        "weight": 0.674
+        "hits": 180,
+        "total": 394,
+        "hitRate": 0.4569,
+        "weight": 0.6117
       },
       {
         "strategyId": "order_imbalance",
-        "hits": 14,
-        "total": 323,
-        "hitRate": 0.0433,
+        "hits": 23,
+        "total": 394,
+        "hitRate": 0.0584,
         "weight": 0.25
       },
       {
         "strategyId": "funding_fade",
         "hits": 0,
-        "total": 323,
+        "total": 394,
         "hitRate": 0,
         "weight": 0.25
       },
       {
         "strategyId": "volume_breakout",
-        "hits": 286,
-        "total": 323,
-        "hitRate": 0.8854,
+        "hits": 347,
+        "total": 394,
+        "hitRate": 0.8807,
         "weight": 3
       },
       {
         "strategyId": "long_short_extreme",
         "hits": 0,
-        "total": 323,
+        "total": 394,
         "hitRate": 0,
         "weight": 0.25
       },
       {
         "strategyId": "atr_breakout",
-        "hits": 250,
-        "total": 323,
-        "hitRate": 0.774,
-        "weight": 2.9232
+        "hits": 310,
+        "total": 394,
+        "hitRate": 0.7868,
+        "weight": 3
       },
       {
         "strategyId": "vwap_proxy",
-        "hits": 323,
-        "total": 323,
-        "hitRate": 1,
+        "hits": 389,
+        "total": 394,
+        "hitRate": 0.9873,
         "weight": 3
       },
       {
         "strategyId": "premium_momentum",
-        "hits": 194,
-        "total": 323,
-        "hitRate": 0.6006,
-        "weight": 2.3244
+        "hits": 245,
+        "total": 394,
+        "hitRate": 0.6218,
+        "weight": 3
       },
       {
         "strategyId": "open_interest",
-        "hits": 323,
-        "total": 323,
+        "hits": 394,
+        "total": 394,
         "hitRate": 1,
         "weight": 3
       },
       {
         "strategyId": "session_bias",
-        "hits": 319,
-        "total": 323,
-        "hitRate": 0.9876,
+        "hits": 390,
+        "total": 394,
+        "hitRate": 0.9898,
         "weight": 3
       },
       {
         "strategyId": "tick_momentum",
-        "hits": 289,
-        "total": 323,
-        "hitRate": 0.8947,
+        "hits": 349,
+        "total": 394,
+        "hitRate": 0.8858,
         "weight": 3
       }
     ],
-    "ensembleAgreement": 0.5294,
+    "ensembleAgreement": 0.7059,
     "feedName": "fast_tick",
     "regime": "range",
     "sentimentScore": -0.416,
@@ -373,11 +373,11 @@
     "mlpSamples": 131595,
     "gbmSamples": 132840,
     "understandingScore": 0.7709,
-    "learningUpdates": 90444,
-    "liveEvaluations": 304206,
-    "sessionEvaluations": 320,
-    "sessionLogAudits": 2,
-    "sessionSkillApplies": 5,
+    "learningUpdates": 90466,
+    "liveEvaluations": 304277,
+    "sessionEvaluations": 391,
+    "sessionLogAudits": 3,
+    "sessionSkillApplies": 6,
     "rollingHitRate": 1,
     "directionalRollingHitRate": 0,
     "peakHitRate": 1,
@@ -391,34 +391,34 @@
     "intensiveLearn": false,
     "recoveryMode": true,
     "hitRecoverMode": true,
-    "updatedAt": 1781419270566
+    "updatedAt": 1781419370679
   },
   "analyst": {
     "summaryAr": "تحليل الوكيل: امتناع · نظام range",
     "bulletsAr": [
       "النظام السوقي: range",
-      "اتفاق الـ 17 استراتيجية: 70.6%",
+      "اتفاق الـ 17 استراتيجية: 76.5%",
       "أصوات S-tier (ترند/مايكرو): 0",
       "Meta-label ثقة: 50.0% → موثوق",
       "ML 50% · MLP 50% · GBM 17%",
       "السبب: بوابة: range regime — reduced confidence · بوابة: negative sentiment · نماذج ML ما اتفقت بقوة. · خبير ينتظر: نموذجين ML على الأقل قبل التداول.",
       "⏸ امتناع — الأفضل عدم الدخول.",
       "---",
-      "✅ نظام range: أداء جيد 66.2% (195728/295705)",
+      "✅ نظام range: أداء جيد 66.2% (195799/295776)",
       "⚠️ نظام trend_down: دقة ضعيفة 35.3% (674/1907) — راجع الامتناع أو الأوزان",
       "⚠️ نظام trend_up: دقة ضعيفة 41.3% (867/2101) — راجع الامتناع أو الأوزان",
       "⚠️ نظام high_vol: دقة ضعيفة 42.0% (193/460) — راجع الامتناع أو الأوزان",
       "--- مراجع السجل ---",
-      "📊 مراجعة السجل: 303 تقييم · hit شامل 100.0% · اتجاهي 0.0% (0 إشارة) · range 100.0%",
+      "📊 مراجعة السجل: 353 تقييم · hit شامل 100.0% · اتجاهي 0.0% (0 إشارة) · range 100.0%",
       "ℹ️ hit الشامل مرتفع لأن أغلب التنبؤات range والسعر هادئ — راقب directional hit فقط (هدف 58%+)",
-      "✅ نظام unknown: قوي 100.0% (51/51)",
-      "ℹ️ نظام range: hit تسمية range 100.0% (252/252) — مو دقة اتجاهية",
+      "✅ نظام unknown: قوي 100.0% (116/116)",
+      "ℹ️ نظام range: hit تسمية range 100.0% (237/237) — مو دقة اتجاهية",
       "--- مهارات طُبّقت ---",
       "✅ agent:patterns: يومية الأنماط حُدّثت على القرص",
       "✅ internal:pattern-boost: تعزيز أنماط نظام range",
       "📋 agent:import-hf-research: أُضيف agent:import-hf-research لطابور REMOTE-COMMANDS (شغّل remote-watcher)"
     ],
-    "updatedAt": 1781419271809,
+    "updatedAt": 1781419371610,
     "skillAppliedAr": [
       "✅ agent:patterns: يومية الأنماط حُدّثت على القرص",
       "✅ internal:pattern-boost: تعزيز أنماط نظام range",
@@ -428,32 +428,32 @@
     "dualAgent": {
       "primaryAgent": "live-learning",
       "secondaryAgent": "log-auditor + analyst-skill-apply",
-      "sessionEvaluations": 320,
-      "sessionLogAudits": 2,
-      "sessionSkillApplies": 5,
-      "totalLogAudits": 9427,
-      "lastLogAuditAt": 1781419239624,
-      "sessionUptimeSec": 331,
+      "sessionEvaluations": 391,
+      "sessionLogAudits": 3,
+      "sessionSkillApplies": 6,
+      "totalLogAudits": 9428,
+      "lastLogAuditAt": 1781419314660,
+      "sessionUptimeSec": 430,
       "auditEvery": 50,
       "analystApplyEvery": 50,
-      "nextAuditInEvals": 30,
-      "nextAnalystApplyInEvals": 30,
+      "nextAuditInEvals": 9,
+      "nextAnalystApplyInEvals": 9,
       "auditWarmedUp": true,
       "analystAutoApply": true,
       "directionalRolling": 0,
       "abstainRate": 1,
-      "statusAr": "الوكيلان نشطان — مراجعات الجلسة: 2"
+      "statusAr": "الوكيلان نشطان — مراجعات الجلسة: 3"
     },
     "logAuditSummary": {
-      "predictions": 280,
-      "evaluations": 303,
-      "hits": 303,
+      "predictions": 271,
+      "evaluations": 353,
+      "hits": 353,
       "misses": 0,
       "hitRate": 1,
       "directionalTotal": 0,
       "directionalHits": 0,
       "directionalHitRate": 0,
-      "abstainCount": 303,
+      "abstainCount": 353,
       "abstainRate": 1
     },
     "metaPnl": {
@@ -480,7 +480,7 @@
   },
   "calibration": {
     "score": 0.7922,
-    "samples": 782961,
+    "samples": 783032,
     "curve": [
       {
         "bucket": 0,
@@ -514,14 +514,14 @@
         "bucket": 4,
         "predicted": 0.45,
         "empirical": 0.8765,
-        "count": 474936,
+        "count": 475003,
         "gap": 0.4265
       },
       {
         "bucket": 5,
         "predicted": 0.55,
         "empirical": 0.7288,
-        "count": 162844,
+        "count": 162848,
         "gap": 0.1788
       },
       {
@@ -556,7 +556,7 @@
   },
   "learning": {
     "patternInsightsAr": [
-      "✅ نظام range: أداء جيد 66.2% (195728/295705)",
+      "✅ نظام range: أداء جيد 66.2% (195799/295776)",
       "⚠️ نظام trend_down: دقة ضعيفة 35.3% (674/1907) — راجع الامتناع أو الأوزان",
       "⚠️ نظام trend_up: دقة ضعيفة 41.3% (867/2101) — راجع الامتناع أو الأوزان",
       "⚠️ نظام high_vol: دقة ضعيفة 42.0% (193/460) — راجع الامتناع أو الأوزان",
@@ -600,27 +600,27 @@
       "lastProb": 0.0046
     },
     "directionalRollingHitRate": 0,
-    "logAudits": 9427,
+    "logAudits": 9428,
     "dualAgent": {
       "primaryAgent": "live-learning",
       "secondaryAgent": "log-auditor + analyst-skill-apply",
-      "sessionEvaluations": 320,
-      "sessionLogAudits": 2,
-      "sessionSkillApplies": 5,
-      "totalLogAudits": 9427,
-      "lastLogAuditAt": 1781419239624,
-      "sessionUptimeSec": 331,
+      "sessionEvaluations": 391,
+      "sessionLogAudits": 3,
+      "sessionSkillApplies": 6,
+      "totalLogAudits": 9428,
+      "lastLogAuditAt": 1781419314660,
+      "sessionUptimeSec": 430,
       "auditEvery": 50,
       "analystApplyEvery": 50,
-      "nextAuditInEvals": 30,
-      "nextAnalystApplyInEvals": 30,
+      "nextAuditInEvals": 9,
+      "nextAnalystApplyInEvals": 9,
       "auditWarmedUp": true,
       "analystAutoApply": true,
       "directionalRolling": 0,
       "abstainRate": 1,
-      "statusAr": "الوكيلان نشطان — مراجعات الجلسة: 2"
+      "statusAr": "الوكيلان نشطان — مراجعات الجلسة: 3"
     },
-    "sessionEvaluations": 320,
+    "sessionEvaluations": 391,
     "skillAppliedAr": [
       "✅ agent:patterns: يومية الأنماط حُدّثت على القرص",
       "✅ internal:pattern-boost: تعزيز أنماط نظام range",
@@ -628,197 +628,192 @@
     ]
   },
   "logAudit": {
-    "auditedAt": 1781419239624,
+    "auditedAt": 1781419314660,
     "source": "C:\\Users\\pc\\zambahola-one-agent\\apps\\one-agent\\data\\runs\\latest.jsonl",
     "dryRun": false,
     "summary": {
-      "predictions": 280,
-      "evaluations": 303,
-      "hits": 303,
+      "predictions": 271,
+      "evaluations": 353,
+      "hits": 353,
       "misses": 0,
       "hitRate": 1,
       "directionalTotal": 0,
       "directionalHits": 0,
       "directionalHitRate": 0,
-      "abstainCount": 303,
+      "abstainCount": 353,
       "abstainRate": 1
     },
     "byRegime": {
       "unknown": {
-        "hits": 51,
-        "total": 51,
+        "hits": 116,
+        "total": 116,
         "hitRate": 1
       },
       "range": {
-        "hits": 252,
-        "total": 252,
+        "hits": 237,
+        "total": 237,
         "hitRate": 1
       }
     },
     "byGateReason": {
       "none": {
-        "hits": 51,
-        "total": 51,
+        "hits": 116,
+        "total": 116,
         "hitRate": 1
       },
       "range regime — reduced confidence": {
-        "hits": 169,
-        "total": 169,
+        "hits": 164,
+        "total": 164,
         "hitRate": 1
       },
       "passed": {
-        "hits": 83,
-        "total": 83,
+        "hits": 73,
+        "total": 73,
         "hitRate": 1
       }
     },
     "byDirection": {
       "range": {
-        "hits": 303,
-        "total": 303,
+        "hits": 353,
+        "total": 353,
         "hitRate": 1
       }
     },
     "byStrategy": {
       "momentum": {
-        "hits": 252,
-        "total": 252,
-        "hitRate": 1
+        "hits": 232,
+        "total": 237,
+        "hitRate": 0.9789
       },
       "mean_reversion": {
-        "hits": 252,
-        "total": 252,
+        "hits": 237,
+        "total": 237,
         "hitRate": 1
       },
       "rsi": {
-        "hits": 86,
-        "total": 252,
-        "hitRate": 0.3413
+        "hits": 81,
+        "total": 237,
+        "hitRate": 0.3418
       },
       "ema_cross": {
-        "hits": 252,
-        "total": 252,
+        "hits": 237,
+        "total": 237,
         "hitRate": 1
       },
       "volatility_regime": {
-        "hits": 252,
-        "total": 252,
+        "hits": 237,
+        "total": 237,
         "hitRate": 1
       },
       "bollinger": {
-        "hits": 218,
-        "total": 252,
-        "hitRate": 0.8651
+        "hits": 205,
+        "total": 237,
+        "hitRate": 0.865
       },
       "macd": {
-        "hits": 113,
-        "total": 252,
-        "hitRate": 0.4484
+        "hits": 92,
+        "total": 237,
+        "hitRate": 0.3882
       },
       "order_imbalance": {
-        "hits": 12,
-        "total": 252,
-        "hitRate": 0.0476
+        "hits": 19,
+        "total": 237,
+        "hitRate": 0.0802
       },
       "funding_fade": {
         "hits": 0,
-        "total": 252,
+        "total": 237,
         "hitRate": 0
       },
       "volume_breakout": {
-        "hits": 219,
-        "total": 252,
-        "hitRate": 0.869
+        "hits": 199,
+        "total": 237,
+        "hitRate": 0.8397
       },
       "long_short_extreme": {
         "hits": 0,
-        "total": 252,
+        "total": 237,
         "hitRate": 0
       },
       "atr_breakout": {
-        "hits": 192,
-        "total": 252,
-        "hitRate": 0.7619
+        "hits": 182,
+        "total": 237,
+        "hitRate": 0.7679
       },
       "vwap_proxy": {
-        "hits": 252,
-        "total": 252,
-        "hitRate": 1
+        "hits": 232,
+        "total": 237,
+        "hitRate": 0.9789
       },
       "premium_momentum": {
-        "hits": 152,
-        "total": 252,
-        "hitRate": 0.6032
+        "hits": 141,
+        "total": 237,
+        "hitRate": 0.5949
       },
       "open_interest": {
-        "hits": 252,
-        "total": 252,
+        "hits": 237,
+        "total": 237,
         "hitRate": 1
       },
       "session_bias": {
-        "hits": 248,
-        "total": 252,
-        "hitRate": 0.9841
+        "hits": 234,
+        "total": 237,
+        "hitRate": 0.9873
       },
       "tick_momentum": {
-        "hits": 223,
-        "total": 252,
-        "hitRate": 0.8849
+        "hits": 207,
+        "total": 237,
+        "hitRate": 0.8734
       }
     },
     "byConfidenceBand": {
       "low_<55": {
-        "hits": 252,
-        "total": 252,
+        "hits": 237,
+        "total": 237,
         "hitRate": 1
       }
     },
     "topMisses": [],
     "topHits": [],
     "insightsAr": [
-      "📊 مراجعة السجل: 303 تقييم · hit شامل 100.0% · اتجاهي 0.0% (0 إشارة) · range 100.0%",
+      "📊 مراجعة السجل: 353 تقييم · hit شامل 100.0% · اتجاهي 0.0% (0 إشارة) · range 100.0%",
       "ℹ️ hit الشامل مرتفع لأن أغلب التنبؤات range والسعر هادئ — راقب directional hit فقط (هدف 58%+)",
-      "✅ نظام unknown: قوي 100.0% (51/51)",
-      "ℹ️ نظام range: hit تسمية range 100.0% (252/252) — مو دقة اتجاهية",
+      "✅ نظام unknown: قوي 100.0% (116/116)",
+      "ℹ️ نظام range: hit تسمية range 100.0% (237/237) — مو دقة اتجاهية",
       "📉 استراتيجية funding_fade: hit 0.0% — مرشحة لتخفيف الوزن",
       "📉 استراتيجية long_short_extreme: hit 0.0% — مرشحة لتخفيف الوزن",
-      "📉 استراتيجية order_imbalance: hit 4.8% — مرشحة لتخفيف الوزن",
-      "📉 استراتيجية rsi: hit 34.1% — مرشحة لتخفيف الوزن"
+      "📉 استراتيجية order_imbalance: hit 8.0% — مرشحة لتخفيف الوزن",
+      "📉 استراتيجية rsi: hit 34.2% — مرشحة لتخفيف الوزن"
     ],
     "cleanup": [
-      {
-        "kind": "strategy_weight",
-        "detail": "rsi: 0.2626 → 0.25 (hit 34.1%, n=252)",
-        "applied": true
-      },
       {
         "kind": "receipt_prune",
         "detail": "prune 50 old eval receipts (keep 250)",
         "applied": true
       }
     ],
-    "weightsChanged": true,
+    "weightsChanged": false,
     "mlReset": false,
     "mlpReset": false
   },
   "dualAgent": {
     "primaryAgent": "live-learning",
     "secondaryAgent": "log-auditor + analyst-skill-apply",
-    "sessionEvaluations": 320,
-    "sessionLogAudits": 2,
-    "sessionSkillApplies": 5,
-    "totalLogAudits": 9427,
-    "lastLogAuditAt": 1781419239624,
-    "sessionUptimeSec": 331,
+    "sessionEvaluations": 391,
+    "sessionLogAudits": 3,
+    "sessionSkillApplies": 6,
+    "totalLogAudits": 9428,
+    "lastLogAuditAt": 1781419314660,
+    "sessionUptimeSec": 430,
     "auditEvery": 50,
     "analystApplyEvery": 50,
-    "nextAuditInEvals": 30,
-    "nextAnalystApplyInEvals": 30,
+    "nextAuditInEvals": 9,
+    "nextAnalystApplyInEvals": 9,
     "auditWarmedUp": true,
     "analystAutoApply": true,
     "directionalRolling": 0,
     "abstainRate": 1,
-    "statusAr": "الوكيلان نشطان — مراجعات الجلسة: 2"
+    "statusAr": "الوكيلان نشطان — مراجعات الجلسة: 3"
   },
   "skillsCatalog": {
     "docAr": "docs/ar/المهارات-والروابط.md",
