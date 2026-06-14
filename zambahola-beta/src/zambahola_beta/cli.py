@@ -74,6 +74,18 @@ def main(argv: list[str] | None = None) -> int:
     p_alloc = sub.add_parser("allocate", parents=[common], help="long-term trend allocation vs HODL")
     p_alloc.add_argument("--cost-bps", dest="alloc_cost_bps", type=float, default=10.0)
 
+    p_pf = sub.add_parser("portfolio", parents=[common], help="thinking allocator vs SMA100/HODL")
+    p_pf.add_argument("--assets", default="BTCUSDT,ETHUSDT")
+    p_pf.add_argument("--cost-bps", dest="alloc_cost_bps", type=float, default=10.0)
+    p_pf.add_argument("--target-vol", dest="target_vol", type=float, default=0.6)
+    p_pf.add_argument("--max-total", dest="max_total", type=float, default=1.0)
+
+    p_sig = sub.add_parser("signal", parents=[common], help="today's target allocation (live advisor)")
+    p_sig.add_argument("--assets", default="BTCUSDT,ETHUSDT")
+    p_sig.add_argument("--mode", default="ensemble", choices=["ensemble", "rotation"])
+    p_sig.add_argument("--target-vol", dest="target_vol", type=float, default=0.6)
+    p_sig.add_argument("--max-total", dest="max_total", type=float, default=1.0)
+
     p_cross = sub.add_parser("cross-search", parents=[common], help="cross-asset lead-lag search")
     p_cross.add_argument("--targets", default="SOLUSDT,DOGEUSDT,XRPUSDT,ADAUSDT,AVAXUSDT")
     p_cross.add_argument("--leaders", default="BTCUSDT,ETHUSDT")
@@ -187,6 +199,37 @@ def main(argv: list[str] | None = None) -> int:
             f"(CAGR {best['cagr']:.1%}, maxDD {best['max_drawdown']:.1%}, Calmar {best['calmar']}) "
             f"vs HODL (CAGR {hodl['cagr']:.1%}, maxDD {hodl['max_drawdown']:.1%})"
         )
+        return 0
+
+    if args.command in ("portfolio", "signal"):
+        from .data import fetch_many
+        from .strategy import compare_portfolios, current_allocation
+
+        symbols = [s.strip() for s in args.assets.split(",") if s.strip()]
+        frames = fetch_many(symbols, interval=cfg.interval, total=cfg.bars)
+
+        if args.command == "portfolio":
+            table = compare_portfolios(
+                frames, cost_bps=args.alloc_cost_bps,
+                target_vol=args.target_vol, max_total=args.max_total,
+            )
+            print(f"[beta] portfolio {symbols} {cfg.interval} · {cfg.bars} bars\n")
+            with pd.option_context("display.width", 200, "display.max_columns", 20):
+                print(table.to_string(index=False))
+            best = table.iloc[0]
+            print(f"\n[beta] best by Calmar: {best['strategy']} "
+                  f"(CAGR {best['cagr']:.1%}, maxDD {best['max_drawdown']:.1%}, Sharpe {best['sharpe']})")
+            return 0
+
+        alloc = current_allocation(
+            frames, mode=args.mode, target_vol=args.target_vol, max_total=args.max_total
+        )
+        print(json.dumps(alloc, indent=2))
+        print("\n[beta] ACTION:")
+        for sym, r in alloc["reasons"].items():
+            print(f"  {sym}: {r['action']}  (target {int(r['target_weight']*100)}% · "
+                  f"trend {int(r['trend_consensus']*100)}% · price {r['price']})")
+        print(f"  CASH: {int(alloc['cash_weight']*100)}%")
         return 0
 
     if args.command == "cross-search":

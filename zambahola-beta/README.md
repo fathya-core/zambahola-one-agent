@@ -89,6 +89,7 @@ leaderboard to `reports/search_leaderboard.csv`.
 | `maker_backtest.py` | Maker (limit-order) economics bounds using real spread + break-even |
 | `cross.py` | Cross-asset lead-lag: align target+leaders, leader features, search |
 | `allocation.py` | Long-term trend/regime allocation (long/cash) vs HODL — the working edge |
+| `strategy.py` | "Thinking" allocator: consensus + vol-targeting + rotation, + live advisor |
 | `cli.py` | `fetch` / `run` / `search` / `record` / `micro-run` / `micro-search` / `micro-maker` |
 
 ## Current honest result (Phase 2 search)
@@ -120,7 +121,19 @@ dozen times a year (costs negligible), and uses textbook un-tuned parameters
 
 ```powershell
 .\.venv\Scripts\python.exe -m zambahola_beta.cli allocate --symbol BTCUSDT --interval 1d --bars 3000
+# multi-asset "thinking" allocator (consensus + vol-target + rotation) vs baselines
+.\.venv\Scripts\python.exe -m zambahola_beta.cli portfolio --assets BTCUSDT,ETHUSDT
+# live advisor — today's target allocation with reasoning (run weekly)
+.\.venv\Scripts\python.exe -m zambahola_beta.cli signal --assets BTCUSDT,ETHUSDT --mode ensemble
 ```
+
+Full strategy report, profile menu and staged deployment plan: **[STRATEGY.md](STRATEGY.md)**.
+
+A "thinking" allocator (signal consensus + volatility targeting + multi-asset
+rotation) was also built and tested. Honest result: it improves Sharpe/Sortino
+but does **not** beat the simple SMA100 trend on Calmar — robust simplicity wins;
+complexity/leverage only adds risk. The thinking value is the rigorous comparison
+plus a live advisor that monitors regime and de-risks to cash in downtrends.
 
 Honest caveats: backtested over a bull-heavy era, so future CAGR will be lower;
 the *durable* advantage is the structural drawdown reduction (avoiding -80%
