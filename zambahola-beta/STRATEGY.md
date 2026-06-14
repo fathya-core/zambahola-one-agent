@@ -73,6 +73,37 @@ and risk, and abstains (cash) in downtrends instead of holding through crashes.
 5. **Review quarterly** with `portfolio` on fresh data; the edge is structural
    (drawdown control), not a promise of 47% CAGR forever.
 
+## 5b. Executor (testnet-first, keys stay out of the repo)
+
+A safe spot executor follows the trend signal. **Defaults: testnet + dry-run.**
+
+Keys are NEVER stored in the project. Point an env var at your existing file
+(outside the repo) or set env vars directly — keys are only loaded at runtime and
+never logged (only masked):
+
+```powershell
+# option A: point at your existing keys file (kept on your Desktop, not in repo)
+$env:ZAMBAHOLA_KEYS_FILE = "C:\Users\pc\OneDrive\Desktop\binance-API.txt"
+# option B: env vars
+$env:BINANCE_API_KEY = "..."; $env:BINANCE_API_SECRET = "..."
+
+# 1) TESTNET dry-run (fake money, places nothing) — see the plan
+.\.venv\Scripts\python.exe -m zambahola_beta.cli execute --assets BTCUSDT,ETHUSDT --interval 1d
+# 2) TESTNET execute (fake money, real testnet orders)  — needs testnet keys
+.\.venv\Scripts\python.exe -m zambahola_beta.cli execute --interval 1d --execute
+# 3) LIVE (real money) — ONLY after testnet works; requires explicit confirm:
+$env:ZAMBAHOLA_I_ACCEPT_REAL_TRADING = "RISK"
+.\.venv\Scripts\python.exe -m zambahola_beta.cli execute --interval 1d --live --execute --max-order-usd 20 --max-total-usd 100
+```
+
+Guarantees built in: spot only (no leverage), symbol whitelist, per-order and
+total USD caps, min-notional checks, live blocked unless explicitly confirmed.
+There is **no "only enter when guaranteed"** — that does not exist; the executor
+follows the validated trend signal (invest in uptrends, cash in downtrends).
+
+> Testnet keys are separate from live keys — create them at
+> testnet.binance.vision. Start there.
+
 ## 6. Honest caveats
 
 - The backtest spans a bull-heavy era; **future CAGR will be lower**.

@@ -86,6 +86,15 @@ def main(argv: list[str] | None = None) -> int:
     p_sig.add_argument("--target-vol", dest="target_vol", type=float, default=0.6)
     p_sig.add_argument("--max-total", dest="max_total", type=float, default=1.0)
 
+    p_exec = sub.add_parser("execute", parents=[common], help="rebalance to target (testnet+dry-run by default)")
+    p_exec.add_argument("--assets", default="BTCUSDT,ETHUSDT")
+    p_exec.add_argument("--mode", default="ensemble", choices=["ensemble", "rotation"])
+    p_exec.add_argument("--target-vol", dest="target_vol", type=float, default=0.6)
+    p_exec.add_argument("--live", action="store_true", help="REAL money (needs env confirm); default testnet")
+    p_exec.add_argument("--execute", action="store_true", help="place orders; default dry-run")
+    p_exec.add_argument("--max-order-usd", dest="max_order_usd", type=float, default=20.0)
+    p_exec.add_argument("--max-total-usd", dest="max_total_usd", type=float, default=100.0)
+
     p_cross = sub.add_parser("cross-search", parents=[common], help="cross-asset lead-lag search")
     p_cross.add_argument("--targets", default="SOLUSDT,DOGEUSDT,XRPUSDT,ADAUSDT,AVAXUSDT")
     p_cross.add_argument("--leaders", default="BTCUSDT,ETHUSDT")
@@ -232,6 +241,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  CASH: {int(alloc['cash_weight']*100)}%")
         return 0
 
+    if args.command == "execute":
+        return _run_execute(cfg, args)
+
     if args.command == "cross-search":
         from .cross import rank_cross, run_cross_search
         from .data import fetch_many
@@ -289,6 +301,83 @@ def main(argv: list[str] | None = None) -> int:
 
     parser.error("unknown command")
     return 2
+
+
+def _run_execute(cfg: Config, args: argparse.Namespace) -> int:
+    from .data import fetch_many
+    from .executor import (
+        BinanceSpot,
+        RiskLimits,
+        load_keys,
+        mask,
+        plan_rebalance,
+        safety_gate,
+    )
+    from .strategy import current_allocation
+
+    live = bool(args.live)
+    do_execute = bool(args.execute)
+    try:
+        safety_gate(live=live)
+    except RuntimeError as exc:
+        print(f"[beta] {exc}")
+        return 1
+
+    symbols = [s.strip() for s in args.assets.split(",") if s.strip()]
+    print(f"[beta] mode={'LIVE' if live else 'TESTNET'} · {'EXECUTE' if do_execute else 'DRY-RUN'} · {symbols}")
+
+    # 1) target allocation from the validated trend signal
+    frames = fetch_many(symbols, interval=cfg.interval, total=max(cfg.bars, 400))
+    alloc = current_allocation(frames, mode=args.mode, target_vol=args.target_vol)
+    targets = alloc["targets"]
+    print(f"[beta] targets: {targets} · cash {int(alloc['cash_weight'] * 100)}%")
+
+    # 2) connect (keys loaded from env/file, never logged)
+    try:
+        keys = load_keys()
+    except RuntimeError as exc:
+        print(f"[beta] {exc}")
+        return 1
+    print(f"[beta] key {mask(keys.api_key)} · secret {mask(keys.api_secret)}")
+    client = BinanceSpot(keys, testnet=not live)
+
+    try:
+        prices = {s: client.price(s) for s in symbols}
+        balances = client.balances()
+    except Exception as exc:  # network/auth errors
+        print(f"[beta] exchange error (check keys/testnet access): {exc}")
+        return 1
+
+    limits = RiskLimits(
+        max_order_usd=args.max_order_usd,
+        max_total_usd=args.max_total_usd,
+        whitelist=tuple(symbols),
+    )
+    plan = plan_rebalance(targets, balances, prices, limits)
+    print(f"[beta] equity ${plan.equity_usd} · deployable ${plan.deployable_usd}")
+    for note in plan.notes:
+        print(f"   note: {note}")
+    if not plan.orders:
+        print("[beta] no rebalance needed (already aligned within limits).")
+        return 0
+    for o in plan.orders:
+        print(f"   {o.side} {o.symbol} ~${o.usd}  ({o.reason})")
+
+    if not do_execute:
+        print("[beta] DRY-RUN — nothing placed. Re-run with --execute to place orders.")
+        return 0
+
+    for o in plan.orders:
+        try:
+            if o.side == "BUY":
+                res = client.market_order(o.symbol, "BUY", quote_qty=o.usd)
+            else:
+                qty = round(o.usd / prices[o.symbol], 6)
+                res = client.market_order(o.symbol, "SELL", quantity=qty)
+            print(f"   placed {o.side} {o.symbol}: orderId={res.get('orderId')} status={res.get('status')}")
+        except Exception as exc:
+            print(f"   FAILED {o.side} {o.symbol}: {exc}")
+    return 0
 
 
 def _print_report(report: dict) -> None:

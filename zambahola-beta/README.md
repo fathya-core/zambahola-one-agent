@@ -90,6 +90,7 @@ leaderboard to `reports/search_leaderboard.csv`.
 | `cross.py` | Cross-asset lead-lag: align target+leaders, leader features, search |
 | `allocation.py` | Long-term trend/regime allocation (long/cash) vs HODL — the working edge |
 | `strategy.py` | "Thinking" allocator: consensus + vol-targeting + rotation, + live advisor |
+| `executor.py` | Safe Binance spot executor (testnet+dry-run default, keys out of repo, risk caps) |
 | `cli.py` | `fetch` / `run` / `search` / `record` / `micro-run` / `micro-search` / `micro-maker` |
 
 ## Current honest result (Phase 2 search)
@@ -125,9 +126,15 @@ dozen times a year (costs negligible), and uses textbook un-tuned parameters
 .\.venv\Scripts\python.exe -m zambahola_beta.cli portfolio --assets BTCUSDT,ETHUSDT
 # live advisor — today's target allocation with reasoning (run weekly)
 .\.venv\Scripts\python.exe -m zambahola_beta.cli signal --assets BTCUSDT,ETHUSDT --mode ensemble
+# safe executor — TESTNET + DRY-RUN by default (keys via env, never in repo)
+$env:ZAMBAHOLA_KEYS_FILE = "C:\path\to\keys-outside-repo.txt"
+.\.venv\Scripts\python.exe -m zambahola_beta.cli execute --assets BTCUSDT,ETHUSDT --interval 1d
 ```
 
-Full strategy report, profile menu and staged deployment plan: **[STRATEGY.md](STRATEGY.md)**.
+Full strategy report, profile menu, executor usage and staged deployment plan:
+**[STRATEGY.md](STRATEGY.md)**. There is no "guaranteed profit"; the executor is
+testnet+dry-run by default, spot-only, no leverage, with strict risk caps, and
+live trading is blocked unless explicitly confirmed.
 
 A "thinking" allocator (signal consensus + volatility targeting + multi-asset
 rotation) was also built and tested. Honest result: it improves Sharpe/Sortino
