@@ -25,10 +25,31 @@ const port = Number(process.env.ZAMBAHOLA_BRIDGE_PORT ?? 8790);
 const token = process.env.ZAMBAHOLA_BRIDGE_TOKEN ?? "";
 
 async function fetchAgent(path) {
-  const res = await fetch(`${agentBase}${path}`, {
-    signal: AbortSignal.timeout(8000),
-  });
-  return { status: res.status, body: await res.json().catch(() => null) };
+  // Never throw: the agent may be down/restarting (esp. under phase5-auto).
+  // A thrown fetch here would become an unhandled rejection and crash the bridge.
+  try {
+    const res = await fetch(`${agentBase}${path}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  } catch {
+    return { status: 0, body: null };
+  }
+}
+
+let agentWasDown = false;
+async function collectTelemetrySafe() {
+  try {
+    const snap = await collectTelemetry();
+    if (agentWasDown && snap?.status?.running) {
+      console.log("[bridge] agent back online — telemetry resumed");
+      agentWasDown = false;
+    }
+    return snap;
+  } catch (e) {
+    console.warn(`[bridge] telemetry collect failed (will retry): ${String(e)}`);
+    return null;
+  }
 }
 
 async function collectTelemetry() {
@@ -91,9 +112,9 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === "/telemetry" && req.method === "GET") {
-      const snap = await collectTelemetry();
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(snap));
+      const snap = await collectTelemetrySafe();
+      res.writeHead(snap ? 200 : 503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(snap ?? { error: "agent unreachable" }));
       return;
     }
 
@@ -149,5 +170,13 @@ server.listen(port, "127.0.0.1", () => {
   else console.log("[bridge] WARNING: no ZAMBAHOLA_BRIDGE_TOKEN — local only");
 });
 
-void collectTelemetry();
-setInterval(() => void collectTelemetry(), intervalSec * 1000);
+// Global guards so a stray rejection never kills the long-running bridge.
+process.on("unhandledRejection", (err) => {
+  console.warn(`[bridge] unhandledRejection ignored: ${String(err)}`);
+});
+process.on("uncaughtException", (err) => {
+  console.warn(`[bridge] uncaughtException ignored: ${String(err)}`);
+});
+
+void collectTelemetrySafe();
+setInterval(() => void collectTelemetrySafe(), intervalSec * 1000);
