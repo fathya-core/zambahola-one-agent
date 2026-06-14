@@ -140,7 +140,7 @@ function render(s){
  if(s.cash_weight!=null&&s.cash_weight>0.001)a.innerHTML+=`<div class="card"><div class="flex"><b>نقد</b><span class="sw badge b-mut">${Math.round(s.cash_weight*100)}%</span></div><div class="k" style="margin-top:8px">غير مستثمر — حماية من الهبوط</div></div>`;
  $("acctstatus").innerHTML=s.account?.connected?'<span class="badge b-up">متصل</span>':'<span class="badge b-mut">غير متصل (أضف المفاتيح)</span>';
  $("equity").textContent=s.account?.equity_usd!=null?("$"+s.account.equity_usd):"—";
- $("balances").textContent=s.account?.balances?Object.entries(s.account.balances).map(([k,v])=>k+": "+v).join("  ·  "):"";
+ if(s.account?.balances){let bt=Object.entries(s.account.balances).map(([k,v])=>k+": "+v).join("  ·  ");const hc=s.account.holdings_count||0,sh=Object.keys(s.account.balances).length-1;if(hc>sh)bt+="   (+"+(hc-sh)+" أخرى)";$("balances").textContent=bt;}else $("balances").textContent="";
  $("exec").disabled=!s.account?.connected;$("exec").textContent=s.live?"⚡ نفّذ (حقيقي ⚠)":"⚡ نفّذ (testnet)";
  if(s.portfolio&&s.portfolio.length){let h='<table><tr><th>استراتيجية</th><th>عائد</th><th>CAGR</th><th>Sharpe</th><th>أقصى تراجع</th></tr>';
   for(const r of s.portfolio)h+=`<tr><td>${r.strategy}</td><td>${(r.total_return*100).toFixed(0)}%</td><td>${(r.cagr*100).toFixed(0)}%</td><td>${r.sharpe}</td><td>${(r.max_drawdown*100).toFixed(0)}%</td></tr>`;
