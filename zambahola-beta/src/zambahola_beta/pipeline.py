@@ -15,6 +15,7 @@ from .config import Config
 from .data import fetch_klines, load_klines, save_klines
 from .features import FEATURE_COLUMNS, build_features
 from .labels import triple_barrier
+from .micro_features import MICRO_FEATURE_COLUMNS, build_micro_features
 from .model import walk_forward_eval
 
 
@@ -42,25 +43,26 @@ def get_klines(cfg: Config, *, fetch: bool, klines: pd.DataFrame | None) -> pd.D
     return load_klines(path)
 
 
-def run_pipeline(
-    cfg: Config,
-    *,
-    fetch: bool = False,
-    klines: pd.DataFrame | None = None,
-    write_report: bool = True,
-) -> dict:
-    raw = get_klines(cfg, fetch=fetch, klines=klines)
-    data = assemble_dataset(raw, cfg)
+def assemble_micro_dataset(micro: pd.DataFrame, cfg: Config) -> pd.DataFrame:
+    """Join microstructure features + triple-barrier labels (mid OHLC)."""
+    feats = build_micro_features(micro)
+    labels = triple_barrier(micro, cfg.horizon, cfg.vol_window, cfg.barrier_mult)
+    data = feats.copy()
+    data["label"] = labels.label
+    data["ret"] = labels.ret
+    data = data.dropna(subset=[*MICRO_FEATURE_COLUMNS, "label", "ret"])
+    return data.sort_index().reset_index(drop=True)
 
+
+def _build_report(cfg: Config, data: pd.DataFrame, source: dict, tag: str, write_report: bool) -> dict:
     wf = walk_forward_eval(data, cfg)
     bt = run_backtest(wf.oos, cfg)
     sweep = threshold_sweep(wf.oos, cfg)
-
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "source": source,
         "config": _config_summary(cfg),
         "dataset": {
-            "klines": int(len(raw)),
             "samples": int(len(data)),
             "directional_samples": int((data["label"] != 0.0).sum()),
             "up_rate": float((data["label"] == 1.0).mean()),
@@ -79,13 +81,40 @@ def run_pipeline(
         "verdict": _verdict(bt),
     }
     report = _jsonable(report)
-
     if write_report:
         cfg.reports_dir.mkdir(parents=True, exist_ok=True)
-        out = cfg.reports_dir / f"report_{cfg.symbol}_{cfg.interval}.json"
+        out = cfg.reports_dir / f"report_{tag}.json"
         out.write_text(json.dumps(report, indent=2), encoding="utf-8")
         report["report_path"] = str(out)
     return report
+
+
+def run_pipeline(
+    cfg: Config,
+    *,
+    fetch: bool = False,
+    klines: pd.DataFrame | None = None,
+    write_report: bool = True,
+) -> dict:
+    raw = get_klines(cfg, fetch=fetch, klines=klines)
+    data = assemble_dataset(raw, cfg)
+    source = {"kind": "klines", "klines": int(len(raw)), "interval": cfg.interval}
+    return _build_report(cfg, data, source, f"{cfg.symbol}_{cfg.interval}", write_report)
+
+
+def run_micro_pipeline(
+    cfg: Config,
+    *,
+    micro: pd.DataFrame | None = None,
+    write_report: bool = True,
+) -> dict:
+    if micro is None:
+        from .recorder import load_micro
+
+        micro = load_micro(cfg.data_dir)
+    data = assemble_micro_dataset(micro, cfg)
+    source = {"kind": "micro", "bars": int(len(micro))}
+    return _build_report(cfg, data, source, f"micro_{cfg.symbol}", write_report)
 
 
 def _verdict(bt: dict) -> dict:

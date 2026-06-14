@@ -24,7 +24,9 @@ from sklearn.metrics import (
 )
 
 from .config import Config
-from .features import FEATURE_COLUMNS
+
+# Columns that are never model inputs.
+_NON_FEATURE = ("label", "ret")
 
 
 class CalibratedModel:
@@ -122,6 +124,7 @@ def walk_forward_eval(data: pd.DataFrame, cfg: Config) -> WalkForwardOutput:
     `data` must be temporally ordered with FEATURE_COLUMNS plus 'label' and 'ret'.
     """
     data = data.reset_index(drop=True)
+    feature_cols = [c for c in data.columns if c not in _NON_FEATURE]
     splits = purged_walkforward_splits(len(data), cfg.n_splits, cfg.embargo)
     if not splits:
         raise ValueError("not enough rows for the requested walk-forward splits")
@@ -134,13 +137,13 @@ def walk_forward_eval(data: pd.DataFrame, cfg: Config) -> WalkForwardOutput:
         dir_train = train[train["label"] != 0.0]
         if dir_train["label"].nunique() < 2 or len(dir_train) < 60:
             continue
-        X_tr = dir_train[FEATURE_COLUMNS]
+        X_tr = dir_train[feature_cols]
         y_tr = (dir_train["label"] == 1.0).astype(int)
 
         model = CalibratedModel(cfg).fit(X_tr, y_tr)
 
         test = data.iloc[test_idx]
-        p_up = model.predict_proba_up(test[FEATURE_COLUMNS])
+        p_up = model.predict_proba_up(test[feature_cols])
         frame = pd.DataFrame(
             {"p_up": p_up, "label": test["label"].to_numpy(), "ret": test["ret"].to_numpy()},
             index=test.index,

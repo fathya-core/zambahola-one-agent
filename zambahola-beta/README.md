@@ -55,6 +55,11 @@ python -m venv .venv
 # Phase 2: grid-search for an edge across interval x horizon x barrier x threshold
 .\.venv\Scripts\python.exe -m zambahola_beta.cli search --bars 20000 \
   --intervals 5m,15m,1h --horizons 4,8,16 --mults 1.0,2.0 --margins 0.06,0.10
+
+# Phase 3: record real L2 microstructure (run for hours/days to build a dataset)
+.\.venv\Scripts\python.exe -m zambahola_beta.cli record --seconds 3600
+# then validate the order-flow edge on the recorded data
+.\.venv\Scripts\python.exe -m zambahola_beta.cli micro-run --horizon 5
 ```
 
 Reports are written to `reports/report_<symbol>_<interval>.json`; the search
@@ -77,8 +82,11 @@ leaderboard to `reports/search_leaderboard.csv`.
 | `labels.py` | Volatility-scaled triple-barrier labels + realized returns |
 | `model.py` | HistGradientBoosting + isotonic calibration; purged walk-forward CV |
 | `backtest.py` | Cost-aware long/short/flat backtest + Sharpe/Sortino/DD/expectancy |
-| `pipeline.py` | Orchestrates the stages and emits the verdict + JSON report |
-| `cli.py` | `fetch` / `run` commands |
+| `search.py` | Phase-2 grid search (interval x horizon x barrier x threshold) -> leaderboard |
+| `recorder.py` | Phase-3 live L2 recorder (Binance depth20 + aggTrade) -> Cont OFI + book/trade flow bars |
+| `micro_features.py` | Order-flow / microstructure features from recorded bars |
+| `pipeline.py` | Orchestrates klines or micro stages; emits the verdict + JSON report |
+| `cli.py` | `fetch` / `run` / `search` / `record` / `micro-run` |
 
 ## Current honest result (Phase 2 search)
 
@@ -90,16 +98,19 @@ Conclusion: **OHLCV-only features carry no exploitable directional edge after
 costs** on BTC — the efficient-market reality. Tuning won't fix this; a
 different *signal source* is required.
 
-## Where the edge will come from (next: Phase 3)
+## Phase 3 (built): real microstructure data path
 
-1. **True microstructure data** (highest potential): record the Binance L2
-   order-book diff stream + trade prints over time to build a dataset, then
-   engineer real order-flow imbalance features. Research attributes ~80% of
-   short-horizon predictability to these.
-2. **Cross-asset / alternative data**: lead-lag from correlated assets, funding/OI
-   regimes, sentiment.
-3. **Only after a validated edge**: promote to Binance testnet -> tiny real size,
-   with strict risk limits (position sizing, stop-loss, daily loss cap).
+The L2 recorder + order-flow feature path now exists and is verified on live
+Binance data (`recorder.py`, `micro_features.py`, `micro-run`). It records Cont
+order-flow imbalance, multi-level book imbalance, microprice and signed trade
+flow into mid-price OHLC bars, then runs the same leakage-safe, cost-aware
+validation. A model test confirms it learns an injected order-flow signal.
 
-The search engine makes this systematic — add a signal source, re-run `search`,
-and the verdict stays honest.
+**What remains to find a real edge:** runtime. Microstructure data must be
+*accumulated* by leaving `record` running for hours/days (ideally a rolling
+collector), then `micro-run` (or a micro grid search) checks for a validated
+edge after costs. Only then: Binance testnet -> tiny real size, with strict risk
+limits (position sizing, stop-loss, daily loss cap).
+
+Other levers if order-flow alone is insufficient: cross-asset lead-lag,
+funding/OI regimes, sentiment. The verdict stays honest throughout.

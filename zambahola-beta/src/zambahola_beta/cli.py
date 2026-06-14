@@ -16,7 +16,7 @@ import pandas as pd
 
 from .config import Config
 from .data import fetch_klines, save_klines, synthetic_klines
-from .pipeline import run_pipeline
+from .pipeline import run_micro_pipeline, run_pipeline
 from .search import (
     DEFAULT_BARRIER_MULTS,
     DEFAULT_HORIZONS,
@@ -61,6 +61,12 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--synthetic", action="store_true", help="use offline synthetic data")
     p_run.add_argument("--no-fetch", action="store_true", help="use cached parquet (no download)")
 
+    p_record = sub.add_parser("record", parents=[common], help="record live L2 microstructure")
+    p_record.add_argument("--seconds", type=float, default=60.0)
+    p_record.add_argument("--bar-ms", dest="bar_ms", type=int, default=1000)
+
+    sub.add_parser("micro-run", parents=[common], help="run pipeline on recorded micro data")
+
     p_search = sub.add_parser("search", parents=[common], help="grid-search for an edge")
     p_search.add_argument("--intervals", default=",".join(DEFAULT_INTERVALS))
     p_search.add_argument("--horizons", default=",".join(str(h) for h in DEFAULT_HORIZONS))
@@ -84,6 +90,27 @@ def main(argv: list[str] | None = None) -> int:
             report = run_pipeline(cfg, klines=klines)
         else:
             report = run_pipeline(cfg, fetch=not getattr(args, "no_fetch", False))
+        _print_report(report)
+        return 0
+
+    if args.command == "record":
+        import asyncio
+
+        from .recorder import record
+
+        path = asyncio.run(
+            record(
+                symbol=cfg.symbol,
+                duration_sec=args.seconds,
+                bar_ms=args.bar_ms,
+                data_dir=cfg.data_dir,
+            )
+        )
+        print(f"[beta] recorded -> {path}")
+        return 0
+
+    if args.command == "micro-run":
+        report = run_micro_pipeline(cfg)
         _print_report(report)
         return 0
 
