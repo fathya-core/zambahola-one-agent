@@ -19,12 +19,16 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import requests
+
+# Binance API keys/secrets are 64-char alphanumeric ASCII tokens.
+_TOKEN_RE = re.compile(r"[A-Za-z0-9]{50,72}")
 
 TESTNET_BASE = "https://testnet.binance.vision"
 LIVE_BASE = "https://api.binance.com"
@@ -62,17 +66,28 @@ def load_keys() -> Keys:
             "to a file OUTSIDE the repo. Keys are never stored in the project."
         )
     text = Path(path).read_text(encoding="utf-8").strip()
-    return _parse_keys_text(text)
+    keys = _parse_keys_text(text)
+    _validate(keys)
+    return keys
 
 
 def _parse_keys_text(text: str) -> Keys:
     text = text.strip()
+    # 1) clean JSON
     if text.startswith("{"):
-        d = json.loads(text)
-        key = d.get("apiKey") or d.get("api_key") or d.get("key")
-        secret = d.get("secret") or d.get("api_secret") or d.get("apiSecret")
-        if key and secret:
-            return Keys(str(key).strip(), str(secret).strip())
+        try:
+            d = json.loads(text)
+            key = d.get("apiKey") or d.get("api_key") or d.get("key")
+            secret = d.get("secret") or d.get("api_secret") or d.get("apiSecret")
+            if key and secret:
+                return Keys(str(key).strip(), str(secret).strip())
+        except json.JSONDecodeError:
+            pass
+    # 2) extract the two long alphanumeric tokens (robust to Arabic/labels/quotes)
+    tokens = _TOKEN_RE.findall(text)
+    if len(tokens) >= 2:
+        return Keys(tokens[0], tokens[1])
+    # 3) KEY=VALUE
     kv: dict[str, str] = {}
     for line in text.splitlines():
         if "=" in line:
@@ -82,10 +97,24 @@ def _parse_keys_text(text: str) -> Keys:
     secret = kv.get("BINANCE_API_SECRET") or kv.get("API_SECRET") or kv.get("SECRET")
     if key and secret:
         return Keys(key, secret)
+    # 4) two non-empty lines
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if len(lines) >= 2:
         return Keys(lines[0], lines[1])
-    raise RuntimeError("Could not parse keys file (expected JSON, KEY=VALUE, or two lines)")
+    raise RuntimeError("Could not parse keys file (expected JSON, KEY=VALUE, or the two 64-char tokens)")
+
+
+def _validate(keys: Keys) -> None:
+    for label, val in (("API key", keys.api_key), ("API secret", keys.api_secret)):
+        if not val.isascii():
+            raise RuntimeError(
+                f"{label} contains non-ASCII characters — the keys file likely has labels/Arabic "
+                "text mixed in. Put just the two 64-char tokens (or KEY=VALUE / JSON) in the file."
+            )
+        if not (50 <= len(val) <= 72):
+            raise RuntimeError(
+                f"{label} length {len(val)} is unusual (Binance keys are 64 chars) — check the file."
+            )
 
 
 # ---------- signing (pure, unit-tested against Binance's published vector) ----------

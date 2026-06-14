@@ -40,6 +40,27 @@ def test_parse_keys_json_and_kv_and_lines():
     assert two == Keys("AAA", "BBB")
 
 
+def test_parse_keys_from_arabic_labeled_file():
+    # real-world: file has Arabic labels around the two 64-char tokens
+    key = "mU5" + "a" * 61  # 64 alphanumeric chars
+    secret = "Dq0" + "b" * 61
+    text = (
+        "مفاتيح باينانس\n"
+        f"المفتاح (API Key): {key}\n"
+        f"السر (Secret): {secret}  حفظ بأمان\n"
+    )
+    parsed = _parse_keys_text(text)
+    assert parsed == Keys(key, secret)
+    assert parsed.api_key.isascii() and parsed.api_secret.isascii()
+
+
+def test_parse_keys_quoted_tokens():
+    key = "K" * 64
+    secret = "S" * 64
+    parsed = _parse_keys_text(f'api_key = "{key}"\nsecret = "{secret}"')
+    assert parsed == Keys(key, secret)
+
+
 def test_safety_gate_blocks_live_without_confirm(monkeypatch):
     monkeypatch.delenv("ZAMBAHOLA_I_ACCEPT_REAL_TRADING", raising=False)
     safety_gate(live=False)  # testnet always ok
