@@ -86,6 +86,13 @@ def main(argv: list[str] | None = None) -> int:
     p_sig.add_argument("--target-vol", dest="target_vol", type=float, default=0.6)
     p_sig.add_argument("--max-total", dest="max_total", type=float, default=1.0)
 
+    p_con = sub.add_parser("console", parents=[common], help="launch the web dashboard (everything, no commands)")
+    p_con.add_argument("--assets", default="BTCUSDT,ETHUSDT")
+    p_con.add_argument("--port", type=int, default=8799)
+    p_con.add_argument("--live", action="store_true", help="REAL money mode (needs env confirm)")
+    p_con.add_argument("--max-order-usd", dest="max_order_usd", type=float, default=20.0)
+    p_con.add_argument("--max-total-usd", dest="max_total_usd", type=float, default=100.0)
+
     p_exec = sub.add_parser("execute", parents=[common], help="rebalance to target (testnet+dry-run by default)")
     p_exec.add_argument("--assets", default="BTCUSDT,ETHUSDT")
     p_exec.add_argument("--mode", default="ensemble", choices=["ensemble", "rotation"])
@@ -239,6 +246,24 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {sym}: {r['action']}  (target {int(r['target_weight']*100)}% · "
                   f"trend {int(r['trend_consensus']*100)}% · price {r['price']})")
         print(f"  CASH: {int(alloc['cash_weight']*100)}%")
+        return 0
+
+    if args.command == "console":
+        from .webapp import AppConfig, main as run_console
+
+        # the validated strategy is daily; default to 1d unless explicitly overridden
+        interval = args.interval or "1d"
+        run_console(
+            AppConfig(
+                assets=tuple(s.strip() for s in args.assets.split(",") if s.strip()),
+                interval=interval,
+                mode="ensemble",
+                live=bool(args.live),
+                max_order_usd=args.max_order_usd,
+                max_total_usd=args.max_total_usd,
+                port=args.port,
+            )
+        )
         return 0
 
     if args.command == "execute":

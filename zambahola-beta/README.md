@@ -2,6 +2,21 @@
 
 A radical rebuild of the prediction brain — **simpler, clearer, and honest**.
 
+## Just want the app? (no commands)
+
+```powershell
+cd zambahola-beta
+# optional: see your account / enable execution (keys stay outside the repo)
+$env:ZAMBAHOLA_KEYS_FILE = "C:\path\to\testnet-keys.txt"
+.\start.ps1
+```
+
+`start.ps1` opens a local web dashboard (http://127.0.0.1:8799): live trend
+signal per asset (INVEST/CASH), your equity, one-click rebalance (testnet +
+confirm), an **auto mode** that checks/executes on a schedule, and a strategy
+comparison — all visual. Defaults to the validated **daily** strategy on
+testnet; live trading needs `start.ps1 -Live` plus the RISK env confirm.
+
 The original TS agent is a great *operational* shell but its models are toys, its
 "LOB" is a coarse REST snapshot, and it has **no out-of-sample validation** — so
 it can't tell whether it actually has an edge. ZAMBAHOLA BETA is the missing
@@ -91,6 +106,7 @@ leaderboard to `reports/search_leaderboard.csv`.
 | `allocation.py` | Long-term trend/regime allocation (long/cash) vs HODL — the working edge |
 | `strategy.py` | "Thinking" allocator: consensus + vol-targeting + rotation, + live advisor |
 | `executor.py` | Safe Binance spot executor (testnet+dry-run default, keys out of repo, risk caps) |
+| `webapp.py` | Local web dashboard + background auto-runner (the no-commands UI) |
 | `cli.py` | `fetch` / `run` / `search` / `record` / `micro-run` / `micro-search` / `micro-maker` |
 
 ## Current honest result (Phase 2 search)
