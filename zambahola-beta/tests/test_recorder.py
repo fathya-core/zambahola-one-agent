@@ -3,7 +3,9 @@ from zambahola_beta.recorder import (
     MicroBarBuilder,
     book_features,
     cont_ofi,
+    load_micro,
     parse_message,
+    save_micro,
     synthetic_micro,
 )
 
@@ -62,3 +64,13 @@ def test_synthetic_micro_schema():
     assert list(df.columns) == MICRO_COLUMNS
     assert len(df) == 500
     assert (df["high"] >= df["low"]).all()
+
+
+def test_rotating_parts_merge_on_load(tmp_path):
+    df = synthetic_micro(n=20, seed=1)
+    # write two non-overlapping rotating parts (like the resilient recorder)
+    save_micro(df.iloc[:10].to_dict("records"), tmp_path, "BTCUSDT", tag="sess_0000")
+    save_micro(df.iloc[10:].to_dict("records"), tmp_path, "BTCUSDT", tag="sess_0001")
+    merged = load_micro(tmp_path)
+    assert len(merged) == 20
+    assert merged["ts"].is_monotonic_increasing

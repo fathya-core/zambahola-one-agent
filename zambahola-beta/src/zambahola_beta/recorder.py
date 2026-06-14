@@ -239,11 +239,12 @@ def micro_dir(data_dir: Path) -> Path:
     return data_dir / "micro"
 
 
-def save_micro(rows: list[dict], data_dir: Path, symbol: str) -> Path:
+def save_micro(rows: list[dict], data_dir: Path, symbol: str, tag: str | None = None) -> Path:
     out = micro_dir(data_dir)
     out.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(rows, columns=MICRO_COLUMNS)
-    path = out / f"micro_{symbol}_{int(time.time())}.parquet"
+    tag = tag or str(int(time.time() * 1000))
+    path = out / f"micro_{symbol}_{tag}.parquet"
     df.to_parquet(path, index=False)
     return path
 
@@ -267,38 +268,79 @@ async def record(
     data_dir: Path,
     flush_every: int = 300,
     verbose: bool = True,
-) -> Path:
-    """Connect to Binance WS and record micro bars to parquet for `duration_sec`."""
+) -> list[Path]:
+    """Resilient rolling recorder.
+
+    - Auto-reconnects on dropped/timed-out connections (no data loss on a blip).
+    - Flushes to a NEW rotating parquet part every `flush_every` bars, so a crash
+      loses at most the current partial buffer.
+    - `duration_sec <= 0` runs indefinitely until Ctrl+C.
+    """
     import websockets
 
     url = WS_URL.format(sym=symbol.lower())
     builder = MicroBarBuilder(bar_ms=bar_ms)
     rows: list[dict] = []
-    deadline = time.time() + duration_sec
+    written: list[Path] = []
+    session = int(time.time())
+    part = 0
+    total = 0
+    deadline = (time.time() + duration_sec) if duration_sec > 0 else float("inf")
 
-    async with websockets.connect(url, open_timeout=15, ping_interval=20) as ws:
+    def flush() -> None:
+        nonlocal rows, part
+        if not rows:
+            return
+        path = save_micro(rows, data_dir, symbol, tag=f"{session}_{part:04d}")
+        written.append(path)
+        if verbose:
+            print(f"[record] flushed {len(rows)} bars -> {path.name}")
+        rows = []
+        part += 1
+
+    try:
         while time.time() < deadline:
             try:
-                raw = await asyncio.wait_for(ws.recv(), timeout=10)
-            except asyncio.TimeoutError:
+                async with websockets.connect(
+                    url, open_timeout=15, ping_interval=20, ping_timeout=60, close_timeout=5
+                ) as ws:
+                    if verbose:
+                        print("[record] connected")
+                    while time.time() < deadline:
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=30)
+                        except asyncio.TimeoutError:
+                            break  # stale connection -> reconnect
+                        parsed = parse_message(json.loads(raw))
+                        if parsed is None:
+                            continue
+                        ts = int(time.time() * 1000)
+                        if parsed[0] == "depth":
+                            row = builder.add_book(ts, parsed[1], parsed[2])
+                        else:
+                            row = builder.add_trade(ts, parsed[1], parsed[2], parsed[3])
+                        if row:
+                            rows.append(row)
+                            total += 1
+                            if verbose and total % 50 == 0:
+                                print(f"[record] bars={total} last_mid={row['close']:.2f} ofi={row['ofi']:.2f}")
+                            if len(rows) >= flush_every:
+                                flush()
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:  # connection dropped/refused -> reconnect
+                if verbose:
+                    print(f"[record] connection lost ({type(exc).__name__}: {str(exc)[:80]}) — reconnecting in 2s")
+                await asyncio.sleep(2)
                 continue
-            parsed = parse_message(json.loads(raw))
-            if parsed is None:
-                continue
-            ts = int(time.time() * 1000)
-            if parsed[0] == "depth":
-                row = builder.add_book(ts, parsed[1], parsed[2])
-            else:
-                row = builder.add_trade(ts, parsed[1], parsed[2], parsed[3])
-            if row:
-                rows.append(row)
-                if verbose and len(rows) % 10 == 0:
-                    print(f"[record] bars={len(rows)} last_mid={row['close']:.2f} ofi={row['ofi']:.2f}")
+    except KeyboardInterrupt:
+        if verbose:
+            print("[record] stopped by user")
 
     final = builder.finalize()
     if final:
         rows.append(final)
-    path = save_micro(rows, data_dir, symbol)
+    flush()
     if verbose:
-        print(f"[record] saved {len(rows)} bars -> {path}")
-    return path
+        print(f"[record] done: {total} bars across {len(written)} file(s) in {micro_dir(data_dir)}")
+    return written

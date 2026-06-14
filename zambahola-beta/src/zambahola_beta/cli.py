@@ -96,17 +96,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "record":
         import asyncio
 
-        from .recorder import record
+        from .recorder import micro_dir, record
 
-        path = asyncio.run(
-            record(
-                symbol=cfg.symbol,
-                duration_sec=args.seconds,
-                bar_ms=args.bar_ms,
-                data_dir=cfg.data_dir,
+        try:
+            written = asyncio.run(
+                record(
+                    symbol=cfg.symbol,
+                    duration_sec=args.seconds,
+                    bar_ms=args.bar_ms,
+                    data_dir=cfg.data_dir,
+                )
             )
-        )
-        print(f"[beta] recorded -> {path}")
+        except KeyboardInterrupt:
+            written = []
+        print(f"[beta] recorded {len(written)} file(s) in {micro_dir(cfg.data_dir)}")
         return 0
 
     if args.command == "micro-run":
