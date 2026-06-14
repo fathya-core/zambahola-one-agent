@@ -59,11 +59,35 @@ small{color:var(--mut)}
 <div class="sw flex"><span class="dot off" id="autodot"></span><span id="autotxt">تلقائي: متوقف</span></div></div>
 
 <div class="card"><div class="flex">
-<button id="check">🔄 افحص الآن</button>
+<button id="check">🔄 افحص السوق الآن</button>
 <button id="exec" class="sec">⚡ نفّذ (testnet)</button>
 <button id="auto" class="sec">▶ شغّل الوضع التلقائي</button>
 <span class="sw"><small id="mode"></small></span>
 </div></div>
+
+<div class="card"><div class="flex"><b>الإعدادات</b><span class="sw"><small id="cfgnote"></small></span></div>
+<div class="row" style="margin-top:8px">
+ <div><div class="k">الوضع الحقيقي (Live)</div>
+  <div class="flex"><button id="live" class="sec">⚪ testnet (آمن)</button>
+  <small id="livewarn" style="color:var(--warn)"></small></div></div>
+ <div><div class="k">التعرّض / الرافعة</div>
+  <div class="flex" id="lev">
+   <button class="sec lv" data-v="0.5">محافظ 0.5x</button>
+   <button class="sec lv" data-v="1">كامل 1x</button>
+   <button class="sec lv" data-v="2">رافعة 2x ⚠</button>
+   <button class="sec lv" data-v="3">رافعة 3x ⚠</button>
+  </div><small id="levnote" style="color:var(--mut)"></small></div>
+</div>
+<div class="row" style="margin-top:6px">
+ <div><div class="k">عدد العملات الممسوحة</div><input id="uni" type="number" min="5" max="60" style="width:90px"></div>
+ <div><div class="k">عدد المراكز (أقوى ترند)</div><input id="topn" type="number" min="1" max="15" style="width:90px"></div>
+ <div><div class="k">حد الأمر $</div><input id="ord" type="number" min="0" style="width:90px"></div>
+ <div><div class="k">حد الإجمالي $</div><input id="tot" type="number" min="0" style="width:90px"></div>
+ <div style="display:flex;align-items:flex-end"><button id="save">💾 حفظ وإعادة فحص</button></div>
+</div></div>
+
+<div class="card"><div class="flex"><b>🔭 مسح السوق — أقوى الاتجاهات</b><span class="sw"><small id="scanned"></small></span></div>
+<div id="market" class="sub" style="margin-top:8px">جارٍ مسح السوق…</div></div>
 
 <div id="assets" class="row"></div>
 
@@ -81,33 +105,55 @@ const $=id=>document.getElementById(id);
 function actionBadge(a){if(a&&a.includes("INVEST"))return'<span class="badge b-up">استثمر</span>';
 if(a&&a.includes("PARTIAL"))return'<span class="badge b-warn">جزئي</span>';return'<span class="badge b-mut">نقد</span>';}
 async function api(path,method="GET",body){const r=await fetch(path,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});return r.json();}
+let LIVE=false;
+function setIf(id,v){const e=$(id);if(e&&document.activeElement!==e&&v!=null)e.value=v;}
 function render(s){
+ LIVE=!!s.live;
  $("sub").textContent="آخر تحديث: "+(s.updated||"—")+" · بيانات حتى "+(s.signal?.as_of||"—");
  $("mode").textContent="الوضع: "+(s.live?"حقيقي ⚠":"testnet")+" · أوامر حتى $"+s.max_order_usd+" / إجمالي $"+s.max_total_usd;
  $("autodot").className="dot "+(s.auto_enabled?"on":"off");
  $("autotxt").textContent="تلقائي: "+(s.auto_enabled?("يعمل كل "+s.auto_interval_hours+"س"+(s.auto_execute?" + تنفيذ":" (فحص فقط)")):"متوقف");
  $("auto").textContent=s.auto_enabled?"⏸ أوقف التلقائي":"▶ شغّل الوضع التلقائي";
+ // settings
+ $("live").textContent=s.live?"🔴 حقيقي (Live)":"⚪ testnet (آمن)";
+ $("live").className=s.live?"":"sec";
+ $("livewarn").textContent=s.live?"تداول بأموال حقيقية — يتطلّب ZAMBAHOLA_I_ACCEPT_REAL_TRADING=RISK":"";
+ document.querySelectorAll(".lv").forEach(b=>b.className=(parseFloat(b.dataset.v)===s.max_total)?"lv":"sec lv");
+ $("levnote").textContent=(s.max_total>1)?"⚠ الرافعة >1 تتطلّب حساب فيوتشرز — على spot يُنفَّذ 1x كحد أقصى":"تعرّض على spot (بدون رافعة)";
+ setIf("uni",s.universe_size);setIf("topn",s.top_n);setIf("ord",s.max_order_usd);setIf("tot",s.max_total_usd);
+ $("scanned").textContent=s.scanned!=null?("مُسح "+s.scanned+" عملة"):"";
+ // market scan table
+ const ranked=s.ranked||s.signal?.ranked;
+ if(ranked&&ranked.length){let h='<table><tr><th>#</th><th>العملة</th><th>السعر</th><th>قوة الترند</th><th>زخم 90ي</th><th>الوزن</th><th>الحالة</th></tr>';
+  ranked.forEach((r,i)=>{const inv=r.action==="INVEST";h+=`<tr><td>${i+1}</td><td><b>${r.symbol}</b></td><td>${r.price}</td>
+   <td>${Math.round((r.trend_consensus||0)*100)}%</td><td style="color:${r.momentum>=0?'var(--up)':'var(--down)'}">${(r.momentum*100).toFixed(1)}%</td>
+   <td>${Math.round((r.target_weight||0)*100)}%</td><td>${inv?'<span class="badge b-up">استثمر</span>':(r.action==="UPTREND"?'<span class="badge b-warn">صاعد</span>':'<span class="badge b-mut">—</span>')}</td></tr>`;});
+  $("market").innerHTML=h+'</table>';}
+ else $("market").textContent="السوق كله هابط الآن — البقاء نقداً هو القرار الصحيح (حماية من الخسارة).";
  const a=$("assets");a.innerHTML="";
  const rs=s.signal?s.signal.reasons:{};
- for(const sym in rs){const r=rs[sym];const pct=Math.round((r.trend_consensus||0)*100);
+ for(const sym in rs){const r=rs[sym];if((r.target_weight||0)<=0)continue;const pct=Math.round((r.trend_consensus||0)*100);
   a.innerHTML+=`<div class="card"><div class="flex"><b>${sym}</b><span class="sw">${actionBadge(r.action)}</span></div>
   <div class="big">${r.price}</div><div class="k">السعر</div>
   <div style="margin-top:8px">قوة الترند: ${pct}%<div class="bar"><i style="width:${pct}%"></i></div></div>
   <div class="k" style="margin-top:8px">الوزن الهدف: ${Math.round((r.target_weight||0)*100)}% · تقلّب: ${Math.round((r.realized_vol_ann||0)*100)}%</div></div>`;}
- if(s.cash_weight!=null)a.innerHTML+=`<div class="card"><div class="flex"><b>نقد</b><span class="sw badge b-mut">${Math.round(s.cash_weight*100)}%</span></div><div class="k" style="margin-top:8px">غير مستثمر — حماية من الهبوط</div></div>`;
+ if(s.cash_weight!=null&&s.cash_weight>0.001)a.innerHTML+=`<div class="card"><div class="flex"><b>نقد</b><span class="sw badge b-mut">${Math.round(s.cash_weight*100)}%</span></div><div class="k" style="margin-top:8px">غير مستثمر — حماية من الهبوط</div></div>`;
  $("acctstatus").innerHTML=s.account?.connected?'<span class="badge b-up">متصل</span>':'<span class="badge b-mut">غير متصل (أضف المفاتيح)</span>';
  $("equity").textContent=s.account?.equity_usd!=null?("$"+s.account.equity_usd):"—";
  $("balances").textContent=s.account?.balances?Object.entries(s.account.balances).map(([k,v])=>k+": "+v).join("  ·  "):"";
- $("exec").disabled=!s.account?.connected;
+ $("exec").disabled=!s.account?.connected;$("exec").textContent=s.live?"⚡ نفّذ (حقيقي ⚠)":"⚡ نفّذ (testnet)";
  if(s.portfolio&&s.portfolio.length){let h='<table><tr><th>استراتيجية</th><th>عائد</th><th>CAGR</th><th>Sharpe</th><th>أقصى تراجع</th></tr>';
   for(const r of s.portfolio)h+=`<tr><td>${r.strategy}</td><td>${(r.total_return*100).toFixed(0)}%</td><td>${(r.cagr*100).toFixed(0)}%</td><td>${r.sharpe}</td><td>${(r.max_drawdown*100).toFixed(0)}%</td></tr>`;
   $("pf").innerHTML=h+'</table>';}
  $("log").textContent=(s.actions||[]).slice().reverse().join("\\n");
 }
 async function refresh(){render(await api('/api/state'));}
-$("check").onclick=async()=>{$("check").disabled=true;$("check").textContent="…جارٍ";render(await api('/api/check','POST'));$("check").disabled=false;$("check").textContent="🔄 افحص الآن";};
-$("exec").onclick=async()=>{if(!confirm("تنفيذ إعادة التوازن على testnet الآن؟"))return;$("exec").disabled=true;render(await api('/api/execute','POST',{}));$("exec").disabled=false;};
+$("check").onclick=async()=>{$("check").disabled=true;$("check").textContent="…جارٍ مسح السوق";render(await api('/api/check','POST'));$("check").disabled=false;$("check").textContent="🔄 افحص السوق الآن";};
+$("exec").onclick=async()=>{if(!confirm((LIVE?"تنفيذ حقيقي بأموال فعلية":"تنفيذ على testnet")+" الآن؟"))return;$("exec").disabled=true;render(await api('/api/execute','POST',{}));$("exec").disabled=false;};
 $("auto").onclick=async()=>{render(await api('/api/auto','POST',{}));};
+$("live").onclick=async()=>{const next=!LIVE;if(next&&!confirm("تفعيل التداول الحقيقي بأموال فعلية؟ تأكد من المفاتيح وZAMBAHOLA_I_ACCEPT_REAL_TRADING=RISK"))return;render(await api('/api/config','POST',{live:next}));};
+document.querySelectorAll(".lv").forEach(b=>b.onclick=async()=>{render(await api('/api/config','POST',{max_total:parseFloat(b.dataset.v)}));});
+$("save").onclick=async()=>{render(await api('/api/config','POST',{universe_size:+$("uni").value,top_n:+$("topn").value,max_order_usd:+$("ord").value,max_total_usd:+$("tot").value}));};
 refresh();setInterval(refresh,15000);
 </script></body></html>"""
 
@@ -117,8 +163,11 @@ class AppConfig:
     assets: tuple[str, ...] = ("BTCUSDT", "ETHUSDT")
     interval: str = "1d"
     bars: int = 400
-    mode: str = "ensemble"
+    mode: str = "scan"  # scan = market-wide trend scanner (default), or ensemble
     target_vol: float = 0.6
+    max_total: float = 1.0  # gross exposure target (1.0 = full spot; >1 = leverage*)
+    universe_size: int = 25  # how many top coins to scan
+    top_n: int = 5  # how many strongest uptrends to hold
     max_order_usd: float = 20.0
     max_total_usd: float = 100.0
     live: bool = False
@@ -175,19 +224,48 @@ def _connect(live: bool) -> BinanceSpot | None:
     return BinanceSpot(keys, testnet=not live)
 
 
+def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str]]:
+    """Market-wide scan -> signal dict (UI-compatible) + scanned symbol list."""
+    from .universe import fetch_frames, fetch_top_symbols, scan
+
+    symbols = fetch_top_symbols(cfg.universe_size)
+    frames = fetch_frames(symbols, interval=cfg.interval, total=max(cfg.bars, 400))
+    sc = scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total)
+    as_of = ""
+    first = next((s for s in symbols if s in frames), None)
+    if first is not None:
+        as_of = str(frames[first]["open_time"].iloc[-1])
+    sig = {
+        "as_of": as_of,
+        "mode": "scan",
+        "scanned": sc["scanned"],
+        "targets": sc["targets"],
+        "cash_weight": sc["cash_weight"],
+        "ranked": sc["ranked"][:12],
+        "reasons": {r["symbol"]: r for r in sc["ranked"][:8]},
+    }
+    return sig, symbols
+
+
 def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -> None:
-    frames = fetch_many(list(cfg.assets), interval=cfg.interval, total=max(cfg.bars, 400))
-    sig = compute_signal(frames, mode=cfg.mode, target_vol=cfg.target_vol)
+    if cfg.mode == "scan":
+        sig, _ = _scan_signal(cfg)
+    else:
+        frames = fetch_many(list(cfg.assets), interval=cfg.interval, total=max(cfg.bars, 400))
+        sig = compute_signal(frames, mode=cfg.mode, target_vol=cfg.target_vol)
+
     client = _connect(cfg.live)
     account = {"connected": False}
     if client is not None:
         try:
-            account = account_snapshot(client, cfg.assets)
+            assets = tuple(sig["targets"].keys()) or cfg.assets
+            account = account_snapshot(client, assets or cfg.assets)
         except Exception as exc:  # noqa: BLE001
             account = {"connected": False, "error": str(exc)}
     pf = None
-    if with_portfolio:
+    if with_portfolio and cfg.mode != "scan":
         try:
+            frames = fetch_many(list(cfg.assets), interval=cfg.interval, total=max(cfg.bars, 400))
             pf = compare_portfolios(frames, cost_bps=10.0, target_vol=cfg.target_vol).to_dict("records")
         except Exception:  # noqa: BLE001
             pf = None
@@ -197,6 +275,18 @@ def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -
         if pf is not None:
             state.portfolio = pf
         state.updated = time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _resolve_whitelist(targets: dict, balances: dict, *, quote: str = "USDT", cap: int = 25) -> list[str]:
+    """Symbols the executor may trade = targets to ENTER + held coins to EXIT."""
+    out = list(targets.keys())
+    for base, qty in balances.items():
+        if base == quote or qty <= 0:
+            continue
+        sym = f"{base}{quote}"
+        if sym not in out:
+            out.append(sym)
+    return out[:cap]
 
 
 def do_execute(cfg: AppConfig, state: AppState) -> dict:
@@ -209,12 +299,26 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     if client is None:
         state.log("لا مفاتيح — التنفيذ متعذّر")
         return {"ok": False, "error": "no keys"}
-    frames = fetch_many(list(cfg.assets), interval=cfg.interval, total=max(cfg.bars, 400))
-    sig = compute_signal(frames, mode=cfg.mode, target_vol=cfg.target_vol)
-    acct = account_snapshot(client, cfg.assets)
+
+    if cfg.mode == "scan":
+        sig, _ = _scan_signal(cfg)
+    else:
+        frames = fetch_many(list(cfg.assets), interval=cfg.interval, total=max(cfg.bars, 400))
+        sig = compute_signal(frames, mode=cfg.mode, target_vol=cfg.target_vol)
+
+    balances = client.balances()
+    # dynamic whitelist: targets to ENTER + currently-held coins to EXIT
+    whitelist = _resolve_whitelist(sig["targets"], balances)
+    prices = {}
+    for s in whitelist:
+        try:
+            prices[s] = client.price(s)
+        except Exception:  # noqa: BLE001
+            pass
+    whitelist = tuple(s for s in whitelist if s in prices)
     limits = RiskLimits(max_order_usd=cfg.max_order_usd, max_total_usd=cfg.max_total_usd,
-                        whitelist=tuple(cfg.assets))
-    plan = plan_rebalance(sig["targets"], client.balances(), acct["_prices"], limits)
+                        whitelist=whitelist)
+    plan = plan_rebalance(sig["targets"], balances, prices, limits)
     if not plan.orders:
         state.log("لا حاجة لإعادة توازن (ضمن الحدود)")
         return {"ok": True, "orders": 0}
@@ -281,10 +385,41 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "auto_execute": state.auto_execute,
                     "auto_interval_hours": state.auto_interval_hours,
                     "cash_weight": state.signal.get("cash_weight") if state.signal else None,
+                    "scanned": state.signal.get("scanned") if state.signal else None,
+                    "ranked": state.signal.get("ranked") if state.signal else None,
                     "live": cfg.live,
+                    "mode": cfg.mode,
+                    "max_total": cfg.max_total,
+                    "universe_size": cfg.universe_size,
+                    "top_n": cfg.top_n,
                     "max_order_usd": cfg.max_order_usd,
                     "max_total_usd": cfg.max_total_usd,
                 }
+
+        def _read_json(self) -> dict:
+            try:
+                ln = int(self.headers.get("Content-Length", 0))
+                raw = self.rfile.read(ln) if ln else b"{}"
+                return json.loads(raw or b"{}")
+            except Exception:  # noqa: BLE001
+                return {}
+
+        def _apply_config(self, body: dict) -> None:
+            if "live" in body:
+                cfg.live = bool(body["live"])
+            if "max_total" in body:
+                cfg.max_total = max(0.1, min(3.0, float(body["max_total"])))
+            if "universe_size" in body:
+                cfg.universe_size = int(max(5, min(60, int(body["universe_size"]))))
+            if "top_n" in body:
+                cfg.top_n = int(max(1, min(15, int(body["top_n"]))))
+            if "max_order_usd" in body:
+                cfg.max_order_usd = max(0.0, float(body["max_order_usd"]))
+            if "max_total_usd" in body:
+                cfg.max_total_usd = max(0.0, float(body["max_total_usd"]))
+            if body.get("mode") in ("scan", "ensemble", "rotation", "trend"):
+                cfg.mode = body["mode"]
+            state.log("تحديث الإعدادات: " + json.dumps(body, ensure_ascii=False))
 
         def do_GET(self):
             if self.path == "/" or self.path.startswith("/index"):
@@ -305,6 +440,10 @@ def make_handler(cfg: AppConfig, state: AppState):
                 with state.lock:
                     state.auto_enabled = not state.auto_enabled
                 state.log("الوضع التلقائي " + ("تشغيل" if state.auto_enabled else "إيقاف"))
+                return self._send(200, self._state_dict())
+            if self.path == "/api/config":
+                self._apply_config(self._read_json())
+                threading.Thread(target=lambda: do_check(cfg, state), daemon=True).start()
                 return self._send(200, self._state_dict())
             return self._send(404, {"error": "not found"})
 

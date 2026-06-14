@@ -88,6 +88,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p_con = sub.add_parser("console", parents=[common], help="launch the web dashboard (everything, no commands)")
     p_con.add_argument("--assets", default="BTCUSDT,ETHUSDT")
+    p_con.add_argument("--mode", default="scan", choices=["scan", "ensemble", "rotation"],
+                       help="scan = market-wide trend scanner (default)")
+    p_con.add_argument("--universe-size", dest="universe_size", type=int, default=25)
+    p_con.add_argument("--top-n", dest="top_n", type=int, default=5)
     p_con.add_argument("--port", type=int, default=8799)
     p_con.add_argument("--live", action="store_true", help="REAL money mode (needs env confirm)")
     p_con.add_argument("--max-order-usd", dest="max_order_usd", type=float, default=20.0)
@@ -257,7 +261,9 @@ def main(argv: list[str] | None = None) -> int:
             AppConfig(
                 assets=tuple(s.strip() for s in args.assets.split(",") if s.strip()),
                 interval=interval,
-                mode="ensemble",
+                mode=args.mode,
+                universe_size=args.universe_size,
+                top_n=args.top_n,
                 live=bool(args.live),
                 max_order_usd=args.max_order_usd,
                 max_total_usd=args.max_total_usd,

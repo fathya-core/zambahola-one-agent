@@ -1,7 +1,12 @@
 import numpy as np
 import pandas as pd
 
-from zambahola_beta.webapp import AppConfig, AppState, compute_signal
+from zambahola_beta.webapp import (
+    AppConfig,
+    AppState,
+    _resolve_whitelist,
+    compute_signal,
+)
 
 
 def _daily(close, start="2020-01-01"):
@@ -43,7 +48,18 @@ def test_compute_signal_downtrend_goes_cash():
 def test_appconfig_defaults_safe():
     cfg = AppConfig()
     assert cfg.live is False  # testnet by default
+    assert cfg.mode == "scan"  # market-wide scanner by default
     assert cfg.max_total_usd <= 1000
+
+
+def test_resolve_whitelist_union_targets_and_holdings():
+    targets = {"SOLUSDT": 0.5, "AVAXUSDT": 0.5}
+    balances = {"USDT": 1000.0, "BTC": 0.01, "SOL": 2.0, "DOGE": 0.0}
+    wl = _resolve_whitelist(targets, balances)
+    # targets come first, held coins (qty>0) appended, USDT and zero-qty skipped
+    assert "SOLUSDT" in wl and "AVAXUSDT" in wl  # enter targets
+    assert "BTCUSDT" in wl  # held -> can EXIT
+    assert "USDTUSDT" not in wl and "DOGEUSDT" not in wl
 
 
 def test_appstate_log_caps_history():
