@@ -98,6 +98,27 @@ Conclusion: **OHLCV-only features carry no exploitable directional edge after
 costs** on BTC — the efficient-market reality. Tuning won't fix this; a
 different *signal source* is required.
 
+## Phase 3 finding (real, but maker-only)
+
+On ~4.6h of recorded BTC L2 data:
+- Order-flow features predict the **immediate next-tick** move strongly
+  (AUC ~0.83 at 5s) but that decays to AUC ~0.5-0.58 by 30-300s.
+- A `micro-search` across horizons shows a **real, positive GROSS edge** at
+  30-60s (AUC ~0.65, positive expectancy) — but only ~0.3-0.5 bps/trade.
+- Taker round-trip cost (~14 bps) is ~40x the edge, so **taker execution is
+  net-negative**. Under zero/maker costs, 11/12 configs are profitable.
+
+Conclusion: the signal is genuine and monetizable **only with maker (limit-order)
+execution** — capturing order-flow alpha is a market-making game, not a taker
+game. Sample is also still tiny (needs days, not hours, for significance).
+
+```powershell
+# search the micro edge across horizons/barriers/thresholds (taker costs)
+.\.venv\Scripts\python.exe -m zambahola_beta.cli micro-search
+# test the signal under maker (zero-cost) execution
+.\.venv\Scripts\python.exe -m zambahola_beta.cli micro-search --fee-bps 0 --slippage-bps 0
+```
+
 ## Phase 3 (built): real microstructure data path
 
 The L2 recorder + order-flow feature path now exists and is verified on live

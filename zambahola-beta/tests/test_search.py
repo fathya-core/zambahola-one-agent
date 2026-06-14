@@ -1,5 +1,11 @@
 from zambahola_beta.config import Config
-from zambahola_beta.search import LEADERBOARD_COLUMNS, rank_leaderboard, run_search
+from zambahola_beta.recorder import synthetic_micro
+from zambahola_beta.search import (
+    LEADERBOARD_COLUMNS,
+    rank_leaderboard,
+    run_micro_search,
+    run_search,
+)
 
 from conftest import make_trend_klines
 
@@ -41,3 +47,19 @@ def test_rank_leaderboard_orders_by_net_return():
     ranked = rank_leaderboard(lb, min_trades=1)
     if len(ranked) >= 2:
         assert ranked["net_return"].iloc[0] >= ranked["net_return"].iloc[1]
+
+
+def test_micro_search_produces_leaderboard():
+    micro = synthetic_micro(n=6000, seed=7)
+    base = Config(n_splits=3, embargo=40, vol_window=60)
+    lb = run_micro_search(
+        base,
+        micro,
+        horizons=[30, 60],
+        barrier_mults=[1.0, 2.0],
+        margins=[0.10, 0.15],
+    )
+    assert not lb.empty
+    assert list(lb.columns) == LEADERBOARD_COLUMNS
+    assert (lb["interval"] == "micro").all()
+    assert "gross_return" in lb.columns

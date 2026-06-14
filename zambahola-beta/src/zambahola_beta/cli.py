@@ -23,6 +23,7 @@ from .search import (
     DEFAULT_INTERVALS,
     DEFAULT_MARGINS,
     rank_leaderboard,
+    run_micro_search,
     run_search,
 )
 
@@ -66,6 +67,12 @@ def main(argv: list[str] | None = None) -> int:
     p_record.add_argument("--bar-ms", dest="bar_ms", type=int, default=1000)
 
     sub.add_parser("micro-run", parents=[common], help="run pipeline on recorded micro data")
+
+    p_msearch = sub.add_parser("micro-search", parents=[common], help="grid-search micro edge")
+    p_msearch.add_argument("--horizons", default="30,60,120,300")
+    p_msearch.add_argument("--mults", default="1.0,2.0,4.0")
+    p_msearch.add_argument("--margins", default="0.10,0.15,0.20")
+    p_msearch.add_argument("--top", type=int, default=12)
 
     p_search = sub.add_parser("search", parents=[common], help="grid-search for an edge")
     p_search.add_argument("--intervals", default=",".join(DEFAULT_INTERVALS))
@@ -115,6 +122,30 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "micro-run":
         report = run_micro_pipeline(cfg)
         _print_report(report)
+        return 0
+
+    if args.command == "micro-search":
+        from .recorder import load_micro
+
+        micro = load_micro(cfg.data_dir)
+        lb = run_micro_search(
+            cfg,
+            micro,
+            horizons=[int(s) for s in args.horizons.split(",") if s.strip()],
+            barrier_mults=[float(s) for s in args.mults.split(",") if s.strip()],
+            margins=[float(s) for s in args.margins.split(",") if s.strip()],
+        )
+        ranked = rank_leaderboard(lb, min_trades=20)
+        cfg.reports_dir.mkdir(parents=True, exist_ok=True)
+        out = cfg.reports_dir / "micro_search_leaderboard.csv"
+        lb.to_csv(out, index=False)
+        print(f"[beta] {len(lb)} configs · with-edge: {int(lb['has_edge'].sum())} · bars: {len(micro)}")
+        print(f"[beta] leaderboard -> {out}\n")
+        if ranked.empty:
+            print("No config met the trade-count threshold. Record more data or widen grid.")
+        else:
+            with pd.option_context("display.width", 220, "display.max_columns", 20):
+                print(ranked.head(args.top).to_string(index=False))
         return 0
 
     if args.command == "search":
