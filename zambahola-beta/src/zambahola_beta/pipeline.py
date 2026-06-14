@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .backtest import run_backtest, threshold_sweep
+from .backtest import has_edge, run_backtest, threshold_sweep
 from .config import Config
 from .data import fetch_klines, load_klines, save_klines
 from .features import FEATURE_COLUMNS, build_features
@@ -44,12 +44,17 @@ def get_klines(cfg: Config, *, fetch: bool, klines: pd.DataFrame | None) -> pd.D
 
 
 def assemble_micro_dataset(micro: pd.DataFrame, cfg: Config) -> pd.DataFrame:
-    """Join microstructure features + triple-barrier labels (mid OHLC)."""
+    """Join microstructure features + triple-barrier labels (mid OHLC).
+
+    Carries raw `spread_bps` as a passthrough column (excluded from model
+    features) for the maker-execution analysis.
+    """
     feats = build_micro_features(micro)
     labels = triple_barrier(micro, cfg.horizon, cfg.vol_window, cfg.barrier_mult)
     data = feats.copy()
     data["label"] = labels.label
     data["ret"] = labels.ret
+    data["spread_bps"] = micro.reset_index(drop=True)["spread_bps"].astype(float)
     data = data.dropna(subset=[*MICRO_FEATURE_COLUMNS, "label", "ret"])
     return data.sort_index().reset_index(drop=True)
 
@@ -117,18 +122,40 @@ def run_micro_pipeline(
     return _build_report(cfg, data, source, f"micro_{cfg.symbol}", write_report)
 
 
+def run_micro_maker(
+    cfg: Config,
+    *,
+    micro: pd.DataFrame | None = None,
+    maker_fee_bps: float = 1.0,
+) -> dict:
+    """Maker-execution analysis (optimistic/conservative bounds) for one config."""
+    from .maker_backtest import maker_eval
+
+    if micro is None:
+        from .recorder import load_micro
+
+        micro = load_micro(cfg.data_dir)
+    data = assemble_micro_dataset(micro, cfg)
+    wf = walk_forward_eval(data, cfg, carry=("spread_bps",))
+    maker = maker_eval(wf.oos, cfg, maker_fee_bps=maker_fee_bps)
+    return _jsonable(
+        {
+            "source": {"kind": "micro", "bars": int(len(micro))},
+            "config": {
+                "horizon": cfg.horizon,
+                "barrier_mult": cfg.barrier_mult,
+                "long_threshold": cfg.long_threshold,
+                "short_threshold": cfg.short_threshold,
+            },
+            "validation": {"folds": len(wf.fold_metrics), "mean_auc": wf.mean_metric("auc")},
+            "maker": maker,
+        }
+    )
+
+
 def _verdict(bt: dict) -> dict:
     """Honest go/no-go: a positive, risk-adjusted edge AFTER costs."""
-    sharpe = bt.get("sharpe")
-    net = bt.get("net_return", 0.0)
-    expectancy = bt.get("expectancy", 0.0)
-    edge = (
-        bt.get("n_trades", 0) >= 30
-        and expectancy is not None
-        and expectancy > 0
-        and net > 0
-        and (sharpe is not None and not math.isnan(sharpe) and sharpe > 0.5)
-    )
+    edge = has_edge(bt)
     return {
         "has_edge_after_costs": bool(edge),
         "note": (

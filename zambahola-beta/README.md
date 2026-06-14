@@ -86,7 +86,8 @@ leaderboard to `reports/search_leaderboard.csv`.
 | `recorder.py` | Phase-3 live L2 recorder (Binance depth20 + aggTrade) -> Cont OFI + book/trade flow bars |
 | `micro_features.py` | Order-flow / microstructure features from recorded bars |
 | `pipeline.py` | Orchestrates klines or micro stages; emits the verdict + JSON report |
-| `cli.py` | `fetch` / `run` / `search` / `record` / `micro-run` |
+| `maker_backtest.py` | Maker (limit-order) economics bounds using real spread + break-even |
+| `cli.py` | `fetch` / `run` / `search` / `record` / `micro-run` / `micro-search` / `micro-maker` |
 
 ## Current honest result (Phase 2 search)
 
@@ -108,15 +109,44 @@ On ~4.6h of recorded BTC L2 data:
 - Taker round-trip cost (~14 bps) is ~40x the edge, so **taker execution is
   net-negative**. Under zero/maker costs, 11/12 configs are profitable.
 
-Conclusion: the signal is genuine and monetizable **only with maker (limit-order)
-execution** — capturing order-flow alpha is a market-making game, not a taker
-game. Sample is also still tiny (needs days, not hours, for significance).
+### Maker analysis (the decisive test)
+
+`micro-maker` bounds the maker economics using the REAL recorded spread:
+- Gross edge at 30s ≈ **0.09 bps/trade**; break-even round-trip cost ≈ 0.09 bps.
+- BTCUSDT spread ≈ **0.0016 bps** (one tick on ~$64k) — essentially nothing to
+  capture as a maker.
+- Maker fee alone (~1 bp) is ~10x the edge → **not profitable even as a maker**.
+
+Decisive conclusion: **BTCUSDT short-horizon direction is not a viable retail
+edge — taker or maker.** BTC is the most liquid, efficient market on earth
+(1-tick spread); fees and efficiency dwarf any micro-edge. Higher-timeframe
+klines "edges" turned out to be trend/beta (Sharpe ~0.1, AUC ~0.5), rejected by
+the honest risk-adjusted gate.
 
 ```powershell
-# search the micro edge across horizons/barriers/thresholds (taker costs)
+# search the micro edge (taker costs)
 .\.venv\Scripts\python.exe -m zambahola_beta.cli micro-search
-# test the signal under maker (zero-cost) execution
+# zero-cost (maker upper bound)
 .\.venv\Scripts\python.exe -m zambahola_beta.cli micro-search --fee-bps 0 --slippage-bps 0
+# bounded maker analysis with real recorded spread
+.\.venv\Scripts\python.exe -m zambahola_beta.cli micro-maker --horizon 30 --long-threshold 0.65 --short-threshold 0.35
+```
+
+### Realistic paths from here
+
+1. **Less-liquid markets** (altcoins): wider spreads → real maker spread capture,
+   and less efficiency → genuine retail order-flow edges. Just run
+   `collect.ps1 <SYMBOL>` then `micro-search`. (BTCUSDT is the hardest target.)
+2. **Different game / longer horizon** with different signal classes (cross-asset
+   lead-lag, funding/OI regimes, sentiment, on-chain) where a small directional
+   edge x a larger move can beat costs.
+3. Accept that BTC HFT/market-making is not a retail game.
+
+Long-running collection (auto-restart, multi-day):
+
+```powershell
+.\collect.ps1              # BTCUSDT
+.\collect.ps1 ETHUSDT      # wider-spread symbol — more likely to show an edge
 ```
 
 ## Phase 3 (built): real microstructure data path

@@ -16,7 +16,7 @@ import pandas as pd
 
 from .config import Config
 from .data import fetch_klines, save_klines, synthetic_klines
-from .pipeline import run_micro_pipeline, run_pipeline
+from .pipeline import run_micro_maker, run_micro_pipeline, run_pipeline
 from .search import (
     DEFAULT_BARRIER_MULTS,
     DEFAULT_HORIZONS,
@@ -67,6 +67,9 @@ def main(argv: list[str] | None = None) -> int:
     p_record.add_argument("--bar-ms", dest="bar_ms", type=int, default=1000)
 
     sub.add_parser("micro-run", parents=[common], help="run pipeline on recorded micro data")
+
+    p_maker = sub.add_parser("micro-maker", parents=[common], help="maker-execution analysis")
+    p_maker.add_argument("--maker-fee-bps", dest="maker_fee_bps", type=float, default=1.0)
 
     p_msearch = sub.add_parser("micro-search", parents=[common], help="grid-search micro edge")
     p_msearch.add_argument("--horizons", default="30,60,120,300")
@@ -122,6 +125,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "micro-run":
         report = run_micro_pipeline(cfg)
         _print_report(report)
+        return 0
+
+    if args.command == "micro-maker":
+        report = run_micro_maker(cfg, maker_fee_bps=args.maker_fee_bps)
+        print(json.dumps(report, indent=2))
         return 0
 
     if args.command == "micro-search":

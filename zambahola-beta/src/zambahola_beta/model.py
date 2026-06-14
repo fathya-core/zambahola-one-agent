@@ -25,8 +25,8 @@ from sklearn.metrics import (
 
 from .config import Config
 
-# Columns that are never model inputs.
-_NON_FEATURE = ("label", "ret")
+# Columns that are never model inputs (targets / passthrough for the backtest).
+_NON_FEATURE = ("label", "ret", "spread_bps")
 
 
 class CalibratedModel:
@@ -118,10 +118,14 @@ def _fold_metrics(y_true: np.ndarray, p_up: np.ndarray) -> dict:
     return out
 
 
-def walk_forward_eval(data: pd.DataFrame, cfg: Config) -> WalkForwardOutput:
+def walk_forward_eval(
+    data: pd.DataFrame, cfg: Config, *, carry: tuple[str, ...] = ()
+) -> WalkForwardOutput:
     """Run purged walk-forward; return OOS predictions + per-fold metrics.
 
-    `data` must be temporally ordered with FEATURE_COLUMNS plus 'label' and 'ret'.
+    `data` must be temporally ordered with feature columns plus 'label' and 'ret'.
+    `carry` columns (e.g. 'spread_bps') are copied into the OOS frame for the
+    backtest but never used as model features.
     """
     data = data.reset_index(drop=True)
     feature_cols = [c for c in data.columns if c not in _NON_FEATURE]
@@ -144,10 +148,11 @@ def walk_forward_eval(data: pd.DataFrame, cfg: Config) -> WalkForwardOutput:
 
         test = data.iloc[test_idx]
         p_up = model.predict_proba_up(test[feature_cols])
-        frame = pd.DataFrame(
-            {"p_up": p_up, "label": test["label"].to_numpy(), "ret": test["ret"].to_numpy()},
-            index=test.index,
-        )
+        cols = {"p_up": p_up, "label": test["label"].to_numpy(), "ret": test["ret"].to_numpy()}
+        for c in carry:
+            if c in test.columns:
+                cols[c] = test[c].to_numpy()
+        frame = pd.DataFrame(cols, index=test.index)
         oos_frames.append(frame)
 
         dir_test = test[test["label"] != 0.0]

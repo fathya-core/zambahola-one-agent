@@ -16,7 +16,7 @@ from dataclasses import replace
 
 import pandas as pd
 
-from .backtest import run_backtest
+from .backtest import has_edge, run_backtest
 from .config import Config
 from .data import fetch_klines, load_klines, save_klines
 from .features import FEATURE_COLUMNS, build_features
@@ -114,7 +114,7 @@ def _row(interval, horizon, mult, margin, auc, bt) -> dict:
         "expectancy": bt["expectancy"],
         "sharpe": bt["sharpe"],
         "max_drawdown": bt["max_drawdown"],
-        "has_edge": bool(bt["n_trades"] >= 30 and bt["net_return"] > 0 and bt["expectancy"] > 0),
+        "has_edge": has_edge(bt),
     }
 
 

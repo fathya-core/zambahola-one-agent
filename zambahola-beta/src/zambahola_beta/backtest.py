@@ -7,10 +7,30 @@ This is the gate that decides whether anything is worth taking to a wallet.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 
 from .config import Config
+
+
+def has_edge(bt: dict) -> bool:
+    """Honest edge gate: positive AND risk-adjusted, not just net>0.
+
+    Requires enough trades, positive expectancy, a non-trivial Sharpe and a
+    tolerable drawdown — otherwise a few lucky trend/beta bets look like 'edge'.
+    """
+    sharpe = bt.get("sharpe")
+    return bool(
+        bt.get("n_trades", 0) >= 50
+        and bt.get("net_return", 0.0) > 0
+        and bt.get("expectancy", 0.0) > 0
+        and sharpe is not None
+        and not math.isnan(sharpe)
+        and sharpe > 1.0
+        and bt.get("max_drawdown", -1.0) > -0.25
+    )
 
 
 def _decide(p_up: np.ndarray, long_thr: float, short_thr: float) -> np.ndarray:
