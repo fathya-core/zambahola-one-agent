@@ -12,9 +12,19 @@ import argparse
 import json
 from dataclasses import replace
 
+import pandas as pd
+
 from .config import Config
 from .data import fetch_klines, save_klines, synthetic_klines
 from .pipeline import run_pipeline
+from .search import (
+    DEFAULT_BARRIER_MULTS,
+    DEFAULT_HORIZONS,
+    DEFAULT_INTERVALS,
+    DEFAULT_MARGINS,
+    rank_leaderboard,
+    run_search,
+)
 
 
 def _cfg_from_args(args: argparse.Namespace) -> Config:
@@ -51,6 +61,14 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--synthetic", action="store_true", help="use offline synthetic data")
     p_run.add_argument("--no-fetch", action="store_true", help="use cached parquet (no download)")
 
+    p_search = sub.add_parser("search", parents=[common], help="grid-search for an edge")
+    p_search.add_argument("--intervals", default=",".join(DEFAULT_INTERVALS))
+    p_search.add_argument("--horizons", default=",".join(str(h) for h in DEFAULT_HORIZONS))
+    p_search.add_argument("--mults", default=",".join(str(m) for m in DEFAULT_BARRIER_MULTS))
+    p_search.add_argument("--margins", default=",".join(str(m) for m in DEFAULT_MARGINS))
+    p_search.add_argument("--top", type=int, default=12)
+    p_search.add_argument("--no-fetch", action="store_true", help="use cached parquet")
+
     args = parser.parse_args(argv)
     cfg = _cfg_from_args(args)
 
@@ -67,6 +85,32 @@ def main(argv: list[str] | None = None) -> int:
         else:
             report = run_pipeline(cfg, fetch=not getattr(args, "no_fetch", False))
         _print_report(report)
+        return 0
+
+    if args.command == "search":
+        lb = run_search(
+            cfg,
+            intervals=[s.strip() for s in args.intervals.split(",") if s.strip()],
+            horizons=[int(s) for s in args.horizons.split(",") if s.strip()],
+            barrier_mults=[float(s) for s in args.mults.split(",") if s.strip()],
+            margins=[float(s) for s in args.margins.split(",") if s.strip()],
+            fetch=not args.no_fetch,
+        )
+        ranked = rank_leaderboard(lb)
+        cfg.reports_dir.mkdir(parents=True, exist_ok=True)
+        out = cfg.reports_dir / "search_leaderboard.csv"
+        lb.to_csv(out, index=False)
+        print(f"[beta] {len(lb)} configs tested · with-edge: {int(lb['has_edge'].sum())}")
+        print(f"[beta] leaderboard -> {out}\n")
+        if ranked.empty:
+            print("No config met the trade-count threshold. Widen the grid or data.")
+        else:
+            with pd.option_context("display.width", 200, "display.max_columns", 20):
+                print(ranked.head(args.top).to_string(index=False))
+            best = ranked.iloc[0]
+            verdict = "EDGE after costs" if bool(best["has_edge"]) else "still no positive edge"
+            print(f"\n[beta] best: {best['interval']} h={int(best['horizon'])} "
+                  f"mult={best['barrier_mult']} margin={best['margin']} -> {verdict}")
         return 0
 
     parser.error("unknown command")

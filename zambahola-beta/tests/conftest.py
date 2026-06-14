@@ -25,7 +25,9 @@ def make_trend_klines(n=1500, slope=0.0008, seed=1):
     high = close * 1.0005
     low = close * 0.9995
     open_ = np.concatenate([[100.0], close[:-1]])
-    vol = np.full(n, 100.0)
+    # varying volume/trades (real series are never perfectly flat)
+    vol = rng.lognormal(mean=4.0, sigma=0.4, size=n)
+    trades = rng.integers(50, 300, n).astype(float)
     start = pd.Timestamp("2025-01-01", tz="UTC")
     return pd.DataFrame(
         {
@@ -36,7 +38,7 @@ def make_trend_klines(n=1500, slope=0.0008, seed=1):
             "close": close,
             "volume": vol,
             "quote_volume": vol * close,
-            "trades": np.full(n, 100.0),
-            "taker_buy_base": vol * (0.5 + np.sign(regime) * 0.2),
+            "trades": trades,
+            "taker_buy_base": vol * np.clip(0.5 + np.sign(regime) * 0.2, 0.05, 0.95),
         }
     )

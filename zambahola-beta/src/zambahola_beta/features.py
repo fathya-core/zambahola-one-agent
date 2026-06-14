@@ -13,9 +13,10 @@ import pandas as pd
 
 FEATURE_COLUMNS = [
     "ret_1", "ret_5", "ret_15", "ret_30", "ret_60",
-    "vol_short", "vol_long", "vol_ratio",
-    "rsi", "macd_hist", "bb_pct", "zscore", "momentum",
+    "vol_short", "vol_long", "vol_ratio", "vol_of_vol",
+    "rsi", "macd_hist", "bb_pct", "zscore", "momentum", "mom_accel",
     "range_pct", "body_pct",
+    "dist_hi", "dist_lo",
     "volume_z", "trades_z",
     "taker_buy_ratio", "taker_buy_dev", "taker_buy_mom",
     "time_sin", "time_cos",
@@ -40,7 +41,12 @@ def _ema(s: pd.Series, span: int) -> pd.Series:
 def _zscore(s: pd.Series, window: int) -> pd.Series:
     mean = s.rolling(window).mean()
     std = s.rolling(window).std(ddof=0)
-    return (s - mean) / std.replace(0.0, np.nan)
+    z = (s - mean) / std.replace(0.0, np.nan)
+    # A flat (zero-variance) full window has z-score 0 by definition; only the
+    # warmup window (mean still NaN) should remain NaN. Prevents an entire
+    # feature column going NaN when a series is locally constant.
+    flat = mean.notna() & (std == 0.0)
+    return z.mask(flat, 0.0)
 
 
 def build_features(klines: pd.DataFrame) -> pd.DataFrame:
@@ -61,9 +67,13 @@ def build_features(klines: pd.DataFrame) -> pd.DataFrame:
     feat["ret_30"] = np.log(close).diff(30)
     feat["ret_60"] = np.log(close).diff(60)
 
-    feat["vol_short"] = log_ret.rolling(10).std(ddof=0)
-    feat["vol_long"] = log_ret.rolling(60).std(ddof=0)
-    feat["vol_ratio"] = feat["vol_short"] / feat["vol_long"].replace(0.0, np.nan) - 1.0
+    vol_short = log_ret.rolling(10).std(ddof=0)
+    vol_long = log_ret.rolling(60).std(ddof=0)
+    feat["vol_short"] = vol_short
+    feat["vol_long"] = vol_long
+    feat["vol_ratio"] = vol_short / vol_long.replace(0.0, np.nan) - 1.0
+    # volatility-of-volatility: how unstable the regime is
+    feat["vol_of_vol"] = vol_short.rolling(30).std(ddof=0) / vol_short.rolling(30).mean().replace(0.0, np.nan)
 
     feat["rsi"] = (_rsi(close) - 50.0) / 50.0
 
@@ -75,10 +85,19 @@ def build_features(klines: pd.DataFrame) -> pd.DataFrame:
     std20 = close.rolling(20).std(ddof=0)
     feat["bb_pct"] = (close - sma20) / (2.0 * std20.replace(0.0, np.nan))
     feat["zscore"] = (close - sma20) / std20.replace(0.0, np.nan)
-    feat["momentum"] = np.log(close).diff(8)
+    momentum = np.log(close).diff(8)
+    feat["momentum"] = momentum
+    feat["mom_accel"] = momentum - momentum.shift(8)  # change in momentum
 
     feat["range_pct"] = (high - low) / close
     feat["body_pct"] = (close - open_) / (high - low).replace(0.0, np.nan)
+
+    # breakout context: distance from recent high/low (mean-reversion vs breakout)
+    roll_hi = high.rolling(60).max()
+    roll_lo = low.rolling(60).min()
+    span = (roll_hi - roll_lo).replace(0.0, np.nan)
+    feat["dist_hi"] = (roll_hi - close) / span
+    feat["dist_lo"] = (close - roll_lo) / span
 
     feat["volume_z"] = _zscore(volume, 60)
     feat["trades_z"] = _zscore(df["trades"].astype(float), 60)

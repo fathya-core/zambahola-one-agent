@@ -51,9 +51,14 @@ python -m venv .venv
 
 # Just fetch data to parquet
 .\.venv\Scripts\python.exe -m zambahola_beta.cli fetch --bars 30000
+
+# Phase 2: grid-search for an edge across interval x horizon x barrier x threshold
+.\.venv\Scripts\python.exe -m zambahola_beta.cli search --bars 20000 \
+  --intervals 5m,15m,1h --horizons 4,8,16 --mults 1.0,2.0 --margins 0.06,0.10
 ```
 
-Reports are written to `reports/report_<symbol>_<interval>.json`.
+Reports are written to `reports/report_<symbol>_<interval>.json`; the search
+leaderboard to `reports/search_leaderboard.csv`.
 
 ## Tests / quality
 
@@ -75,18 +80,26 @@ Reports are written to `reports/report_<symbol>_<interval>.json`.
 | `pipeline.py` | Orchestrates the stages and emits the verdict + JSON report |
 | `cli.py` | `fetch` / `run` commands |
 
-## Current honest result
+## Current honest result (Phase 2 search)
 
-On BTCUSDT 1m, horizon 15, with klines-only features, out-of-sample
-**AUC ≈ 0.51** and the cost-aware backtest is **negative** → no edge yet. This is
-the expected, truthful baseline. It also proves the validation + cost gate work.
+A grid search of **36 configs** across intervals (5m/15m/1h), horizons
+(4/8/16), barrier multipliers and confidence thresholds found **zero** with a
+positive edge after costs. Best out-of-sample **AUC ≈ 0.52**; all net-negative.
 
-## Where the edge will come from (next)
+Conclusion: **OHLCV-only features carry no exploitable directional edge after
+costs** on BTC — the efficient-market reality. Tuning won't fix this; a
+different *signal source* is required.
 
-1. **Better data**: true L2 order-book event stream (depth diffs), not snapshots.
-2. **Horizon search**: longer horizons (5–60 min) are more predictable than 1m.
-3. **Richer features**: multi-timeframe, cross-asset, funding/OI regimes.
-4. **Only then**: promote to Binance testnet -> tiny real size, with risk limits.
+## Where the edge will come from (next: Phase 3)
 
-The pipeline is built to search these systematically — change `Config` and re-run;
-the verdict stays honest.
+1. **True microstructure data** (highest potential): record the Binance L2
+   order-book diff stream + trade prints over time to build a dataset, then
+   engineer real order-flow imbalance features. Research attributes ~80% of
+   short-horizon predictability to these.
+2. **Cross-asset / alternative data**: lead-lag from correlated assets, funding/OI
+   regimes, sentiment.
+3. **Only after a validated edge**: promote to Binance testnet -> tiny real size,
+   with strict risk limits (position sizing, stop-loss, daily loss cap).
+
+The search engine makes this systematic — add a signal source, re-run `search`,
+and the verdict stays honest.
