@@ -139,7 +139,13 @@ class BinanceSpot:
         query += "&signature=" + sign_query(query, self.keys.api_secret)
         url = f"{self.base}{path}?{query}"
         resp = self.session.request(method, url, timeout=15)
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            # surface Binance's {code, msg} instead of a bare HTTP error
+            try:
+                err = resp.json()
+                raise RuntimeError(f"Binance {err.get('code')}: {err.get('msg')}")
+            except ValueError:
+                raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
         return resp.json()
 
     def price(self, symbol: str) -> float:
@@ -153,6 +159,8 @@ class BinanceSpot:
 
     def market_order(self, symbol: str, side: str, *, quote_qty: float | None = None,
                      quantity: float | None = None) -> dict:
+        # quoteOrderQty works for BOTH BUY and SELL on spot MARKET orders and
+        # avoids LOT_SIZE/precision filters (no need to round base quantity).
         params: dict = {"symbol": symbol, "side": side, "type": "MARKET"}
         if quote_qty is not None:
             params["quoteOrderQty"] = round(quote_qty, 2)

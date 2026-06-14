@@ -369,12 +369,12 @@ def _run_execute(cfg: Config, args: argparse.Namespace) -> int:
 
     for o in plan.orders:
         try:
-            if o.side == "BUY":
-                res = client.market_order(o.symbol, "BUY", quote_qty=o.usd)
-            else:
-                qty = round(o.usd / prices[o.symbol], 6)
-                res = client.market_order(o.symbol, "SELL", quantity=qty)
-            print(f"   placed {o.side} {o.symbol}: orderId={res.get('orderId')} status={res.get('status')}")
+            # quoteOrderQty for both sides -> no LOT_SIZE precision issues
+            res = client.market_order(o.symbol, o.side, quote_qty=o.usd)
+            fills = res.get("fills") or []
+            filled = sum(float(f.get("qty", 0)) for f in fills)
+            print(f"   placed {o.side} {o.symbol}: orderId={res.get('orderId')} "
+                  f"status={res.get('status')} filledQty={filled}")
         except Exception as exc:
             print(f"   FAILED {o.side} {o.symbol}: {exc}")
     return 0
