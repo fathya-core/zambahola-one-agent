@@ -15,7 +15,7 @@ from dataclasses import replace
 import pandas as pd
 
 from .config import Config
-from .data import fetch_klines, save_klines, synthetic_klines
+from .data import fetch_klines, load_klines, save_klines, synthetic_klines
 from .pipeline import run_micro_maker, run_micro_pipeline, run_pipeline
 from .search import (
     DEFAULT_BARRIER_MULTS,
@@ -70,6 +70,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p_maker = sub.add_parser("micro-maker", parents=[common], help="maker-execution analysis")
     p_maker.add_argument("--maker-fee-bps", dest="maker_fee_bps", type=float, default=1.0)
+
+    p_alloc = sub.add_parser("allocate", parents=[common], help="long-term trend allocation vs HODL")
+    p_alloc.add_argument("--cost-bps", dest="alloc_cost_bps", type=float, default=10.0)
 
     p_cross = sub.add_parser("cross-search", parents=[common], help="cross-asset lead-lag search")
     p_cross.add_argument("--targets", default="SOLUSDT,DOGEUSDT,XRPUSDT,ADAUSDT,AVAXUSDT")
@@ -162,6 +165,28 @@ def main(argv: list[str] | None = None) -> int:
         else:
             with pd.option_context("display.width", 220, "display.max_columns", 20):
                 print(ranked.head(args.top).to_string(index=False))
+        return 0
+
+    if args.command == "allocate":
+        from .allocation import compare_strategies
+
+        path = cfg.klines_path()
+        if getattr(args, "no_fetch", False) and path.exists():
+            klines = load_klines(path)
+        else:
+            klines = fetch_klines(cfg.symbol, cfg.interval, cfg.bars)
+            save_klines(klines, path)
+        table = compare_strategies(klines, cost_bps=args.alloc_cost_bps)
+        print(f"[beta] {cfg.symbol} {cfg.interval} · {len(klines)} bars · cost {args.alloc_cost_bps}bps/switch\n")
+        with pd.option_context("display.width", 200, "display.max_columns", 20):
+            print(table.to_string(index=False))
+        hodl = table[table["strategy"] == "HODL"].iloc[0]
+        best = table.iloc[0]
+        print(
+            f"\n[beta] best by Calmar: {best['strategy']} "
+            f"(CAGR {best['cagr']:.1%}, maxDD {best['max_drawdown']:.1%}, Calmar {best['calmar']}) "
+            f"vs HODL (CAGR {hodl['cagr']:.1%}, maxDD {hodl['max_drawdown']:.1%})"
+        )
         return 0
 
     if args.command == "cross-search":

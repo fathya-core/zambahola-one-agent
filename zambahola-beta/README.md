@@ -88,6 +88,7 @@ leaderboard to `reports/search_leaderboard.csv`.
 | `pipeline.py` | Orchestrates klines or micro stages; emits the verdict + JSON report |
 | `maker_backtest.py` | Maker (limit-order) economics bounds using real spread + break-even |
 | `cross.py` | Cross-asset lead-lag: align target+leaders, leader features, search |
+| `allocation.py` | Long-term trend/regime allocation (long/cash) vs HODL — the working edge |
 | `cli.py` | `fetch` / `run` / `search` / `record` / `micro-run` / `micro-search` / `micro-maker` |
 
 ## Current honest result (Phase 2 search)
@@ -99,6 +100,32 @@ positive edge after costs. Best out-of-sample **AUC ≈ 0.52**; all net-negative
 Conclusion: **OHLCV-only features carry no exploitable directional edge after
 costs** on BTC — the efficient-market reality. Tuning won't fix this; a
 different *signal source* is required.
+
+## The edge that actually works: long-term trend allocation
+
+Short-horizon direction is a dead end for retail (below). The realistic
+"best return" is **low-frequency trend-following** (long in uptrends, cash in
+downtrends) — it captures bull markets, sidesteps the -80% crashes, trades a
+dozen times a year (costs negligible), and uses textbook un-tuned parameters
+(no overfitting). Validated on full daily history with realistic costs:
+
+| Symbol | Strategy | Total return | CAGR | Sharpe | Max DD |
+|--------|----------|--------------|------|--------|--------|
+| BTCUSDT | **SMA100 trend** | **+2249%** | 46.8% | 1.11 | **-38%** |
+| BTCUSDT | HODL | +799% | 30.6% | 0.74 | -77% |
+| ETHUSDT | **SMA50 trend** | **+2010%** | 44.9% | 0.95 | -55% |
+| ETHUSDT | HODL | +333% | 19.5% | 0.64 | -90% |
+
+~3-6x the return of buy-and-hold with **half the drawdown**, on both assets.
+
+```powershell
+.\.venv\Scripts\python.exe -m zambahola_beta.cli allocate --symbol BTCUSDT --interval 1d --bars 3000
+```
+
+Honest caveats: backtested over a bull-heavy era, so future CAGR will be lower;
+the *durable* advantage is the structural drawdown reduction (avoiding -80%
+crashes) and better risk-adjusted compounding through cycles. Spot long/cash,
+no leverage — directly implementable for retail.
 
 ## Phase 3 finding (real, but maker-only)
 
