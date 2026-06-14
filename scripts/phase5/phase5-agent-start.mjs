@@ -1,13 +1,11 @@
 #!/usr/bin/env node
 /** Start agent detached (Windows-safe) and wait for /api/status */
-import { spawn, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runNpm } from "../core/lib/run-npm.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const agentUrl = process.env.ZAMBAHOLA_AGENT_URL ?? "http://127.0.0.1:8787";
-const isWin = process.platform === "win32";
-const npm = isWin ? "npm.cmd" : "npm";
 
 export async function agentHealthy() {
   try {
@@ -26,20 +24,12 @@ export async function startAgentDetached(
 ) {
   console.log(`[phase5-start] launching ${cmd}...`);
 
-  if (isWin) {
-    // detached + shell:true is unreliable on Windows; use cmd start /B
-    spawnSync("cmd.exe", ["/c", "start", "zambahola-agent", "/B", npm, "run", cmd], {
-      cwd: root,
-      windowsHide: true,
-      stdio: "ignore",
-    });
-  } else {
-    const child = spawn(npm, ["run", cmd], {
-      cwd: root,
-      detached: true,
-      stdio: "ignore",
-    });
-    child.unref();
+  // `npm run <cmd>` invokes cli/start.ts, which itself spawns the agent runner
+  // detached (unref) and returns after ~2s. Running it to completion here is far
+  // more reliable on Windows than `cmd /c start /B`, which often fails to launch.
+  const r = runNpm(["run", cmd], { cwd: root, stdio: "inherit" });
+  if (!r.ok) {
+    console.error(`[phase5-start] launcher exited ${r.status}`);
   }
 
   const attempts = Math.max(1, Math.ceil(waitSec / 3));

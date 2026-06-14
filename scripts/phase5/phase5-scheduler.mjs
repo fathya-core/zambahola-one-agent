@@ -109,7 +109,17 @@ function localParts() {
   const dowMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
   const dow = dowMap[parts.weekday] ?? 0;
   const isNight = hour >= nightStart || hour < dayStart;
-  return { hour, dateKey, dow, isNight, mode: isNight ? "night" : "day" };
+  // A "night cycle" spans nightStart (evening) through the next morning. Hours
+  // after midnight but before dayStart belong to the PREVIOUS evening's cycle,
+  // so each night trains exactly once (keyed by the evening's date).
+  const cycleKey = hour < dayStart ? prevDateKey(dateKey) : dateKey;
+  return { hour, dateKey, cycleKey, dow, isNight, mode: isNight ? "night" : "day" };
+}
+
+function prevDateKey(dateKey) {
+  const d = new Date(`${dateKey}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 function spawnSidecar(name, args) {
@@ -146,14 +156,33 @@ async function stopAgent() {
 
 async function startAgent() {
   await log("agent_start", { cmd: agentCmd });
-  const r = await startAgentDetached(agentCmd);
+  const r = await startAgentDetached(agentCmd, { waitSec: 60 });
   const status = r.status;
   await log(r.ok ? "agent_up" : "agent_start_no_status", {
     tickCount: status?.tickCount,
     pid: status?.pid,
     feed: status?.feed,
   });
+  if (r.ok) await openDashboardOnce();
   return r.ok;
+}
+
+let dashboardOpened = false;
+async function openDashboardOnce() {
+  if (dashboardOpened) return;
+  if (process.env.ZAMBAHOLA_PHASE5_OPEN_DASHBOARD === "0") return;
+  dashboardOpened = true;
+  const url = (process.env.ZAMBAHOLA_AGENT_URL ?? "http://127.0.0.1:8787") + "/";
+  try {
+    if (isWin) {
+      spawn("cmd.exe", ["/c", "start", "", url], { stdio: "ignore", windowsHide: true });
+    } else {
+      spawn("xdg-open", [url], { stdio: "ignore" });
+    }
+    await log("dashboard_opened", { url });
+  } catch {
+    await log("dashboard_open_failed", { url });
+  }
 }
 
 async function runNightTrain(state, parts) {
@@ -161,14 +190,14 @@ async function runNightTrain(state, parts) {
     await log("night_train_skip", { reason: "in_progress" });
     return state;
   }
-  if (state.lastNightTrainKey === parts.dateKey) {
-    await log("night_train_skip", { reason: "already_done", dateKey: parts.dateKey });
+  if (state.lastNightTrainKey === parts.cycleKey) {
+    await log("night_train_skip", { reason: "already_done", cycleKey: parts.cycleKey });
     return state;
   }
 
   state.nightTrainInProgress = true;
   await saveState(state);
-  await log("night_train_begin", { dateKey: parts.dateKey, hour: parts.hour, dow: parts.dow });
+  await log("night_train_begin", { cycleKey: parts.cycleKey, hour: parts.hour, dow: parts.dow });
 
   const r = spawnSync(process.execPath, [join(root, "scripts/phase5/phase5-night-train.mjs")], {
     cwd: root,
@@ -177,8 +206,8 @@ async function runNightTrain(state, parts) {
   });
 
   if (r.status === 0) {
-    state.lastNightTrainKey = parts.dateKey;
-    await log("night_train_done", { dateKey: parts.dateKey });
+    state.lastNightTrainKey = parts.cycleKey;
+    await log("night_train_done", { cycleKey: parts.cycleKey });
   } else {
     await log("night_train_failed", { exit: r.status ?? 1 });
   }
@@ -186,6 +215,8 @@ async function runNightTrain(state, parts) {
   state.nightTrainInProgress = false;
   await saveState(state);
 
+  // Training finished → go LIVE immediately (do not wait for 6 AM / dayStart).
+  await log("go_live_after_train", { cycleKey: parts.cycleKey });
   if (!(await agentHealthy())) {
     await startAgent();
   }
@@ -195,6 +226,7 @@ async function runNightTrain(state, parts) {
 async function ensureDayAgent() {
   const status = await agentHealthy();
   if (status) {
+    await openDashboardOnce();
     return true;
   }
   await log("agent_down_restart");
@@ -239,18 +271,16 @@ async function tick(state) {
     });
   }
 
-  if (parts.isNight) {
+  // "Live" is driven by training completion, not the clock: train once when the
+  // night cycle opens, then run live continuously (through the morning and day)
+  // until the next night cycle — no forced 6 AM switch.
+  const trainedThisCycle = state.lastNightTrainKey === parts.cycleKey;
+  const shouldTrain = parts.isNight && !trainedThisCycle;
+
+  if (shouldTrain) {
     state = await runNightTrain(state, parts);
-    if (!state.nightTrainInProgress && !(await agentHealthy())) {
-      await ensureDayAgent();
-    } else if (await agentHealthy()) {
-      const s = await agentHealthy();
-      if (tickN % 5 === 1) {
-        await log("heartbeat", {
-          tickCount: s?.tickCount,
-          uptimeSec: s?.time?.uptimeSec,
-        });
-      }
+    // After training completes, fall through to live on the next tick.
+    if (await agentHealthy()) {
       await maybePush();
       await maybeAudit();
     }
@@ -263,6 +293,7 @@ async function tick(state) {
           tickCount: s.tickCount,
           uptimeSec: s.time?.uptimeSec,
           lastTickAgeSec: s.time?.lastTickAgeSec,
+          phase: parts.isNight ? "live_post_train" : "live_day",
         });
       }
     }
