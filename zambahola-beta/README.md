@@ -87,6 +87,7 @@ leaderboard to `reports/search_leaderboard.csv`.
 | `micro_features.py` | Order-flow / microstructure features from recorded bars |
 | `pipeline.py` | Orchestrates klines or micro stages; emits the verdict + JSON report |
 | `maker_backtest.py` | Maker (limit-order) economics bounds using real spread + break-even |
+| `cross.py` | Cross-asset lead-lag: align target+leaders, leader features, search |
 | `cli.py` | `fetch` / `run` / `search` / `record` / `micro-run` / `micro-search` / `micro-maker` |
 
 ## Current honest result (Phase 2 search)
@@ -131,6 +132,28 @@ the honest risk-adjusted gate.
 # bounded maker analysis with real recorded spread
 .\.venv\Scripts\python.exe -m zambahola_beta.cli micro-maker --horizon 30 --long-threshold 0.65 --short-threshold 0.35
 ```
+
+### Cross-asset lead-lag (tested)
+
+`cross-search` adds BTC/ETH leader features (recent leader returns/momentum +
+relative strength) to an altcoin target — a different signal class. On a 5m
+basket (SOL/DOGE/XRP/ADA/AVAX) it scored **0 edge**: AUC ~0.50-0.54 (a faint
+lead-lag exists, slightly above BTC's 0.51) but too small to beat costs. The
+lead-lag is real but arbitraged away at 5m on liquid pairs.
+
+```powershell
+.\.venv\Scripts\python.exe -m zambahola_beta.cli cross-search --interval 5m \
+  --targets SOLUSDT,DOGEUSDT,XRPUSDT,ADAUSDT,AVAXUSDT --leaders BTCUSDT,ETHUSDT
+```
+
+### Consolidated finding
+
+Across klines (BTC + alts), BTC microstructure, cross-asset lead-lag, and maker
+execution, **no data class tested produced a risk-adjusted edge after costs**.
+Liquid crypto direction is efficient; retail-accessible signals at these
+frequencies don't beat fees. The faint signals (order-flow AUC, cross-asset AUC
+>0.5) point to the only realistic frontier: **less-liquid markets at high
+frequency** (wider spreads + inefficiency), captured as a maker.
 
 ### Realistic paths from here
 

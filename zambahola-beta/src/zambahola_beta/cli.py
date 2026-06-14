@@ -71,6 +71,14 @@ def main(argv: list[str] | None = None) -> int:
     p_maker = sub.add_parser("micro-maker", parents=[common], help="maker-execution analysis")
     p_maker.add_argument("--maker-fee-bps", dest="maker_fee_bps", type=float, default=1.0)
 
+    p_cross = sub.add_parser("cross-search", parents=[common], help="cross-asset lead-lag search")
+    p_cross.add_argument("--targets", default="SOLUSDT,DOGEUSDT,XRPUSDT,ADAUSDT,AVAXUSDT")
+    p_cross.add_argument("--leaders", default="BTCUSDT,ETHUSDT")
+    p_cross.add_argument("--horizons", default="4,8,16")
+    p_cross.add_argument("--mults", default="1.0,2.0")
+    p_cross.add_argument("--margins", default="0.08,0.12")
+    p_cross.add_argument("--top", type=int, default=15)
+
     p_msearch = sub.add_parser("micro-search", parents=[common], help="grid-search micro edge")
     p_msearch.add_argument("--horizons", default="30,60,120,300")
     p_msearch.add_argument("--mults", default="1.0,2.0,4.0")
@@ -151,6 +159,35 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[beta] leaderboard -> {out}\n")
         if ranked.empty:
             print("No config met the trade-count threshold. Record more data or widen grid.")
+        else:
+            with pd.option_context("display.width", 220, "display.max_columns", 20):
+                print(ranked.head(args.top).to_string(index=False))
+        return 0
+
+    if args.command == "cross-search":
+        from .cross import rank_cross, run_cross_search
+        from .data import fetch_many
+
+        targets = [s.strip() for s in args.targets.split(",") if s.strip()]
+        leaders = [s.strip() for s in args.leaders.split(",") if s.strip()]
+        symbols = sorted(set(targets) | set(leaders))
+        frames = fetch_many(symbols, interval=cfg.interval, total=cfg.bars)
+        lb = run_cross_search(
+            cfg,
+            {t: frames[t] for t in targets},
+            {ldr: frames[ldr] for ldr in leaders},
+            horizons=[int(s) for s in args.horizons.split(",") if s.strip()],
+            barrier_mults=[float(s) for s in args.mults.split(",") if s.strip()],
+            margins=[float(s) for s in args.margins.split(",") if s.strip()],
+        )
+        ranked = rank_cross(lb)
+        cfg.reports_dir.mkdir(parents=True, exist_ok=True)
+        out = cfg.reports_dir / "cross_search_leaderboard.csv"
+        lb.to_csv(out, index=False)
+        print(f"[beta] {len(lb)} configs · with-edge: {int(lb['has_edge'].sum())} · leaders={leaders}")
+        print(f"[beta] leaderboard -> {out}\n")
+        if ranked.empty:
+            print("No config met the trade-count threshold.")
         else:
             with pd.option_context("display.width", 220, "display.max_columns", 20):
                 print(ranked.head(args.top).to_string(index=False))

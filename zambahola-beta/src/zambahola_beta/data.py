@@ -81,6 +81,18 @@ def fetch_klines(
     return df.tail(total).reset_index(drop=True)
 
 
+def fetch_many(
+    symbols: list[str],
+    interval: str = "5m",
+    total: int = 30_000,
+    *,
+    session: requests.Session | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Fetch klines for several symbols (for cross-asset analysis)."""
+    sess = session or requests.Session()
+    return {s: fetch_klines(s, interval, total, session=sess) for s in symbols}
+
+
 def save_klines(df: pd.DataFrame, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(path, index=False)
