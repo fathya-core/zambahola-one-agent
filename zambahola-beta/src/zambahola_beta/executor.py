@@ -45,25 +45,43 @@ class Keys:
 def mask(secret: str) -> str:
     if not secret:
         return "<empty>"
-    return f"{secret[:3]}…{secret[-2:]} (len {len(secret)})"
+    return f"{secret[:3]}...{secret[-2:]} (len {len(secret)})"
 
 
-def load_keys() -> Keys:
-    """Load from env vars first, else a file pointed to by ZAMBAHOLA_KEYS_FILE.
+def load_keys(testnet: bool = False) -> Keys:
+    """Load keys for the requested network (env vars first, then a file).
+
+    Testnet and live use DIFFERENT keys (testnet keys come from
+    testnet.binance.vision). Resolution order:
+
+    - testnet: BINANCE_TESTNET_API_KEY/SECRET -> ZAMBAHOLA_TESTNET_KEYS_FILE,
+      then falls back to the live vars below (back-compat).
+    - live:    BINANCE_API_KEY/SECRET -> ZAMBAHOLA_KEYS_FILE.
 
     File may be JSON {"apiKey","secret"} / {"api_key","api_secret"}, or
     KEY=VALUE lines, or two non-empty lines (key then secret).
     """
-    env_key = os.environ.get("BINANCE_API_KEY")
-    env_secret = os.environ.get("BINANCE_API_SECRET")
-    if env_key and env_secret:
-        return Keys(env_key.strip(), env_secret.strip())
+    if testnet:
+        ek = os.environ.get("BINANCE_TESTNET_API_KEY")
+        es = os.environ.get("BINANCE_TESTNET_API_SECRET")
+    else:
+        ek = os.environ.get("BINANCE_API_KEY")
+        es = os.environ.get("BINANCE_API_SECRET")
+    if ek and es:
+        return Keys(ek.strip(), es.strip())
 
-    path = os.environ.get("ZAMBAHOLA_KEYS_FILE")
+    if testnet:
+        path = os.environ.get("ZAMBAHOLA_TESTNET_KEYS_FILE") or os.environ.get("ZAMBAHOLA_KEYS_FILE")
+    else:
+        path = os.environ.get("ZAMBAHOLA_KEYS_FILE")
+
     if not path:
+        which = "testnet" if testnet else "live"
+        env_hint = ("BINANCE_TESTNET_API_KEY/SECRET or ZAMBAHOLA_TESTNET_KEYS_FILE"
+                    if testnet else "BINANCE_API_KEY/SECRET or ZAMBAHOLA_KEYS_FILE")
         raise RuntimeError(
-            "No keys: set BINANCE_API_KEY/BINANCE_API_SECRET, or ZAMBAHOLA_KEYS_FILE "
-            "to a file OUTSIDE the repo. Keys are never stored in the project."
+            f"No {which} keys: set {env_hint} to a file OUTSIDE the repo. "
+            "Keys are never stored in the project."
         )
     text = Path(path).read_text(encoding="utf-8").strip()
     keys = _parse_keys_text(text)
@@ -152,6 +170,18 @@ class BinanceSpot:
         r = self.session.get(f"{self.base}/api/v3/ticker/price", params={"symbol": symbol}, timeout=15)
         r.raise_for_status()
         return float(r.json()["price"])
+
+    def all_prices(self) -> dict[str, float]:
+        """Every symbol's price in ONE request (public). Avoids N per-symbol calls."""
+        r = self.session.get(f"{self.base}/api/v3/ticker/price", timeout=15)
+        r.raise_for_status()
+        out: dict[str, float] = {}
+        for d in r.json():
+            try:
+                out[d["symbol"]] = float(d["price"])
+            except (KeyError, TypeError, ValueError):
+                continue
+        return out
 
     def balances(self) -> dict[str, float]:
         acct = self._signed("GET", "/api/v3/account", {})

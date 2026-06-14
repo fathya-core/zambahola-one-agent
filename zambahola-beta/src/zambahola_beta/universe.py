@@ -9,6 +9,8 @@ whole market" like an expert.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pandas as pd
 import requests
 
@@ -57,18 +59,26 @@ def fetch_frames(
     interval: str = "1d",
     total: int = 400,
     min_bars: int = 120,
+    max_workers: int = 8,
     session: requests.Session | None = None,
 ) -> dict[str, pd.DataFrame]:
-    """Resilient multi-symbol fetch: skip any symbol that errors or is too short."""
-    sess = session or requests.Session()
-    out: dict[str, pd.DataFrame] = {}
-    for s in symbols:
+    """Resilient PARALLEL multi-symbol fetch: skip any symbol that errors/short.
+
+    Each worker uses its own Session (requests Sessions are not thread-safe).
+    Parallelism turns a ~20s sequential scan into a few seconds.
+    """
+    def _one(sym: str) -> tuple[str, pd.DataFrame | None]:
         try:
-            df = fetch_klines(s, interval, total, session=sess)
+            df = fetch_klines(sym, interval, total, session=requests.Session())
         except Exception:  # noqa: BLE001
-            continue
-        if len(df) >= min_bars:
-            out[s] = df
+            return sym, None
+        return sym, df if len(df) >= min_bars else None
+
+    out: dict[str, pd.DataFrame] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        for sym, df in ex.map(_one, symbols):
+            if df is not None:
+                out[sym] = df
     return out
 
 

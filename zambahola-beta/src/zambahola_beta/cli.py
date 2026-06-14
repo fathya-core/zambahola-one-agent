@@ -363,9 +363,9 @@ def _run_execute(cfg: Config, args: argparse.Namespace) -> int:
     targets = alloc["targets"]
     print(f"[beta] targets: {targets} · cash {int(alloc['cash_weight'] * 100)}%")
 
-    # 2) connect (keys loaded from env/file, never logged)
+    # 2) connect (keys loaded from env/file, never logged; testnet vs live differ)
     try:
-        keys = load_keys()
+        keys = load_keys(testnet=not live)
     except RuntimeError as exc:
         print(f"[beta] {exc}")
         return 1

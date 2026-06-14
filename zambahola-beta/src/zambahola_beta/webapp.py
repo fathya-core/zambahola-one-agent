@@ -199,26 +199,44 @@ def compute_signal(frames: dict, *, mode: str, target_vol: float) -> dict:
     return current_allocation(frames, mode=mode, target_vol=target_vol)
 
 
-def account_snapshot(client: BinanceSpot, assets: tuple[str, ...]) -> dict:
+def account_snapshot(client: BinanceSpot, assets: tuple[str, ...], *, quote: str = "USDT") -> dict:
+    """Connected account view. Uses ONE bulk price call (not N per-symbol), so it
+    stays fast even on a testnet faucet wallet with dozens of junk tokens, and
+    equity reflects the full real wallet."""
     balances = client.balances()
-    prices = {s: client.price(s) for s in assets}
-    quote = "USDT"
+    try:
+        allp = client.all_prices()
+    except Exception:  # noqa: BLE001
+        allp = {}
     equity = balances.get(quote, 0.0)
-    shown = {quote: round(balances.get(quote, 0.0), 2)}
+    prices: dict[str, float] = {}
+    valued: list[tuple[str, float, float]] = []  # (base, qty, usd)
+    for b, q in balances.items():
+        if b == quote or q <= 0:
+            continue
+        sym = f"{b}{quote}"
+        p = allp.get(sym, 0.0)
+        prices[sym] = p
+        usd = q * p
+        equity += usd
+        valued.append((b, q, usd))
     for s in assets:
-        base = s.replace(quote, "")
-        qty = balances.get(base, 0.0)
-        equity += qty * prices.get(s, 0.0)
-        if qty > 0:
-            shown[base] = round(qty, 6)
-    return {"connected": True, "equity_usd": round(equity, 2), "balances": shown, "_prices": prices}
+        if s in allp:
+            prices[s] = allp[s]
+    # keep the UI clean: USDT + top holdings by USD value (faucet wallets have 100s)
+    valued.sort(key=lambda x: x[2], reverse=True)
+    shown = {quote: round(balances.get(quote, 0.0), 2)}
+    for b, q, _usd in valued[:12]:
+        shown[b] = round(q, 6)
+    return {"connected": True, "equity_usd": round(equity, 2),
+            "balances": shown, "holdings_count": len(valued), "_prices": prices}
 
 
 # ---------- actions ----------
 
 def _connect(live: bool) -> BinanceSpot | None:
     try:
-        keys = load_keys()
+        keys = load_keys(testnet=not live)
     except RuntimeError:
         return None
     return BinanceSpot(keys, testnet=not live)
@@ -309,12 +327,11 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     balances = client.balances()
     # dynamic whitelist: targets to ENTER + currently-held coins to EXIT
     whitelist = _resolve_whitelist(sig["targets"], balances)
-    prices = {}
-    for s in whitelist:
-        try:
-            prices[s] = client.price(s)
-        except Exception:  # noqa: BLE001
-            pass
+    try:
+        allp = client.all_prices()
+    except Exception:  # noqa: BLE001
+        allp = {}
+    prices = {s: allp[s] for s in whitelist if s in allp and allp[s] > 0}
     whitelist = tuple(s for s in whitelist if s in prices)
     limits = RiskLimits(max_order_usd=cfg.max_order_usd, max_total_usd=cfg.max_total_usd,
                         whitelist=whitelist)
@@ -459,7 +476,7 @@ def main(cfg: AppConfig | None = None, *, open_browser: bool = True) -> None:
     threading.Thread(target=lambda: do_check(cfg, state, with_portfolio=True), daemon=True).start()
     httpd = ThreadingHTTPServer(("127.0.0.1", cfg.port), make_handler(cfg, state))
     url = f"http://127.0.0.1:{cfg.port}"
-    print(f"[beta] ZAMBAHOLA BETA Console → {url}")
+    print(f"[beta] ZAMBAHOLA BETA Console -> {url}")
     if open_browser:
         try:
             webbrowser.open(url)
