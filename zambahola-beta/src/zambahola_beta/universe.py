@@ -101,6 +101,10 @@ def trend_score(close: pd.Series, *, leader: pd.Series | None = None) -> dict:
     rel = 0.0
     if leader is not None and len(leader) > 90:
         rel = mom90 - float(leader.pct_change(90).iloc[-1])
+    # trailing drawdown: how far below the recent (60-bar) high we are now
+    win = min(60, len(close))
+    hi = float(close.rolling(win).max().iloc[-1]) if win > 0 else float(close.iloc[-1])
+    dd_high = (float(close.iloc[-1]) / hi - 1.0) if hi > 0 else 0.0
     return {
         "consensus": cons,
         "momentum": round(mom90, 4),
@@ -109,6 +113,7 @@ def trend_score(close: pd.Series, *, leader: pd.Series | None = None) -> dict:
         "risk_adj": round(risk_adj, 3),
         "accel": round(accel, 4),
         "rel_strength": round(rel, 4),
+        "dd_high": round(dd_high, 4),
     }
 
 
@@ -146,11 +151,13 @@ def scan(
     target_vol: float = 0.6,
     max_total: float = 1.0,
     min_consensus: float = 0.75,
+    stop_pct: float = 0.25,
     leader: str = "BTCUSDT",
     use_regime: bool = True,
 ) -> dict:
     """Rank coins by a smart composite score, allocate to the strongest
-    uptrends (vol-targeted, conviction-tilted), scaled by market regime."""
+    uptrends (vol-targeted, conviction-tilted), scaled by market regime, with a
+    trailing stop that refuses coins that have fallen hard from their highs."""
     lead_close = None
     if leader in frames:
         lead_close = frames[leader]["close"].astype(float).reset_index(drop=True)
@@ -164,13 +171,17 @@ def scan(
         s["symbol"] = sym
         s["price"] = round(float(close.iloc[-1]), 6)
         s["score"] = round(smart_score(s), 4)
+        s["stopped"] = s["dd_high"] <= -abs(stop_pct)
         scored.append(s)
 
     regime = market_regime(frames, leader) if use_regime else 1.0
     effective_total = max_total * regime
 
-    # eligible = clear uptrend with positive conviction; rank by smart score
-    eligible = [s for s in scored if s["consensus"] >= min_consensus and s["score"] > 0]
+    # eligible = clear uptrend, positive conviction, AND not stopped out
+    eligible = [
+        s for s in scored
+        if s["consensus"] >= min_consensus and s["score"] > 0 and not s["stopped"]
+    ]
     eligible.sort(key=lambda s: s["score"], reverse=True)
     picks = eligible[:top_n]
 
@@ -190,6 +201,8 @@ def scan(
     for s in sorted(scored, key=lambda s: s["score"], reverse=True):
         if s["symbol"] in targets:
             action = "INVEST"
+        elif s["consensus"] >= min_consensus and s["stopped"]:
+            action = "STOP"  # would qualify, but trailing stop hit -> protect
         elif s["consensus"] >= min_consensus:
             action = "UPTREND"
         else:
@@ -202,6 +215,7 @@ def scan(
             "risk_adj": s["risk_adj"],
             "rel_strength": s["rel_strength"],
             "score": s["score"],
+            "dd_high": s["dd_high"],
             "realized_vol_ann": s["vol"],
             "target_weight": targets.get(s["symbol"], 0.0),
             "action": action,

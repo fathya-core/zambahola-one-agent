@@ -48,6 +48,33 @@ def test_scan_picks_uptrends_and_ranks_smart():
     assert res["ranked"][-1]["action"] == "CASH"
 
 
+def test_trend_score_drawdown_from_high():
+    close = pd.Series(np.concatenate([np.linspace(100.0, 300.0, 200),
+                                      np.linspace(300.0, 210.0, 30)]))
+    s = trend_score(close)
+    assert s["dd_high"] <= -0.25  # ~30% below the recent 300 high
+
+
+def test_scan_trailing_stop_excludes_crashed_coin():
+    # rose to a high then fell ~28% off it within the 60-bar window
+    close = np.concatenate([
+        np.linspace(100.0, 280.0, 160),
+        np.linspace(280.0, 360.0, 40),
+        np.linspace(360.0, 260.0, 30),
+    ])
+    res = scan({"CRASHUSDT": _frame(close)}, top_n=5, stop_pct=0.25)
+    assert "CRASHUSDT" not in res["targets"]
+    row = next(r for r in res["ranked"] if r["symbol"] == "CRASHUSDT")
+    assert row["dd_high"] <= -0.25
+
+
+def test_scan_funded_coins_are_near_highs():
+    res = scan(_frames(), stop_pct=0.25)
+    for r in res["ranked"]:
+        if r["symbol"] in res["targets"]:
+            assert r["dd_high"] > -0.25  # never funds a coin past its stop
+
+
 def test_scan_all_down_goes_cash():
     n = 260
     down = {"AUSDT": _frame(np.linspace(200.0, 100.0, n)),
