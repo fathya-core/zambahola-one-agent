@@ -14,11 +14,13 @@ never shown (only masked).
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import webbrowser
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from .data import fetch_many
 from .executor import (
@@ -29,6 +31,47 @@ from .executor import (
     safety_gate,
 )
 from .strategy import compare_portfolios, current_allocation
+
+
+def _perf_path() -> Path:
+    return Path(os.environ.get("ZAMBAHOLA_DATA_DIR", "data")) / "equity_history.json"
+
+
+def _load_equity_history() -> list:
+    try:
+        data = json.loads(_perf_path().read_text("utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _save_equity_history(hist: list) -> None:
+    try:
+        p = _perf_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(hist), "utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def compute_pnl(hist: list) -> dict | None:
+    """Account value over time -> return since baseline (the actual performance)."""
+    pts = [h for h in hist if isinstance(h, dict) and "eq" in h]
+    if not pts:
+        return None
+    start = float(pts[0]["eq"]) or 1.0
+    cur = float(pts[-1]["eq"])
+    peak = max(float(p["eq"]) for p in pts)
+    return {
+        "start": round(float(pts[0]["eq"]), 2),
+        "current": round(cur, 2),
+        "pnl_usd": round(cur - float(pts[0]["eq"]), 2),
+        "pnl_pct": round((cur / start - 1.0) * 100, 2),
+        "drawdown_pct": round((cur / peak - 1.0) * 100, 2) if peak else 0.0,
+        "points": [round(float(p["eq"]), 2) for p in pts[-80:]],
+        "since": pts[0].get("t", ""),
+        "n": len(pts),
+    }
 
 DASHBOARD_HTML = """<!doctype html><html lang="ar" dir="rtl"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -100,6 +143,15 @@ small{color:var(--mut)}
 <div class="big" id="equity">—</div><div class="k">إجمالي القيمة (USDT)</div>
 <div id="balances" class="sub" style="margin-top:8px"></div></div>
 
+<div class="card"><div class="flex"><b>📈 الأداء الفعلي (PnL)</b>
+<button id="perfreset" class="sec sw" style="padding:5px 12px;font-size:12px">صفّر البداية</button></div>
+<div class="row" style="margin-top:8px;align-items:center">
+ <div style="min-width:120px"><div class="big" id="pnlpct">—</div><div class="k">العائد منذ البداية</div></div>
+ <div style="min-width:120px"><div class="big" id="pnlusd">—</div><div class="k">ربح/خسارة (USDT)</div></div>
+ <div style="flex:2"><canvas id="spark" width="420" height="56" style="width:100%;max-width:480px"></canvas>
+  <div class="k" id="pnlmeta"></div></div>
+</div></div>
+
 <div class="card"><b>مقارنة الاستراتيجيات</b><div id="pf" class="sub">اضغط "افحص الآن" لتحميلها…</div></div>
 
 <div class="card"><b>سجل الإجراءات</b><div class="log" id="log"></div></div>
@@ -151,10 +203,23 @@ function render(s){
  $("equity").textContent=s.account?.equity_usd!=null?("$"+s.account.equity_usd):"—";
  if(s.account?.balances){let bt=Object.entries(s.account.balances).map(([k,v])=>k+": "+v).join("  ·  ");const hc=s.account.holdings_count||0,sh=Object.keys(s.account.balances).length-1;if(hc>sh)bt+="   (+"+(hc-sh)+" أخرى)";$("balances").textContent=bt;}else $("balances").textContent="";
  $("exec").disabled=!s.account?.connected;$("exec").textContent=s.live?"⚡ نفّذ (حقيقي ⚠)":"⚡ نفّذ (testnet)";
+ renderPnl(s.pnl);
  if(s.portfolio&&s.portfolio.length){let h='<table><tr><th>استراتيجية</th><th>عائد</th><th>CAGR</th><th>Sharpe</th><th>أقصى تراجع</th></tr>';
   for(const r of s.portfolio)h+=`<tr><td>${r.strategy}</td><td>${(r.total_return*100).toFixed(0)}%</td><td>${(r.cagr*100).toFixed(0)}%</td><td>${r.sharpe}</td><td>${(r.max_drawdown*100).toFixed(0)}%</td></tr>`;
   $("pf").innerHTML=h+'</table>';}
  $("log").textContent=(s.actions||[]).slice().reverse().join("\\n");
+}
+function renderPnl(p){
+ if(!p){$("pnlpct").textContent="—";$("pnlusd").textContent="—";$("pnlmeta").textContent="بانتظار أول قراءة للحساب…";return;}
+ const up=p.pnl_usd>=0,col=up?'var(--up)':'var(--down)';
+ $("pnlpct").textContent=(up?'+':'')+p.pnl_pct+'%';$("pnlpct").style.color=col;
+ $("pnlusd").textContent=(up?'+':'')+'$'+p.pnl_usd;$("pnlusd").style.color=col;
+ $("pnlmeta").textContent='من $'+p.start+' إلى $'+p.current+' · '+p.n+' قراءة · أقصى تراجع '+p.drawdown_pct+'%';
+ const c=$("spark"),x=c.getContext('2d'),W=c.width,H=c.height,d=p.points||[];x.clearRect(0,0,W,H);
+ if(d.length>1){const mn=Math.min(...d),mx=Math.max(...d),rg=(mx-mn)||1;
+  x.beginPath();x.lineWidth=2;x.strokeStyle=col;
+  d.forEach((v,i)=>{const px=i/(d.length-1)*(W-4)+2,py=H-4-((v-mn)/rg)*(H-8);i?x.lineTo(px,py):x.moveTo(px,py);});x.stroke();
+  x.globalAlpha=0.12;x.lineTo(W-2,H);x.lineTo(2,H);x.closePath();x.fillStyle=col;x.fill();x.globalAlpha=1;}
 }
 async function refresh(){render(await api('/api/state'));}
 $("check").onclick=async()=>{$("check").disabled=true;$("check").textContent="…جارٍ مسح السوق";render(await api('/api/check','POST'));$("check").disabled=false;$("check").textContent="🔄 افحص السوق الآن";};
@@ -164,6 +229,7 @@ $("autoexec").onchange=async()=>{render(await api('/api/auto','POST',{enabled:AU
 $("live").onclick=async()=>{const next=!LIVE;if(next&&!confirm("تفعيل التداول الحقيقي بأموال فعلية؟ تأكد من المفاتيح وZAMBAHOLA_I_ACCEPT_REAL_TRADING=RISK"))return;render(await api('/api/config','POST',{live:next}));};
 document.querySelectorAll(".lv").forEach(b=>b.onclick=async()=>{render(await api('/api/config','POST',{max_total:parseFloat(b.dataset.v)}));});
 $("save").onclick=async()=>{render(await api('/api/config','POST',{universe_size:+$("uni").value,top_n:+$("topn").value,max_order_usd:+$("ord").value,max_total_usd:+$("tot").value}));};
+$("perfreset").onclick=async()=>{if(!confirm("تصفير سجل الأداء والبدء من القيمة الحالية؟"))return;render(await api('/api/perf-reset','POST',{}));};
 refresh();setInterval(refresh,15000);
 </script></body></html>"""
 
@@ -194,12 +260,35 @@ class AppState:
     auto_enabled: bool = False
     auto_execute: bool = False
     auto_interval_hours: float = 6.0
+    equity_history: list = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def log(self, msg: str) -> None:
         stamp = time.strftime("%Y-%m-%d %H:%M")
         self.actions.append(f"[{stamp}] {msg}")
         self.actions[:] = self.actions[-100:]
+
+    def record_equity(self, equity: float) -> None:
+        """Append an account-value point (throttled to ~1/min) and persist it."""
+        now = time.time()
+        with self.lock:
+            h = self.equity_history
+            if h:
+                try:
+                    last_ts = time.mktime(time.strptime(h[-1]["t"], "%Y-%m-%d %H:%M:%S"))
+                    if now - last_ts < 55:  # throttle: at most ~1 point/min
+                        return
+                except Exception:  # noqa: BLE001
+                    pass
+            h.append({"t": time.strftime("%Y-%m-%d %H:%M:%S"), "eq": round(float(equity), 2)})
+            self.equity_history = h[-2000:]
+            snapshot = list(self.equity_history)
+        _save_equity_history(snapshot)
+
+    def reset_equity(self) -> None:
+        with self.lock:
+            self.equity_history = []
+        _save_equity_history([])
 
 
 # ---------- testable core ----------
@@ -314,6 +403,9 @@ def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -
         if pf is not None:
             state.portfolio = pf
         state.updated = time.strftime("%Y-%m-%d %H:%M:%S")
+    # track actual account value over time (outside the lock)
+    if account.get("connected") and account.get("equity_usd") is not None:
+        state.record_equity(account["equity_usd"])
 
 
 def _resolve_whitelist(
@@ -440,6 +532,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "auto_enabled": state.auto_enabled,
                     "auto_execute": state.auto_execute,
                     "auto_interval_hours": state.auto_interval_hours,
+                    "pnl": compute_pnl(state.equity_history),
                     "cash_weight": state.signal.get("cash_weight") if state.signal else None,
                     "scanned": state.signal.get("scanned") if state.signal else None,
                     "regime": state.signal.get("regime") if state.signal else None,
@@ -521,16 +614,33 @@ def make_handler(cfg: AppConfig, state: AppState):
                 self._apply_config(self._read_json())
                 threading.Thread(target=lambda: do_check(cfg, state), daemon=True).start()
                 return self._send(200, self._state_dict())
+            if self.path == "/api/perf-reset":
+                state.reset_equity()
+                state.log("تصفير سجل الأداء — البداية من الآن")
+                threading.Thread(target=lambda: do_check(cfg, state), daemon=True).start()
+                return self._send(200, self._state_dict())
             return self._send(404, {"error": "not found"})
 
     return Handler
 
 
+def _refresh_loop(cfg: AppConfig, state: AppState) -> None:
+    """Keep signal/account/equity fresh (and the PnL curve growing) every 5 min."""
+    while True:
+        time.sleep(300)
+        try:
+            do_check(cfg, state)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def main(cfg: AppConfig | None = None, *, open_browser: bool = True) -> None:
     cfg = cfg or AppConfig()
     state = AppState()
+    state.equity_history = _load_equity_history()
     state.log("بدء اللوحة")
     threading.Thread(target=_auto_loop, args=(cfg, state), daemon=True).start()
+    threading.Thread(target=_refresh_loop, args=(cfg, state), daemon=True).start()
     # initial signal fetch in background so the page loads instantly
     threading.Thread(target=lambda: do_check(cfg, state, with_portfolio=True), daemon=True).start()
     httpd = ThreadingHTTPServer(("127.0.0.1", cfg.port), make_handler(cfg, state))

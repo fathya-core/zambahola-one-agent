@@ -5,6 +5,7 @@ from zambahola_beta.webapp import (
     AppConfig,
     AppState,
     _resolve_whitelist,
+    compute_pnl,
     compute_signal,
 )
 
@@ -50,6 +51,24 @@ def test_appconfig_defaults_safe():
     assert cfg.live is False  # testnet by default
     assert cfg.mode == "scan"  # market-wide scanner by default
     assert cfg.max_total_usd <= 1000
+
+
+def test_compute_pnl_gain_and_drawdown():
+    hist = [
+        {"t": "2026-01-01 00:00:00", "eq": 1000.0},
+        {"t": "2026-01-01 01:00:00", "eq": 1200.0},  # peak
+        {"t": "2026-01-01 02:00:00", "eq": 1100.0},  # pulled back from peak
+    ]
+    p = compute_pnl(hist)
+    assert p["start"] == 1000.0 and p["current"] == 1100.0
+    assert p["pnl_usd"] == 100.0
+    assert p["pnl_pct"] == 10.0
+    assert p["drawdown_pct"] < 0  # below the 1200 peak
+    assert p["points"] == [1000.0, 1200.0, 1100.0]
+
+
+def test_compute_pnl_empty_is_none():
+    assert compute_pnl([]) is None
 
 
 def test_resolve_whitelist_union_targets_and_holdings():
