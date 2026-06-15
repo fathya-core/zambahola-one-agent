@@ -102,6 +102,28 @@ def test_plan_skips_below_min_notional():
     assert plan.orders == []
 
 
+def test_plan_rebalance_buy_clamped_to_available_cash():
+    # only $15 cash, target wants 100% -> BUY must not exceed cash on hand
+    limits = RiskLimits(max_order_usd=50, max_total_usd=100, min_notional_usd=10,
+                        whitelist=("BTCUSDT",))
+    balances = {"USDT": 15.0}
+    prices = {"BTCUSDT": 100.0}
+    plan = plan_rebalance({"BTCUSDT": 1.0}, balances, prices, limits)
+    buys = [o for o in plan.orders if o.side == "BUY"]
+    assert buys and buys[0].usd <= 15.0
+
+
+def test_plan_rebalance_sell_clamped_to_holdings():
+    # holding only $50 of BTC, target 0 -> SELL must not exceed holdings
+    limits = RiskLimits(max_order_usd=1000, max_total_usd=10000, min_notional_usd=10,
+                        whitelist=("BTCUSDT",))
+    balances = {"USDT": 0.0, "BTC": 0.5}  # $50 at price 100
+    prices = {"BTCUSDT": 100.0}
+    plan = plan_rebalance({"BTCUSDT": 0.0}, balances, prices, limits)
+    sells = [o for o in plan.orders if o.side == "SELL"]
+    assert sells and sells[0].usd <= 50.0
+
+
 def test_no_real_keys_in_env_by_default():
     # sanity: tests never accidentally pick up real creds
     assert not (os.environ.get("BINANCE_API_KEY") and os.environ.get("BINANCE_API_SECRET")) or True

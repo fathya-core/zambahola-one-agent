@@ -245,7 +245,13 @@ def plan_rebalance(
     deployable = min(equity, limits.max_total_usd)
 
     plan = RebalancePlan(equity_usd=round(equity, 2), deployable_usd=round(deployable, 2))
-    for sym in limits.whitelist:
+    avail_quote = quote_bal  # track so total BUYs never exceed cash on hand
+    # SELL first (frees cash), then BUY — and do larger deltas first
+    order_syms = sorted(
+        limits.whitelist,
+        key=lambda s: (targets.get(s, 0.0) * deployable) - holdings_usd.get(s, 0.0),
+    )
+    for sym in order_syms:
         if sym not in prices or prices[sym] <= 0:
             plan.notes.append(f"{sym}: no price, skipped")
             continue
@@ -254,12 +260,19 @@ def plan_rebalance(
         delta = target_usd - holdings_usd[sym]
         if abs(delta) < limits.min_notional_usd:
             continue
-        capped = max(-limits.max_order_usd, min(limits.max_order_usd, delta))
-        side = "BUY" if capped > 0 else "SELL"
-        if side == "BUY" and quote_bal < limits.min_notional_usd:
-            plan.notes.append(f"{sym}: want BUY but insufficient {quote}")
-            continue
-        plan.orders.append(Order(symbol=sym, side=side, usd=round(abs(capped), 2),
+        if delta > 0:  # BUY — clamp to per-order cap AND cash actually available
+            usd = min(delta, limits.max_order_usd, avail_quote * 0.99)
+            if usd < limits.min_notional_usd:
+                plan.notes.append(f"{sym}: want BUY but insufficient {quote}")
+                continue
+            avail_quote -= usd
+            side = "BUY"
+        else:  # SELL — clamp to per-order cap AND what we actually hold
+            usd = min(-delta, limits.max_order_usd, holdings_usd[sym] * 0.99)
+            if usd < limits.min_notional_usd:
+                continue
+            side = "SELL"
+        plan.orders.append(Order(symbol=sym, side=side, usd=round(usd, 2),
                                  reason=f"target {target_w:.0%} -> {side}"))
     return plan
 

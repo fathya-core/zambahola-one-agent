@@ -82,12 +82,61 @@ def fetch_frames(
     return out
 
 
-def trend_score(close: pd.Series) -> dict:
-    """Causal trend strength for one coin (consensus + 90d momentum + vol)."""
+def trend_score(close: pd.Series, *, leader: pd.Series | None = None) -> dict:
+    """Multi-factor trend strength for one coin (causal, last bar):
+
+    - consensus: fraction of bullish trend votes (SMA50/100/200 + 90d).
+    - mom90 / mom30: medium and short momentum.
+    - vol: annualised realised vol (risk).
+    - risk_adj: mom90 / vol (Sharpe-like — reward per unit of risk).
+    - accel: mom30 - mom90/3 (is the move accelerating vs its own pace?).
+    - rel_strength: 90d return minus the market leader's (BTC) — true alpha.
+    """
     cons = float(trend_consensus(close).iloc[-1])
-    mom = float(close.pct_change(90).iloc[-1]) if len(close) > 90 else 0.0
+    mom90 = float(close.pct_change(90).iloc[-1]) if len(close) > 90 else 0.0
+    mom30 = float(close.pct_change(30).iloc[-1]) if len(close) > 30 else 0.0
     rv = float(realized_vol(close, 30).iloc[-1]) if len(close) > 30 else 0.0
-    return {"consensus": cons, "momentum": round(mom, 4), "vol": round(rv, 3)}
+    risk_adj = (mom90 / rv) if rv > 0 else 0.0
+    accel = mom30 - mom90 / 3.0
+    rel = 0.0
+    if leader is not None and len(leader) > 90:
+        rel = mom90 - float(leader.pct_change(90).iloc[-1])
+    return {
+        "consensus": cons,
+        "momentum": round(mom90, 4),
+        "mom30": round(mom30, 4),
+        "vol": round(rv, 3),
+        "risk_adj": round(risk_adj, 3),
+        "accel": round(accel, 4),
+        "rel_strength": round(rel, 4),
+    }
+
+
+def smart_score(s: dict) -> float:
+    """Composite conviction for an uptrend: reward risk-adjusted momentum,
+    acceleration, and relative strength vs the market — gated by trend
+    consensus so we never chase a coin that isn't actually trending up."""
+    if s["consensus"] < 0.5 or s["momentum"] <= 0:
+        return 0.0
+    return s["consensus"] * (
+        max(0.0, s["risk_adj"])
+        + 0.5 * max(0.0, s["accel"])
+        + 0.3 * max(0.0, s["rel_strength"])
+        + 0.2 * max(0.0, s["momentum"])
+    )
+
+
+def market_regime(frames: dict[str, pd.DataFrame], leader: str = "BTCUSDT") -> float:
+    """Risk-on/off scale in [0.4, 1.0] from the market leader's trend.
+    Alts crash with BTC, so when BTC is weak we cut total exposure (but never
+    to zero — strong relative trends can still earn at reduced size)."""
+    if leader not in frames:
+        return 1.0
+    close = frames[leader]["close"].astype(float).reset_index(drop=True)
+    if len(close) < 200:
+        return 1.0
+    cons = float(trend_consensus(close).iloc[-1])
+    return round(0.4 + 0.6 * cons, 3)
 
 
 def scan(
@@ -97,50 +146,72 @@ def scan(
     target_vol: float = 0.6,
     max_total: float = 1.0,
     min_consensus: float = 0.75,
+    leader: str = "BTCUSDT",
+    use_regime: bool = True,
 ) -> dict:
-    """Rank coins by trend, allocate to the top uptrends (vol-targeted)."""
+    """Rank coins by a smart composite score, allocate to the strongest
+    uptrends (vol-targeted, conviction-tilted), scaled by market regime."""
+    lead_close = None
+    if leader in frames:
+        lead_close = frames[leader]["close"].astype(float).reset_index(drop=True)
+
     scored = []
     for sym, df in frames.items():
         close = df["close"].astype(float).reset_index(drop=True)
         if len(close) < 120:
             continue
-        s = trend_score(close)
+        s = trend_score(close, leader=lead_close)
         s["symbol"] = sym
         s["price"] = round(float(close.iloc[-1]), 6)
+        s["score"] = round(smart_score(s), 4)
         scored.append(s)
 
-    # eligible = clear uptrend; rank the eligible by momentum
-    eligible = [s for s in scored if s["consensus"] >= min_consensus and s["momentum"] > 0]
-    eligible.sort(key=lambda s: s["momentum"], reverse=True)
+    regime = market_regime(frames, leader) if use_regime else 1.0
+    effective_total = max_total * regime
+
+    # eligible = clear uptrend with positive conviction; rank by smart score
+    eligible = [s for s in scored if s["consensus"] >= min_consensus and s["score"] > 0]
+    eligible.sort(key=lambda s: s["score"], reverse=True)
     picks = eligible[:top_n]
 
     targets: dict[str, float] = {}
     if picks:
-        # vol-target each pick, then normalise so the book sums to max_total
+        # weight = vol-target x conviction; normalise to the regime-scaled budget
         raw = {}
         for s in picks:
-            scale = min(1.0, target_vol / s["vol"]) if s["vol"] > 0 else 0.0
-            raw[s["symbol"]] = max(0.0, scale)
+            vscale = min(1.0, target_vol / s["vol"]) if s["vol"] > 0 else 0.0
+            conviction = max(0.1, s["score"])
+            raw[s["symbol"]] = max(0.0, vscale) * conviction
         ssum = sum(raw.values()) or 1.0
         for sym, w in raw.items():
-            targets[sym] = round(w / ssum * max_total, 4)
+            targets[sym] = round(w / ssum * effective_total, 4)
 
     ranked = []
-    for s in sorted(scored, key=lambda s: s["momentum"], reverse=True):
+    for s in sorted(scored, key=lambda s: s["score"], reverse=True):
+        if s["symbol"] in targets:
+            action = "INVEST"
+        elif s["consensus"] >= min_consensus:
+            action = "UPTREND"
+        else:
+            action = "CASH"
         ranked.append({
             "symbol": s["symbol"],
             "price": s["price"],
             "trend_consensus": round(s["consensus"], 2),
             "momentum": s["momentum"],
+            "risk_adj": s["risk_adj"],
+            "rel_strength": s["rel_strength"],
+            "score": s["score"],
             "realized_vol_ann": s["vol"],
             "target_weight": targets.get(s["symbol"], 0.0),
-            "action": "INVEST" if s["symbol"] in targets else ("UPTREND" if s["consensus"] >= min_consensus else "CASH"),
+            "action": action,
         })
 
     cash = round(max(0.0, 1.0 - sum(targets.values())), 4)
     return {
         "mode": "scan",
         "scanned": len(scored),
+        "regime": regime,
         "picks": list(targets.keys()),
         "targets": targets,
         "cash_weight": cash,

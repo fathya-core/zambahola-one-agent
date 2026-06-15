@@ -5,7 +5,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from zambahola_beta.universe import fetch_top_symbols, scan, trend_score
+from zambahola_beta.universe import (
+    fetch_top_symbols,
+    market_regime,
+    scan,
+    trend_score,
+)
 
 
 def _frame(values: np.ndarray) -> pd.DataFrame:
@@ -29,18 +34,18 @@ def test_trend_score_directions():
     assert down["consensus"] <= 0.25 and down["momentum"] < 0
 
 
-def test_scan_picks_uptrends_and_ranks_by_momentum():
+def test_scan_picks_uptrends_and_ranks_smart():
     res = scan(_frames(), top_n=5, target_vol=0.6, max_total=1.0)
     assert res["scanned"] == 3
     # downtrend coin must not be funded
     assert "DOWNUSDT_X" not in res["targets"]
-    # both uptrends funded, book sums to ~max_total
+    # both uptrends funded, book sums to ~max_total (no BTC leader -> regime 1.0)
     assert set(res["targets"]) == {"UPUSDT_X", "MILDUSDT"}
     assert abs(sum(res["targets"].values()) - 1.0) < 1e-6
-    # ranked by momentum: strong uptrend first
-    syms = [r["symbol"] for r in res["ranked"]]
-    assert syms[0] == "UPUSDT_X"
+    # smart ranking: an invested uptrend on top, the downtrend last and in cash
     assert res["ranked"][0]["action"] == "INVEST"
+    assert res["ranked"][-1]["symbol"] == "DOWNUSDT_X"
+    assert res["ranked"][-1]["action"] == "CASH"
 
 
 def test_scan_all_down_goes_cash():
@@ -53,8 +58,30 @@ def test_scan_all_down_goes_cash():
 
 
 def test_scan_respects_max_total_leverage():
+    # no BTC leader in the synthetic basket -> regime 1.0 -> full max_total
     res = scan(_frames(), top_n=5, max_total=2.0)
     assert abs(sum(res["targets"].values()) - 2.0) < 1e-6
+
+
+def test_market_regime_scales_with_leader():
+    n = 260
+    up = _frame(np.linspace(100.0, 300.0, n))
+    down = _frame(np.linspace(300.0, 100.0, n))
+    assert market_regime({"BTCUSDT": up}) > 0.9     # BTC up -> risk on
+    assert market_regime({"BTCUSDT": down}) < 0.5   # BTC down -> risk off
+    assert market_regime({}) == 1.0                 # unknown -> neutral
+
+
+def test_scan_regime_cuts_exposure_when_btc_weak():
+    n = 260
+    frames = {
+        "BTCUSDT": _frame(np.linspace(300.0, 100.0, n)),     # market leader DOWN
+        "ALTUSDT": _frame(np.linspace(100.0, 320.0, n)),     # a strong alt uptrend
+    }
+    res = scan(frames, top_n=5, max_total=1.0)
+    # alt still funded, but total exposure is scaled down by the risk-off regime
+    assert res["regime"] < 0.5
+    assert 0 < sum(res["targets"].values()) <= res["regime"] + 1e-6
 
 
 class _Resp:

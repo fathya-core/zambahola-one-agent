@@ -121,12 +121,13 @@ function render(s){
  document.querySelectorAll(".lv").forEach(b=>b.className=(parseFloat(b.dataset.v)===s.max_total)?"lv":"sec lv");
  $("levnote").textContent=(s.max_total>1)?"⚠ الرافعة >1 تتطلّب حساب فيوتشرز — على spot يُنفَّذ 1x كحد أقصى":"تعرّض على spot (بدون رافعة)";
  setIf("uni",s.universe_size);setIf("topn",s.top_n);setIf("ord",s.max_order_usd);setIf("tot",s.max_total_usd);
- $("scanned").textContent=s.scanned!=null?("مُسح "+s.scanned+" عملة"):"";
- // market scan table
+ {let sc=s.scanned!=null?("مُسح "+s.scanned+" عملة"):"";if(s.regime!=null){const rp=Math.round(s.regime*100);sc+=" · وضع السوق: "+rp+"% "+(rp>=80?"🟢":(rp>=55?"🟡":"🔴 خطر"));}$("scanned").textContent=sc;}
+ // market scan table (smart score = risk-adjusted momentum + acceleration + relative strength)
  const ranked=s.ranked||s.signal?.ranked;
- if(ranked&&ranked.length){let h='<table><tr><th>#</th><th>العملة</th><th>السعر</th><th>قوة الترند</th><th>زخم 90ي</th><th>الوزن</th><th>الحالة</th></tr>';
+ if(ranked&&ranked.length){let h='<table><tr><th>#</th><th>العملة</th><th>السعر</th><th>قوة الترند</th><th>زخم 90ي</th><th>عائد/مخاطرة</th><th>الوزن</th><th>الحالة</th></tr>';
   ranked.forEach((r,i)=>{const inv=r.action==="INVEST";h+=`<tr><td>${i+1}</td><td><b>${r.symbol}</b></td><td>${r.price}</td>
    <td>${Math.round((r.trend_consensus||0)*100)}%</td><td style="color:${r.momentum>=0?'var(--up)':'var(--down)'}">${(r.momentum*100).toFixed(1)}%</td>
+   <td style="color:${(r.risk_adj||0)>=0?'var(--up)':'var(--down)'}">${(r.risk_adj!=null?r.risk_adj.toFixed(2):'—')}</td>
    <td>${Math.round((r.target_weight||0)*100)}%</td><td>${inv?'<span class="badge b-up">استثمر</span>':(r.action==="UPTREND"?'<span class="badge b-warn">صاعد</span>':'<span class="badge b-mut">—</span>')}</td></tr>`;});
   $("market").innerHTML=h+'</table>';}
  else $("market").textContent="السوق كله هابط الآن — البقاء نقداً هو القرار الصحيح (حماية من الخسارة).";
@@ -242,8 +243,8 @@ def _connect(live: bool) -> BinanceSpot | None:
     return BinanceSpot(keys, testnet=not live)
 
 
-def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str]]:
-    """Market-wide scan -> signal dict (UI-compatible) + scanned symbol list."""
+def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str], dict]:
+    """Market-wide scan -> (signal dict, scanned symbols by volume, frames)."""
     from .universe import fetch_frames, fetch_top_symbols, scan
 
     symbols = fetch_top_symbols(cfg.universe_size)
@@ -257,19 +258,36 @@ def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str]]:
         "as_of": as_of,
         "mode": "scan",
         "scanned": sc["scanned"],
+        "regime": sc.get("regime", 1.0),
         "targets": sc["targets"],
         "cash_weight": sc["cash_weight"],
         "ranked": sc["ranked"][:12],
         "reasons": {r["symbol"]: r for r in sc["ranked"][:8]},
     }
-    return sig, symbols
+    return sig, symbols, frames
+
+
+def _portfolio_records(frames: dict, symbols: list[str], cfg: AppConfig) -> list | None:
+    """Strategy comparison on a long-history liquid basket (reuses scan frames)."""
+    try:
+        if cfg.mode == "scan":
+            basket_syms = [s for s in symbols if s in frames and len(frames[s]) >= 350][:4]
+            basket = {s: frames[s] for s in basket_syms}
+        else:
+            basket = frames
+        if not basket:
+            return None
+        return compare_portfolios(basket, cost_bps=10.0, target_vol=cfg.target_vol).to_dict("records")
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -> None:
     if cfg.mode == "scan":
-        sig, _ = _scan_signal(cfg)
+        sig, symbols, frames = _scan_signal(cfg)
     else:
-        frames = fetch_many(list(cfg.assets), interval=cfg.interval, total=max(cfg.bars, 400))
+        symbols = list(cfg.assets)
+        frames = fetch_many(symbols, interval=cfg.interval, total=max(cfg.bars, 400))
         sig = compute_signal(frames, mode=cfg.mode, target_vol=cfg.target_vol)
 
     client = _connect(cfg.live)
@@ -280,13 +298,7 @@ def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -
             account = account_snapshot(client, assets or cfg.assets)
         except Exception as exc:  # noqa: BLE001
             account = {"connected": False, "error": str(exc)}
-    pf = None
-    if with_portfolio and cfg.mode != "scan":
-        try:
-            frames = fetch_many(list(cfg.assets), interval=cfg.interval, total=max(cfg.bars, 400))
-            pf = compare_portfolios(frames, cost_bps=10.0, target_vol=cfg.target_vol).to_dict("records")
-        except Exception:  # noqa: BLE001
-            pf = None
+    pf = _portfolio_records(frames, symbols, cfg) if with_portfolio else None
     with state.lock:
         state.signal = sig
         state.account = account
@@ -319,7 +331,7 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         return {"ok": False, "error": "no keys"}
 
     if cfg.mode == "scan":
-        sig, _ = _scan_signal(cfg)
+        sig, _, _ = _scan_signal(cfg)
     else:
         frames = fetch_many(list(cfg.assets), interval=cfg.interval, total=max(cfg.bars, 400))
         sig = compute_signal(frames, mode=cfg.mode, target_vol=cfg.target_vol)
@@ -403,6 +415,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "auto_interval_hours": state.auto_interval_hours,
                     "cash_weight": state.signal.get("cash_weight") if state.signal else None,
                     "scanned": state.signal.get("scanned") if state.signal else None,
+                    "regime": state.signal.get("regime") if state.signal else None,
                     "ranked": state.signal.get("ranked") if state.signal else None,
                     "live": cfg.live,
                     "mode": cfg.mode,
