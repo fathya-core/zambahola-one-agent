@@ -229,6 +229,7 @@ class RiskLimits:
     max_order_usd: float = 20.0
     max_total_usd: float = 100.0
     min_notional_usd: float = 10.0
+    rebalance_band: float = 0.0  # skip rebalances smaller than band*position (fee-aware)
     whitelist: tuple[str, ...] = ("BTCUSDT", "ETHUSDT")
     quote: str = "USDT"
 
@@ -279,7 +280,10 @@ def plan_rebalance(
         target_w = max(0.0, min(1.0, targets.get(sym, 0.0)))
         target_usd = target_w * deployable
         delta = target_usd - holdings_usd[sym]
-        if abs(delta) < limits.min_notional_usd:
+        # fee-aware: ignore small drifts (don't churn on noise); always allow full exits
+        band = limits.rebalance_band * max(target_usd, holdings_usd[sym])
+        threshold = limits.min_notional_usd if target_usd <= 0 else max(limits.min_notional_usd, band)
+        if abs(delta) < threshold:
             continue
         if delta > 0:  # BUY — clamp to per-order cap AND cash actually available
             usd = min(delta, limits.max_order_usd, avail_quote * 0.99)

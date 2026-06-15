@@ -30,6 +30,7 @@ from .executor import (
     plan_rebalance,
     safety_gate,
 )
+from .ledger import append_trade, load_ledger, load_trades, reset_ledger, save_ledger
 from .strategy import compare_portfolios, current_allocation
 
 
@@ -85,7 +86,10 @@ def _load_auto(state: AppState) -> None:
         pass
 
 
-_PERSIST_FIELDS = ("mode", "max_total", "universe_size", "top_n", "max_order_usd", "max_total_usd")
+_PERSIST_FIELDS = (
+    "mode", "max_total", "universe_size", "top_n", "max_order_usd", "max_total_usd",
+    "rebalance_band", "take_profit_pct", "take_profit_frac", "breaker_pct",
+)
 
 
 def _save_config(cfg: AppConfig) -> None:
@@ -158,12 +162,18 @@ small{color:var(--mut)}
 <div class="sub" id="sub">جارٍ التحميل…</div></div>
 <div class="sw flex"><span class="dot off" id="autodot"></span><span id="autotxt">تلقائي: متوقف</span></div></div>
 
+<div id="halt" class="card" style="display:none;border-color:var(--down);background:rgba(234,57,67,.12)">
+<div class="flex"><b style="color:var(--down)">⛔ قاطع الدائرة فعّال — التداول متوقف (تصفية لنقد)</b>
+<button id="resume" class="sw" style="background:var(--down)">▶ استئناف</button></div>
+<div class="k" id="halttxt" style="margin-top:6px"></div></div>
+
 <div class="card"><div class="flex">
 <button id="check">🔄 افحص السوق الآن</button>
 <button id="exec" class="sec">⚡ نفّذ (testnet)</button>
 <button id="auto" class="sec">🤖 تداول تلقائي</button>
-<span class="sw"><small id="mode"></small></span>
+<button id="flatten" class="sw" style="background:var(--down)">🛑 تصفية الكل لنقد</button>
 </div>
+<div class="flex" style="margin-top:6px"><small id="mode"></small></div>
 <div class="flex" style="margin-top:8px">
  <label class="flex" style="gap:6px"><input type="checkbox" id="autoexec"> ينفّذ تلقائياً (مو فحص فقط)</label>
  <span class="flex" style="gap:6px"><small>كل</small><input id="autoiv" type="number" step="0.1" min="0.1" style="width:70px"><small>ساعة</small></span>
@@ -208,6 +218,16 @@ small{color:var(--mut)}
  <div style="flex:2"><canvas id="spark" width="420" height="56" style="width:100%;max-width:480px"></canvas>
   <div class="k" id="pnlmeta"></div></div>
 </div></div>
+
+<div class="card"><div class="flex"><b>🧾 سجل الصفقات والأرباح المحقّقة</b>
+<button id="ledgerreset" class="sec sw" style="padding:5px 12px;font-size:12px">صفّر السجل</button></div>
+<div class="row" style="margin-top:8px">
+ <div style="min-width:130px"><div class="big" id="realized">—</div><div class="k">ربح محقّق (USDT)</div></div>
+ <div style="min-width:130px"><div class="big" id="winrate">—</div><div class="k">نسبة الفوز</div></div>
+ <div style="min-width:120px"><div class="k">صفقات مغلقة: <span id="closed">0</span></div>
+  <div class="k">رابحة: <span id="wins">0</span> · خاسرة: <span id="losses">0</span></div></div>
+</div>
+<div id="tradetbl" class="sub" style="margin-top:8px"></div></div>
 
 <div class="card"><b>مقارنة الاستراتيجيات</b><div id="pf" class="sub">اضغط "افحص الآن" لتحميلها…</div></div>
 
@@ -261,6 +281,18 @@ function render(s){
  if(s.account?.balances){let bt=Object.entries(s.account.balances).map(([k,v])=>k+": "+v).join("  ·  ");const hc=s.account.holdings_count||0,sh=Object.keys(s.account.balances).length-1;if(hc>sh)bt+="   (+"+(hc-sh)+" أخرى)";$("balances").textContent=bt;$("balances").style.color="";}else{$("balances").textContent=s.account?.error||"";$("balances").style.color=s.account?.error?"var(--warn)":"";}
  $("exec").disabled=!s.account?.connected;$("exec").textContent=s.live?"⚡ نفّذ (حقيقي ⚠)":"⚡ نفّذ (testnet)";
  renderPnl(s.pnl);
+ // circuit breaker banner
+ $("halt").style.display=s.halted?"":"none";
+ if(s.halted)$("halttxt").textContent="هبط رأس المال "+(s.drawdown_pct!=null?s.drawdown_pct.toFixed(1):"?")+"% عن القمّة (الحد "+s.breaker_pct+"%). اضغط استئناف للعودة.";
+ // trade ledger
+ const lg=s.ledger||{};
+ if(lg.realized_pnl!=null){const up=lg.realized_pnl>=0;$("realized").textContent=(up?'+':'')+'$'+lg.realized_pnl;$("realized").style.color=up?'var(--up)':'var(--down)';}
+ $("winrate").textContent=lg.win_rate!=null?lg.win_rate+'%':'—';
+ $("closed").textContent=lg.trades_closed||0;$("wins").textContent=lg.wins||0;$("losses").textContent=lg.losses||0;
+ const tr=s.trades||[];
+ if(tr.length){let h='<table><tr><th>الوقت</th><th>النوع</th><th>العملة</th><th>$</th><th>ربح</th><th>السبب</th></tr>';
+  tr.slice().reverse().forEach(t=>{const sell=t.side==='SELL';const rp=t.realized||0;h+=`<tr><td>${(t.t||'').slice(5,16)}</td><td>${sell?'بيع':'شراء'}</td><td><b>${t.symbol}</b></td><td>${t.usd}</td><td style="color:${rp>0?'var(--up)':(rp<0?'var(--down)':'var(--mut)')}">${rp?((rp>0?'+':'')+'$'+rp):'—'}</td><td class="k">${t.why||''}</td></tr>`;});
+  $("tradetbl").innerHTML=h+'</table>';}else $("tradetbl").textContent="لا صفقات بعد.";
  if(s.portfolio&&s.portfolio.length){let h='<table><tr><th>استراتيجية</th><th>عائد</th><th>CAGR</th><th>Sharpe</th><th>أقصى تراجع</th></tr>';
   for(const r of s.portfolio)h+=`<tr><td>${r.strategy}</td><td>${(r.total_return*100).toFixed(0)}%</td><td>${(r.cagr*100).toFixed(0)}%</td><td>${r.sharpe}</td><td>${(r.max_drawdown*100).toFixed(0)}%</td></tr>`;
   $("pf").innerHTML=h+'</table>';}
@@ -287,6 +319,9 @@ $("live").onclick=async()=>{const next=!LIVE;if(next&&!confirm("تفعيل ال�
 document.querySelectorAll(".lv").forEach(b=>b.onclick=async()=>{render(await api('/api/config','POST',{max_total:parseFloat(b.dataset.v)}));});
 $("save").onclick=async()=>{render(await api('/api/config','POST',{universe_size:+$("uni").value,top_n:+$("topn").value,max_order_usd:+$("ord").value,max_total_usd:+$("tot").value}));};
 $("perfreset").onclick=async()=>{if(!confirm("تصفير سجل الأداء والبدء من القيمة الحالية؟"))return;render(await api('/api/perf-reset','POST',{}));};
+$("ledgerreset").onclick=async()=>{if(!confirm("تصفير سجل الصفقات والأرباح المحقّقة؟"))return;render(await api('/api/ledger-reset','POST',{}));};
+$("flatten").onclick=async()=>{if(!confirm((LIVE?"تصفية حقيقية":"تصفية testnet")+" لكل المراكز إلى نقد الآن؟"))return;$("flatten").disabled=true;render(await api('/api/flatten','POST',{}));$("flatten").disabled=false;};
+$("resume").onclick=async()=>{render(await api('/api/resume','POST',{}));};
 refresh();setInterval(refresh,15000);
 </script></body></html>"""
 
@@ -303,6 +338,10 @@ class AppConfig:
     top_n: int = 5  # how many strongest uptrends to hold
     max_order_usd: float = 1000.0  # per-order slippage cap (high = don't throttle deployment)
     max_total_usd: float = 1000.0  # total budget to deploy across picks
+    rebalance_band: float = 0.2  # fee-aware: ignore drifts < 20% of position
+    take_profit_pct: float = 15.0  # trim a winner once it's up this % from avg cost
+    take_profit_frac: float = 0.3  # how much of the position to trim (opportunistic)
+    breaker_pct: float = 18.0  # halt + go cash if equity falls this % from peak
     live: bool = False
     port: int = 8799
 
@@ -318,6 +357,7 @@ class AppState:
     auto_execute: bool = False
     auto_interval_hours: float = 6.0
     equity_history: list = field(default_factory=list)
+    halted: bool = False  # circuit breaker tripped -> trading paused
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def log(self, msg: str) -> None:
@@ -534,9 +574,32 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         allp = {}
     prices = {s: allp[s] for s in whitelist if s in allp and allp[s] > 0}
     whitelist = tuple(s for s in whitelist if s in prices)
+
+    targets = {s: w for s, w in sig["targets"].items()}
+    # 1) circuit breaker: account fell too far from its peak -> flatten to cash + halt
+    with state.lock:
+        _hist = list(state.equity_history)
+    dd = _breaker_drawdown(_hist)
+    if dd is not None and dd <= -abs(cfg.breaker_pct):
+        targets = {}
+        with state.lock:
+            state.halted = True
+            state.auto_execute = False
+        _save_auto(state)
+        state.log(f"⛔ قاطع الدائرة: تراجع رأس المال {dd:.1f}% — تصفية كاملة لنقد وإيقاف التداول")
+
+    led = load_ledger()
+    # 2) opportunistic profit-taking: trim winners above the take-profit threshold
+    if targets:
+        for sym in list(targets):
+            g = led.unrealized_gain_pct(sym, prices.get(sym, 0.0))
+            if g is not None and g >= cfg.take_profit_pct and targets[sym] > 0:
+                targets[sym] = round(targets[sym] * (1 - cfg.take_profit_frac), 4)
+                state.log(f"💰 جني أرباح {sym}: +{g:.0f}% → بيع {int(cfg.take_profit_frac * 100)}%")
+
     limits = RiskLimits(max_order_usd=cfg.max_order_usd, max_total_usd=cfg.max_total_usd,
-                        whitelist=whitelist)
-    plan = plan_rebalance(sig["targets"], balances, prices, limits)
+                        rebalance_band=cfg.rebalance_band, whitelist=whitelist)
+    plan = plan_rebalance(targets, balances, prices, limits)
     buys = sum(1 for o in plan.orders if o.side == "BUY")
     sells = len(plan.orders) - buys
     if not plan.orders:
@@ -547,17 +610,76 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     ranked_map = {r["symbol"]: r for r in sig.get("ranked", [])}
     placed = 0
     for o in plan.orders:
-        why = _order_reason(o.symbol, o.side, sig.get("targets", {}), ranked_map)
+        why = _order_reason(o.symbol, o.side, targets, ranked_map)
         try:
             res = client.market_order(o.symbol, o.side, quote_qty=o.usd)
             placed += 1
+            rec = led.record(o.side, o.symbol, o.usd, prices.get(o.symbol, 0.0))
+            append_trade({**rec, "mode": "live" if cfg.live else "testnet", "why": why})
             side_ar = "شراء" if o.side == "BUY" else "بيع"
             ok = str(res.get("status", "")).upper() in ("FILLED", "NEW", "PARTIALLY_FILLED")
             mark = "✓ تم" if ok else f"({res.get('status')})"
-            state.log(f"{'حقيقي' if cfg.live else 'testnet'} {side_ar} {o.symbol} ${o.usd} {mark} — {why}")
+            pnl = f" · ربح ${rec['realized']}" if (o.side == "SELL" and rec["realized"]) else ""
+            state.log(f"{'حقيقي' if cfg.live else 'testnet'} {side_ar} {o.symbol} ${o.usd} {mark} — {why}{pnl}")
         except Exception as exc:  # noqa: BLE001
             state.log(f"✗ فشل {o.side} {o.symbol}: {exc}")
+    save_ledger(led)
     return {"ok": True, "orders": placed, "buys": buys, "sells": sells}
+
+
+def _breaker_drawdown(hist: list) -> float | None:
+    """Account drawdown % from its tracked peak (None if not enough data)."""
+    pts = [float(h["eq"]) for h in hist if isinstance(h, dict) and "eq" in h]
+    if len(pts) < 2:
+        return None
+    peak = max(pts)
+    return (pts[-1] / peak - 1.0) * 100 if peak > 0 else None
+
+
+def do_flatten(cfg: AppConfig, state: AppState) -> dict:
+    """Emergency kill switch: sell ALL managed holdings to cash now."""
+    try:
+        safety_gate(live=cfg.live)
+    except RuntimeError as exc:
+        state.log(f"تصفية محظورة: {exc}")
+        return {"ok": False, "error": str(exc)}
+    client = _connect(cfg.live)
+    if client is None:
+        return {"ok": False, "error": "no keys"}
+    balances = client.balances()
+    universe = None
+    if cfg.mode == "scan":
+        try:
+            from .universe import fetch_top_symbols
+            universe = fetch_top_symbols(cfg.universe_size)
+        except Exception:  # noqa: BLE001
+            universe = None
+    else:
+        universe = list(cfg.assets)
+    whitelist = _resolve_whitelist({}, balances, universe=universe)
+    try:
+        allp = client.all_prices()
+    except Exception:  # noqa: BLE001
+        allp = {}
+    led = load_ledger()
+    state.log("🛑 طوارئ: تصفية كل المراكز إلى نقد")
+    placed = 0
+    for sym in whitelist:
+        price = allp.get(sym, 0.0)
+        base = sym.replace("USDT", "")
+        usd = balances.get(base, 0.0) * price
+        if price <= 0 or usd < 10:
+            continue
+        try:
+            client.market_order(sym, "SELL", quote_qty=round(usd * 0.99, 2))
+            rec = led.record("SELL", sym, usd * 0.99, price)
+            append_trade({**rec, "mode": "live" if cfg.live else "testnet", "why": "طوارئ: تصفية"})
+            placed += 1
+            state.log(f"{'حقيقي' if cfg.live else 'testnet'} بيع {sym} ${round(usd * 0.99, 2)} ✓ تم — طوارئ")
+        except Exception as exc:  # noqa: BLE001
+            state.log(f"✗ فشل بيع {sym}: {exc}")
+    save_ledger(led)
+    return {"ok": True, "sold": placed}
 
 
 def _auto_loop(cfg: AppConfig, state: AppState) -> None:
@@ -579,7 +701,9 @@ def _auto_loop(cfg: AppConfig, state: AppState) -> None:
         try:
             do_check(cfg, state)
             state.log("فحص تلقائي")
-            if execute:
+            with state.lock:
+                halted = state.halted
+            if execute and not halted:
                 do_execute(cfg, state)
         except Exception as exc:  # noqa: BLE001
             state.log(f"خطأ تلقائي: {exc}")
@@ -602,7 +726,7 @@ def make_handler(cfg: AppConfig, state: AppState):
 
         def _state_dict(self):
             with state.lock:
-                return {
+                d = {
                     "signal": state.signal,
                     "account": state.account,
                     "portfolio": state.portfolio,
@@ -612,6 +736,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "auto_execute": state.auto_execute,
                     "auto_interval_hours": state.auto_interval_hours,
                     "pnl": compute_pnl(state.equity_history),
+                    "halted": state.halted,
+                    "drawdown_pct": _breaker_drawdown(state.equity_history),
                     "cash_weight": state.signal.get("cash_weight") if state.signal else None,
                     "scanned": state.signal.get("scanned") if state.signal else None,
                     "regime": state.signal.get("regime") if state.signal else None,
@@ -623,7 +749,13 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "top_n": cfg.top_n,
                     "max_order_usd": cfg.max_order_usd,
                     "max_total_usd": cfg.max_total_usd,
+                    "breaker_pct": cfg.breaker_pct,
+                    "take_profit_pct": cfg.take_profit_pct,
                 }
+            # file-backed (read outside the state lock)
+            d["ledger"] = load_ledger().summary()
+            d["trades"] = load_trades(30)
+            return d
 
         def _read_json(self) -> dict:
             try:
@@ -648,6 +780,14 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.max_total_usd = max(0.0, float(body["max_total_usd"]))
             if body.get("mode") in ("scan", "ensemble", "rotation", "trend"):
                 cfg.mode = body["mode"]
+            if "rebalance_band" in body:
+                cfg.rebalance_band = max(0.0, min(0.9, float(body["rebalance_band"])))
+            if "take_profit_pct" in body:
+                cfg.take_profit_pct = max(1.0, float(body["take_profit_pct"]))
+            if "take_profit_frac" in body:
+                cfg.take_profit_frac = max(0.0, min(1.0, float(body["take_profit_frac"])))
+            if "breaker_pct" in body:
+                cfg.breaker_pct = max(2.0, float(body["breaker_pct"]))
             _save_config(cfg)
             state.log("تحديث الإعدادات: " + json.dumps(body, ensure_ascii=False))
 
@@ -698,6 +838,21 @@ def make_handler(cfg: AppConfig, state: AppState):
             if self.path == "/api/perf-reset":
                 state.reset_equity()
                 state.log("تصفير سجل الأداء — البداية من الآن")
+                threading.Thread(target=lambda: do_check(cfg, state), daemon=True).start()
+                return self._send(200, self._state_dict())
+            if self.path == "/api/ledger-reset":
+                reset_ledger()
+                state.log("تصفير سجل الصفقات والأرباح المحقّقة")
+                return self._send(200, self._state_dict())
+            if self.path == "/api/flatten":
+                res = do_flatten(cfg, state)
+                do_check(cfg, state)
+                return self._send(200, {**self._state_dict(), "result": res})
+            if self.path == "/api/resume":
+                with state.lock:
+                    state.halted = False
+                state.reset_equity()  # reset peak so the breaker doesn't instantly refire
+                state.log("استئناف التداول بعد قاطع الدائرة — أُعيد ضبط القمّة")
                 threading.Thread(target=lambda: do_check(cfg, state), daemon=True).start()
                 return self._send(200, self._state_dict())
             return self._send(404, {"error": "not found"})
