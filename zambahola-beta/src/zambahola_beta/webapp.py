@@ -231,7 +231,7 @@ function render(s){
  if(s.cash_weight!=null&&s.cash_weight>0.001)a.innerHTML+=`<div class="card"><div class="flex"><b>نقد</b><span class="sw badge b-mut">${Math.round(s.cash_weight*100)}%</span></div><div class="k" style="margin-top:8px">غير مستثمر — حماية من الهبوط</div></div>`;
  $("acctstatus").innerHTML=s.account?.connected?'<span class="badge b-up">متصل</span>':'<span class="badge b-mut">غير متصل (أضف المفاتيح)</span>';
  $("equity").textContent=s.account?.equity_usd!=null?("$"+s.account.equity_usd):"—";
- if(s.account?.balances){let bt=Object.entries(s.account.balances).map(([k,v])=>k+": "+v).join("  ·  ");const hc=s.account.holdings_count||0,sh=Object.keys(s.account.balances).length-1;if(hc>sh)bt+="   (+"+(hc-sh)+" أخرى)";$("balances").textContent=bt;}else $("balances").textContent="";
+ if(s.account?.balances){let bt=Object.entries(s.account.balances).map(([k,v])=>k+": "+v).join("  ·  ");const hc=s.account.holdings_count||0,sh=Object.keys(s.account.balances).length-1;if(hc>sh)bt+="   (+"+(hc-sh)+" أخرى)";$("balances").textContent=bt;$("balances").style.color="";}else{$("balances").textContent=s.account?.error||"";$("balances").style.color=s.account?.error?"var(--warn)":"";}
  $("exec").disabled=!s.account?.connected;$("exec").textContent=s.live?"⚡ نفّذ (حقيقي ⚠)":"⚡ نفّذ (testnet)";
  renderPnl(s.pnl);
  if(s.portfolio&&s.portfolio.length){let h='<table><tr><th>استراتيجية</th><th>عائد</th><th>CAGR</th><th>Sharpe</th><th>أقصى تراجع</th></tr>';
@@ -419,8 +419,11 @@ def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -
         sig = compute_signal(frames, mode=cfg.mode, target_vol=cfg.target_vol)
 
     client = _connect(cfg.live)
-    account = {"connected": False}
-    if client is not None:
+    if client is None:
+        net = "الحقيقية" if cfg.live else "testnet"
+        account = {"connected": False,
+                   "error": f"لم يتم العثور على مفاتيح {net} — ضع testnet-keys.txt و binance-API.txt على سطح المكتب"}
+    else:
         try:
             assets = tuple(sig["targets"].keys()) or cfg.assets
             account = account_snapshot(client, assets or cfg.assets)

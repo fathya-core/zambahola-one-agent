@@ -76,17 +76,38 @@ def load_keys(testnet: bool = False) -> Keys:
         path = os.environ.get("ZAMBAHOLA_KEYS_FILE")
 
     if not path:
+        path = _autodetect_keys_file(testnet)  # convenience: find keys on the Desktop
+
+    if not path:
         which = "testnet" if testnet else "live"
         env_hint = ("BINANCE_TESTNET_API_KEY/SECRET or ZAMBAHOLA_TESTNET_KEYS_FILE"
                     if testnet else "BINANCE_API_KEY/SECRET or ZAMBAHOLA_KEYS_FILE")
         raise RuntimeError(
-            f"No {which} keys: set {env_hint} to a file OUTSIDE the repo. "
+            f"No {which} keys: set {env_hint} to a file OUTSIDE the repo "
+            "(or put testnet-keys.txt / binance-API.txt on your Desktop). "
             "Keys are never stored in the project."
         )
     text = Path(path).read_text(encoding="utf-8").strip()
     keys = _parse_keys_text(text)
     _validate(keys)
     return keys
+
+
+def _autodetect_keys_file(testnet: bool) -> str | None:
+    """Last-resort convenience: look for the user's key files on the Desktop so
+    the dashboard 'just works' however it's launched. Testnet and live use
+    different files; testnet falls back to the live file if no testnet file."""
+    home = Path.home()
+    desktops = [home / "OneDrive" / "Desktop", home / "Desktop"]
+    testnet_names = ["testnet-keys.txt", "binance-testnet.txt", "binance-testnet-API.txt"]
+    live_names = ["binance-API.txt", "binance-api.txt", "binance-keys.txt"]
+    order = (testnet_names + live_names) if testnet else live_names
+    for d in desktops:
+        for name in order:
+            p = d / name
+            if p.exists():
+                return str(p)
+    return None
 
 
 def _parse_keys_text(text: str) -> Keys:
