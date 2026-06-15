@@ -35,7 +35,8 @@ def test_trend_score_directions():
 
 
 def test_scan_picks_uptrends_and_ranks_smart():
-    res = scan(_frames(), top_n=5, target_vol=0.6, max_total=1.0)
+    # disable the correlation filter here (synthetic linear coins are ~identical)
+    res = scan(_frames(), top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0)
     assert res["scanned"] == 3
     # downtrend coin must not be funded
     assert "DOWNUSDT_X" not in res["targets"]
@@ -75,6 +76,21 @@ def test_scan_funded_coins_are_near_highs():
             assert r["dd_high"] > -0.25  # never funds a coin past its stop
 
 
+def test_scan_diversification_skips_correlated():
+    rng = np.random.default_rng(0)
+    n = 260
+    shocks_a = rng.normal(0.005, 0.012, n)          # uptrend + noise
+    a = 100 * np.cumprod(1 + shocks_a)
+    b = 100 * np.cumprod(1 + shocks_a + rng.normal(0, 0.0004, n))  # ~ same shocks -> corr
+    c = 100 * np.cumprod(1 + rng.normal(0.005, 0.012, n))          # independent uptrend
+    frames = {"AUSDT": _frame(a), "BUSDT": _frame(b), "CUSDT": _frame(c)}
+    res = scan(frames, top_n=2, max_correlation=0.8)
+    picks = set(res["targets"])
+    # the independent coin is kept; the two near-identical coins aren't both funded
+    assert "CUSDT" in picks
+    assert not ({"AUSDT", "BUSDT"} <= picks)
+
+
 def test_scan_all_down_goes_cash():
     n = 260
     down = {"AUSDT": _frame(np.linspace(200.0, 100.0, n)),
@@ -86,7 +102,7 @@ def test_scan_all_down_goes_cash():
 
 def test_scan_respects_max_total_leverage():
     # no BTC leader in the synthetic basket -> regime 1.0 -> full max_total
-    res = scan(_frames(), top_n=5, max_total=2.0)
+    res = scan(_frames(), top_n=5, max_total=2.0, max_correlation=1.0)
     assert abs(sum(res["targets"].values()) - 2.0) < 1e-6
 
 

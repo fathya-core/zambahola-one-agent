@@ -152,6 +152,8 @@ def scan(
     max_total: float = 1.0,
     min_consensus: float = 0.75,
     stop_pct: float = 0.25,
+    max_correlation: float = 0.85,
+    corr_window: int = 60,
     leader: str = "BTCUSDT",
     use_regime: bool = True,
 ) -> dict:
@@ -183,7 +185,31 @@ def scan(
         if s["consensus"] >= min_consensus and s["score"] > 0 and not s["stopped"]
     ]
     eligible.sort(key=lambda s: s["score"], reverse=True)
-    picks = eligible[:top_n]
+
+    # diversification: greedily take the highest scores, skipping any candidate
+    # too correlated with one already picked (avoid a book that all crashes together)
+    def _ret(sym: str) -> pd.Series:
+        c = frames[sym]["close"].astype(float)
+        return c.pct_change().tail(corr_window).reset_index(drop=True)
+
+    picks: list[dict] = []
+    for s in eligible:
+        if len(picks) >= top_n:
+            break
+        if max_correlation < 1.0 and picks:
+            r = _ret(s["symbol"])
+            too_corr = False
+            for p in picks:
+                try:
+                    c = r.corr(_ret(p["symbol"]))
+                except Exception:  # noqa: BLE001
+                    c = None
+                if c is not None and c > max_correlation:
+                    too_corr = True
+                    break
+            if too_corr:
+                continue
+        picks.append(s)
 
     targets: dict[str, float] = {}
     if picks:

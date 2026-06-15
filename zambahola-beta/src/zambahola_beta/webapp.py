@@ -88,7 +88,7 @@ def _load_auto(state: AppState) -> None:
 
 _PERSIST_FIELDS = (
     "mode", "max_total", "universe_size", "top_n", "max_order_usd", "max_total_usd",
-    "rebalance_band", "take_profit_pct", "take_profit_frac", "breaker_pct",
+    "rebalance_band", "take_profit_pct", "take_profit_frac", "breaker_pct", "max_correlation",
 )
 
 
@@ -229,7 +229,11 @@ small{color:var(--mut)}
 </div>
 <div id="tradetbl" class="sub" style="margin-top:8px"></div></div>
 
-<div class="card"><b>مقارنة الاستراتيجيات</b><div id="pf" class="sub">اضغط "افحص الآن" لتحميلها…</div></div>
+<div class="card"><div class="flex"><b>🧪 باك-تست الاستراتيجية الفعلية (مسح + Regime + وقف خسارة)</b>
+<button id="bt" class="sec sw" style="padding:5px 12px;font-size:12px">شغّل الباك-تست</button></div>
+<div id="btres" class="sub" style="margin-top:8px">اضغط لتشغيل محاكاة تاريخية حقيقية لمنطق الوكيل الكامل.</div></div>
+
+<div class="card"><b>مقارنة الاستراتيجيات (سلّة مرجعية)</b><div id="pf" class="sub">اضغط "افحص الآن" لتحميلها…</div></div>
 
 <div class="card"><b>سجل الإجراءات</b><div class="log" id="log"></div></div>
 <div class="sub" style="margin-top:10px">لا يوجد ربح مضمون. التنفيذ على testnet افتراضياً؛ الحقيقي يتطلّب تأكيداً صريحاً. الإشارة قد تكون "نقد" لتجنّب الهبوط.</div>
@@ -293,6 +297,7 @@ function render(s){
  if(tr.length){let h='<table><tr><th>الوقت</th><th>النوع</th><th>العملة</th><th>$</th><th>ربح</th><th>السبب</th></tr>';
   tr.slice().reverse().forEach(t=>{const sell=t.side==='SELL';const rp=t.realized||0;h+=`<tr><td>${(t.t||'').slice(5,16)}</td><td>${sell?'بيع':'شراء'}</td><td><b>${t.symbol}</b></td><td>${t.usd}</td><td style="color:${rp>0?'var(--up)':(rp<0?'var(--down)':'var(--mut)')}">${rp?((rp>0?'+':'')+'$'+rp):'—'}</td><td class="k">${t.why||''}</td></tr>`;});
   $("tradetbl").innerHTML=h+'</table>';}else $("tradetbl").textContent="لا صفقات بعد.";
+ renderBacktest(s.backtest);
  if(s.portfolio&&s.portfolio.length){let h='<table><tr><th>استراتيجية</th><th>عائد</th><th>CAGR</th><th>Sharpe</th><th>أقصى تراجع</th></tr>';
   for(const r of s.portfolio)h+=`<tr><td>${r.strategy}</td><td>${(r.total_return*100).toFixed(0)}%</td><td>${(r.cagr*100).toFixed(0)}%</td><td>${r.sharpe}</td><td>${(r.max_drawdown*100).toFixed(0)}%</td></tr>`;
   $("pf").innerHTML=h+'</table>';}
@@ -310,7 +315,19 @@ function renderPnl(p){
   d.forEach((v,i)=>{const px=i/(d.length-1)*(W-4)+2,py=H-4-((v-mn)/rg)*(H-8);i?x.lineTo(px,py):x.moveTo(px,py);});x.stroke();
   x.globalAlpha=0.12;x.lineTo(W-2,H);x.lineTo(2,H);x.closePath();x.fillStyle=col;x.fill();x.globalAlpha=1;}
 }
+function renderBacktest(b){
+ if(!b)return;
+ if(!b.ok){$("btres").textContent="تعذّر: "+(b.error||"");return;}
+ const up=b.total_return>=0,bup=(b.btc_hodl_return||0)>=0;
+ $("btres").innerHTML=`<table>
+ <tr><td>الفترة</td><td>${(b.start||'').slice(0,10)} → ${(b.end||'').slice(0,10)} (${b.days} يوم · ${b.coins} عملة)</td></tr>
+ <tr><td>عائد الاستراتيجية</td><td style="color:${up?'var(--up)':'var(--down)'}"><b>${(b.total_return*100).toFixed(0)}%</b> (CAGR ${(b.cagr*100).toFixed(0)}%)</td></tr>
+ <tr><td>مقابل احتفاظ BTC</td><td style="color:${bup?'var(--up)':'var(--down)'}">${b.btc_hodl_return!=null?(b.btc_hodl_return*100).toFixed(0)+'%':'—'}</td></tr>
+ <tr><td>Sharpe · أقصى تراجع</td><td>${b.sharpe} · ${(b.max_drawdown*100).toFixed(0)}%</td></tr>
+ <tr><td>أيام رابحة</td><td>${b.positive_days_pct}%</td></tr></table>`;
+}
 async function refresh(){render(await api('/api/state'));}
+$("bt").onclick=async()=>{$("bt").disabled=true;$("bt").textContent="…جارٍ";$("btres").textContent="جارٍ تشغيل المحاكاة التاريخية… (قد تأخذ دقيقة)";try{render(await api('/api/backtest','POST',{}));}finally{$("bt").disabled=false;$("bt").textContent="شغّل الباك-تست";}};
 $("check").onclick=async()=>{$("check").disabled=true;$("check").textContent="…جارٍ مسح السوق";render(await api('/api/check','POST'));$("check").disabled=false;$("check").textContent="🔄 افحص السوق الآن";};
 $("exec").onclick=async()=>{if(!confirm((LIVE?"تنفيذ حقيقي بأموال فعلية":"تنفيذ على testnet")+" الآن؟"))return;$("exec").disabled=true;render(await api('/api/execute','POST',{}));$("exec").disabled=false;};
 $("auto").onclick=async()=>{const willEnable=!AUTO;if(willEnable&&$("autoexec").checked&&LIVE&&!confirm("تشغيل تداول تلقائي حقيقي بأموال فعلية؟"))return;render(await api('/api/auto','POST',{enabled:willEnable,execute:$("autoexec").checked,interval_hours:parseFloat($("autoiv").value)||6}));};
@@ -342,6 +359,7 @@ class AppConfig:
     take_profit_pct: float = 15.0  # trim a winner once it's up this % from avg cost
     take_profit_frac: float = 0.3  # how much of the position to trim (opportunistic)
     breaker_pct: float = 18.0  # halt + go cash if equity falls this % from peak
+    max_correlation: float = 0.85  # diversification: skip picks too correlated
     live: bool = False
     port: int = 8799
 
@@ -358,6 +376,7 @@ class AppState:
     auto_interval_hours: float = 6.0
     equity_history: list = field(default_factory=list)
     halted: bool = False  # circuit breaker tripped -> trading paused
+    backtest: dict | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def log(self, msg: str) -> None:
@@ -444,7 +463,8 @@ def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str], dict]:
 
     symbols = fetch_top_symbols(cfg.universe_size)
     frames = fetch_frames(symbols, interval=cfg.interval, total=max(cfg.bars, 400))
-    sc = scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total)
+    sc = scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total,
+              max_correlation=cfg.max_correlation)
     as_of = ""
     first = next((s for s in symbols if s in frames), None)
     if first is not None:
@@ -682,6 +702,26 @@ def do_flatten(cfg: AppConfig, state: AppState) -> dict:
     return {"ok": True, "sold": placed}
 
 
+def do_backtest(cfg: AppConfig, state: AppState) -> dict:
+    """Run the real-strategy backtest on the live universe (on demand, heavy)."""
+    from .scan_backtest import backtest_scan
+    from .universe import fetch_frames, fetch_top_symbols
+
+    symbols = fetch_top_symbols(cfg.universe_size)
+    frames = fetch_frames(symbols, interval=cfg.interval, total=500)
+    res = backtest_scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total)
+    with state.lock:
+        state.backtest = res
+    if res.get("ok"):
+        btc = res.get("btc_hodl_return")
+        state.log(f"باك-تست الاستراتيجية: عائد {int(res['total_return'] * 100)}% · "
+                  f"تراجع {int(res['max_drawdown'] * 100)}% · Sharpe {res['sharpe']}"
+                  + (f" مقابل BTC {int(btc * 100)}%" if btc is not None else ""))
+    else:
+        state.log("باك-تست فشل: " + str(res.get("error", "")))
+    return res
+
+
 def _auto_loop(cfg: AppConfig, state: AppState) -> None:
     while True:
         time.sleep(2)
@@ -751,6 +791,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "max_total_usd": cfg.max_total_usd,
                     "breaker_pct": cfg.breaker_pct,
                     "take_profit_pct": cfg.take_profit_pct,
+                    "backtest": state.backtest,
                 }
             # file-backed (read outside the state lock)
             d["ledger"] = load_ledger().summary()
@@ -848,6 +889,9 @@ def make_handler(cfg: AppConfig, state: AppState):
                 res = do_flatten(cfg, state)
                 do_check(cfg, state)
                 return self._send(200, {**self._state_dict(), "result": res})
+            if self.path == "/api/backtest":
+                res = do_backtest(cfg, state)
+                return self._send(200, {**self._state_dict(), "backtest_result": res})
             if self.path == "/api/resume":
                 with state.lock:
                     state.halted = False

@@ -93,6 +93,8 @@ def main(argv: list[str] | None = None) -> int:
     p_con.add_argument("--universe-size", dest="universe_size", type=int, default=25)
     p_con.add_argument("--top-n", dest="top_n", type=int, default=5)
     p_con.add_argument("--port", type=int, default=8799)
+    p_con.add_argument("--no-browser", dest="no_browser", action="store_true",
+                       help="don't open a browser (for the watchdog)")
     p_con.add_argument("--live", action="store_true", help="REAL money mode (needs env confirm)")
     p_con.add_argument("--max-order-usd", dest="max_order_usd", type=float, default=1000.0)
     p_con.add_argument("--max-total-usd", dest="max_total_usd", type=float, default=1000.0)
@@ -268,7 +270,8 @@ def main(argv: list[str] | None = None) -> int:
                 max_order_usd=args.max_order_usd,
                 max_total_usd=args.max_total_usd,
                 port=args.port,
-            )
+            ),
+            open_browser=not args.no_browser,
         )
         return 0
 
