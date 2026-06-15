@@ -30,6 +30,8 @@ def backtest_scan(
     warmup: int = 210,
     min_bars: int = 300,
     periods_per_year: float = 365.0,
+    regime_floor: float = 0.4,
+    conviction_power: float = 1.0,
 ) -> dict:
     frames = {s: df for s, df in frames.items() if len(df) >= min_bars}
     if len(frames) < 2:
@@ -59,7 +61,7 @@ def backtest_scan(
     for t in range(warmup, T - 1):
         regime = 1.0
         if btc_cons is not None and not pd.isna(btc_cons.iloc[t]):
-            regime = 0.4 + 0.6 * float(btc_cons.iloc[t])
+            regime = regime_floor + (1.0 - regime_floor) * float(btc_cons.iloc[t])
         eff_total = max_total * regime
 
         cand: list[tuple[str, float, float]] = []
@@ -84,7 +86,7 @@ def backtest_scan(
             raw = {}
             for n, score, v in picks:
                 vs = min(1.0, target_vol / v) if v > 0 else 0.0
-                raw[n] = max(0.0, vs) * max(0.1, score)
+                raw[n] = max(0.0, vs) * (max(0.1, score) ** conviction_power)
             ssum = sum(raw.values()) or 1.0
             for n, rv in raw.items():
                 w[n] = rv / ssum * eff_total

@@ -89,6 +89,7 @@ def _load_auto(state: AppState) -> None:
 _PERSIST_FIELDS = (
     "mode", "interval", "max_total", "universe_size", "top_n", "max_order_usd", "max_total_usd",
     "rebalance_band", "take_profit_pct", "take_profit_frac", "breaker_pct", "max_correlation",
+    "stop_pct", "conviction_power",
 )
 
 
@@ -373,6 +374,8 @@ class AppConfig:
     take_profit_frac: float = 0.3  # how much of the position to trim (opportunistic)
     breaker_pct: float = 18.0  # halt + go cash if equity falls this % from peak
     max_correlation: float = 0.85  # diversification: skip picks too correlated
+    stop_pct: float = 0.35  # trailing stop (let winners run; validated on full cycle)
+    conviction_power: float = 1.5  # concentrate weight toward the strongest trends
     live: bool = False
     port: int = 8799
 
@@ -477,6 +480,7 @@ def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str], dict]:
     symbols = fetch_top_symbols(cfg.universe_size)
     frames = fetch_frames(symbols, interval=cfg.interval, total=max(cfg.bars, 400))
     sc = scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total,
+              stop_pct=cfg.stop_pct, conviction_power=cfg.conviction_power,
               max_correlation=cfg.max_correlation)
     as_of = ""
     first = next((s for s in symbols if s in frames), None)
@@ -731,7 +735,8 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
     frames = fetch_frames(symbols, interval=cfg.interval, total=total, min_bars=120)
     ppy = {"1d": 365, "12h": 730, "8h": 1095, "6h": 1460, "4h": 2190, "1h": 8760}.get(cfg.interval, 365)
     res = backtest_scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol,
-                        max_total=cfg.max_total, min_bars=min_bars, periods_per_year=ppy)
+                        max_total=cfg.max_total, min_bars=min_bars, periods_per_year=ppy,
+                        stop_pct=cfg.stop_pct, conviction_power=cfg.conviction_power)
     res["scope"] = "years" if long_history else "recent"
     res["interval"] = cfg.interval
     with state.lock:
@@ -857,6 +862,10 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.take_profit_frac = max(0.0, min(1.0, float(body["take_profit_frac"])))
             if "breaker_pct" in body:
                 cfg.breaker_pct = max(2.0, float(body["breaker_pct"]))
+            if "stop_pct" in body:
+                cfg.stop_pct = max(0.05, min(0.9, float(body["stop_pct"])))
+            if "conviction_power" in body:
+                cfg.conviction_power = max(1.0, min(3.0, float(body["conviction_power"])))
             _save_config(cfg)
             state.log("تحديث الإعدادات: " + json.dumps(body, ensure_ascii=False))
 

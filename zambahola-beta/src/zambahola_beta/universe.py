@@ -158,7 +158,8 @@ def scan(
     target_vol: float = 0.6,
     max_total: float = 1.0,
     min_consensus: float = 0.75,
-    stop_pct: float = 0.25,
+    stop_pct: float = 0.35,
+    conviction_power: float = 1.5,
     max_correlation: float = 0.85,
     corr_window: int = 60,
     leader: str = "BTCUSDT",
@@ -224,7 +225,7 @@ def scan(
         raw = {}
         for s in picks:
             vscale = min(1.0, target_vol / s["vol"]) if s["vol"] > 0 else 0.0
-            conviction = max(0.1, s["score"])
+            conviction = max(0.1, s["score"]) ** conviction_power
             raw[s["symbol"]] = max(0.0, vscale) * conviction
         ssum = sum(raw.values()) or 1.0
         for sym, w in raw.items():
