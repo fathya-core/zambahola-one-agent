@@ -307,15 +307,27 @@ def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -
         state.updated = time.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _resolve_whitelist(targets: dict, balances: dict, *, quote: str = "USDT", cap: int = 25) -> list[str]:
-    """Symbols the executor may trade = targets to ENTER + held coins to EXIT."""
+def _resolve_whitelist(
+    targets: dict, balances: dict, *, universe: list[str] | None = None,
+    quote: str = "USDT", cap: int = 30,
+) -> list[str]:
+    """Symbols the executor may trade = targets to ENTER + held coins to EXIT.
+
+    When a `universe` is given (the scanned top markets), held coins OUTSIDE it
+    are ignored — so a testnet faucet wallet stuffed with hundreds of random
+    tokens isn't liquidated; we only manage coins the strategy actually scans.
+    """
     out = list(targets.keys())
+    uni = set(universe or [])
     for base, qty in balances.items():
         if base == quote or qty <= 0:
             continue
         sym = f"{base}{quote}"
-        if sym not in out:
-            out.append(sym)
+        if sym in out:
+            continue
+        if uni and sym not in uni:
+            continue  # not part of the scanned strategy universe -> leave it alone
+        out.append(sym)
     return out[:cap]
 
 
@@ -331,14 +343,15 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         return {"ok": False, "error": "no keys"}
 
     if cfg.mode == "scan":
-        sig, _, _ = _scan_signal(cfg)
+        sig, universe, _ = _scan_signal(cfg)
     else:
-        frames = fetch_many(list(cfg.assets), interval=cfg.interval, total=max(cfg.bars, 400))
+        universe = list(cfg.assets)
+        frames = fetch_many(universe, interval=cfg.interval, total=max(cfg.bars, 400))
         sig = compute_signal(frames, mode=cfg.mode, target_vol=cfg.target_vol)
 
     balances = client.balances()
-    # dynamic whitelist: targets to ENTER + currently-held coins to EXIT
-    whitelist = _resolve_whitelist(sig["targets"], balances)
+    # only manage coins in the scanned universe (ignore unrelated faucet tokens)
+    whitelist = _resolve_whitelist(sig["targets"], balances, universe=universe)
     try:
         allp = client.all_prices()
     except Exception:  # noqa: BLE001
@@ -348,18 +361,23 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     limits = RiskLimits(max_order_usd=cfg.max_order_usd, max_total_usd=cfg.max_total_usd,
                         whitelist=whitelist)
     plan = plan_rebalance(sig["targets"], balances, prices, limits)
+    buys = sum(1 for o in plan.orders if o.side == "BUY")
+    sells = len(plan.orders) - buys
     if not plan.orders:
-        state.log("لا حاجة لإعادة توازن (ضمن الحدود)")
-        return {"ok": True, "orders": 0}
+        state.log("لا حاجة لإعادة توازن (المحفظة مطابقة للأهداف ضمن الحدود)")
+        return {"ok": True, "orders": 0, "buys": 0, "sells": 0}
+    net = "خطة: " + (f"شراء {buys}" if buys else "") + (" · " if buys and sells else "") + (f"بيع {sells}" if sells else "")
+    state.log(f"{net} (ميزانية ${cfg.max_total_usd:g})")
     placed = 0
     for o in plan.orders:
         try:
             res = client.market_order(o.symbol, o.side, quote_qty=o.usd)
             placed += 1
-            state.log(f"{'حقيقي' if cfg.live else 'testnet'} {o.side} {o.symbol} ${o.usd} → {res.get('status')}")
+            side_ar = "شراء" if o.side == "BUY" else "بيع"
+            state.log(f"{'حقيقي' if cfg.live else 'testnet'} {side_ar} {o.symbol} ${o.usd} → {res.get('status')}")
         except Exception as exc:  # noqa: BLE001
             state.log(f"فشل {o.side} {o.symbol}: {exc}")
-    return {"ok": True, "orders": placed}
+    return {"ok": True, "orders": placed, "buys": buys, "sells": sells}
 
 
 def _auto_loop(cfg: AppConfig, state: AppState) -> None:
