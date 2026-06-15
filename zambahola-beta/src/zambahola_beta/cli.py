@@ -94,8 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     p_con.add_argument("--top-n", dest="top_n", type=int, default=5)
     p_con.add_argument("--port", type=int, default=8799)
     p_con.add_argument("--live", action="store_true", help="REAL money mode (needs env confirm)")
-    p_con.add_argument("--max-order-usd", dest="max_order_usd", type=float, default=20.0)
-    p_con.add_argument("--max-total-usd", dest="max_total_usd", type=float, default=100.0)
+    p_con.add_argument("--max-order-usd", dest="max_order_usd", type=float, default=1000.0)
+    p_con.add_argument("--max-total-usd", dest="max_total_usd", type=float, default=1000.0)
 
     p_exec = sub.add_parser("execute", parents=[common], help="rebalance to target (testnet+dry-run by default)")
     p_exec.add_argument("--assets", default="BTCUSDT,ETHUSDT")

@@ -61,8 +61,13 @@ small{color:var(--mut)}
 <div class="card"><div class="flex">
 <button id="check">🔄 افحص السوق الآن</button>
 <button id="exec" class="sec">⚡ نفّذ (testnet)</button>
-<button id="auto" class="sec">▶ شغّل الوضع التلقائي</button>
+<button id="auto" class="sec">🤖 تداول تلقائي</button>
 <span class="sw"><small id="mode"></small></span>
+</div>
+<div class="flex" style="margin-top:8px">
+ <label class="flex" style="gap:6px"><input type="checkbox" id="autoexec"> ينفّذ تلقائياً (مو فحص فقط)</label>
+ <span class="flex" style="gap:6px"><small>كل</small><input id="autoiv" type="number" step="0.1" min="0.1" style="width:70px"><small>ساعة</small></span>
+ <small class="sw" id="autostate"></small>
 </div></div>
 
 <div class="card"><div class="flex"><b>الإعدادات</b><span class="sw"><small id="cfgnote"></small></span></div>
@@ -105,15 +110,18 @@ const $=id=>document.getElementById(id);
 function actionBadge(a){if(a&&a.includes("INVEST"))return'<span class="badge b-up">استثمر</span>';
 if(a&&a.includes("PARTIAL"))return'<span class="badge b-warn">جزئي</span>';return'<span class="badge b-mut">نقد</span>';}
 async function api(path,method="GET",body){const r=await fetch(path,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});return r.json();}
-let LIVE=false;
+let LIVE=false,AUTO=false;
 function setIf(id,v){const e=$(id);if(e&&document.activeElement!==e&&v!=null)e.value=v;}
 function render(s){
- LIVE=!!s.live;
+ LIVE=!!s.live;AUTO=!!s.auto_enabled;
  $("sub").textContent="آخر تحديث: "+(s.updated||"—")+" · بيانات حتى "+(s.signal?.as_of||"—");
  $("mode").textContent="الوضع: "+(s.live?"حقيقي ⚠":"testnet")+" · أوامر حتى $"+s.max_order_usd+" / إجمالي $"+s.max_total_usd;
  $("autodot").className="dot "+(s.auto_enabled?"on":"off");
  $("autotxt").textContent="تلقائي: "+(s.auto_enabled?("يعمل كل "+s.auto_interval_hours+"س"+(s.auto_execute?" + تنفيذ":" (فحص فقط)")):"متوقف");
- $("auto").textContent=s.auto_enabled?"⏸ أوقف التلقائي":"▶ شغّل الوضع التلقائي";
+ $("auto").textContent=s.auto_enabled?"⏸ أوقف التلقائي":"🤖 تداول تلقائي";
+ if(document.activeElement!==$("autoexec"))$("autoexec").checked=!!s.auto_execute;
+ setIf("autoiv",s.auto_interval_hours);
+ $("autostate").textContent=s.auto_enabled?("▶ يعمل: "+(s.auto_execute?"يتداول":"يفحص")+" كل "+s.auto_interval_hours+"س"):"متوقف";
  // settings
  $("live").textContent=s.live?"🔴 حقيقي (Live)":"⚪ testnet (آمن)";
  $("live").className=s.live?"":"sec";
@@ -151,7 +159,8 @@ function render(s){
 async function refresh(){render(await api('/api/state'));}
 $("check").onclick=async()=>{$("check").disabled=true;$("check").textContent="…جارٍ مسح السوق";render(await api('/api/check','POST'));$("check").disabled=false;$("check").textContent="🔄 افحص السوق الآن";};
 $("exec").onclick=async()=>{if(!confirm((LIVE?"تنفيذ حقيقي بأموال فعلية":"تنفيذ على testnet")+" الآن؟"))return;$("exec").disabled=true;render(await api('/api/execute','POST',{}));$("exec").disabled=false;};
-$("auto").onclick=async()=>{render(await api('/api/auto','POST',{}));};
+$("auto").onclick=async()=>{const willEnable=!AUTO;if(willEnable&&$("autoexec").checked&&LIVE&&!confirm("تشغيل تداول تلقائي حقيقي بأموال فعلية؟"))return;render(await api('/api/auto','POST',{enabled:willEnable,execute:$("autoexec").checked,interval_hours:parseFloat($("autoiv").value)||6}));};
+$("autoexec").onchange=async()=>{render(await api('/api/auto','POST',{enabled:AUTO,execute:$("autoexec").checked,interval_hours:parseFloat($("autoiv").value)||6}));};
 $("live").onclick=async()=>{const next=!LIVE;if(next&&!confirm("تفعيل التداول الحقيقي بأموال فعلية؟ تأكد من المفاتيح وZAMBAHOLA_I_ACCEPT_REAL_TRADING=RISK"))return;render(await api('/api/config','POST',{live:next}));};
 document.querySelectorAll(".lv").forEach(b=>b.onclick=async()=>{render(await api('/api/config','POST',{max_total:parseFloat(b.dataset.v)}));});
 $("save").onclick=async()=>{render(await api('/api/config','POST',{universe_size:+$("uni").value,top_n:+$("topn").value,max_order_usd:+$("ord").value,max_total_usd:+$("tot").value}));};
@@ -169,8 +178,8 @@ class AppConfig:
     max_total: float = 1.0  # gross exposure target (1.0 = full spot; >1 = leverage*)
     universe_size: int = 25  # how many top coins to scan
     top_n: int = 5  # how many strongest uptrends to hold
-    max_order_usd: float = 20.0
-    max_total_usd: float = 100.0
+    max_order_usd: float = 1000.0  # per-order slippage cap (high = don't throttle deployment)
+    max_total_usd: float = 1000.0  # total budget to deploy across picks
     live: bool = False
     port: int = 8799
 
@@ -184,7 +193,7 @@ class AppState:
     updated: str | None = None
     auto_enabled: bool = False
     auto_execute: bool = False
-    auto_interval_hours: float = 12.0
+    auto_interval_hours: float = 6.0
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def log(self, msg: str) -> None:
@@ -485,9 +494,28 @@ def make_handler(cfg: AppConfig, state: AppState):
                 do_check(cfg, state)
                 return self._send(200, {**self._state_dict(), "result": res})
             if self.path == "/api/auto":
+                body = self._read_json()
                 with state.lock:
-                    state.auto_enabled = not state.auto_enabled
-                state.log("الوضع التلقائي " + ("تشغيل" if state.auto_enabled else "إيقاف"))
+                    if "enabled" in body:
+                        state.auto_enabled = bool(body["enabled"])
+                    else:
+                        state.auto_enabled = not state.auto_enabled
+                    if "execute" in body:
+                        state.auto_execute = bool(body["execute"])
+                    if "interval_hours" in body:
+                        state.auto_interval_hours = max(0.05, float(body["interval_hours"]))
+                    en, ex, iv = state.auto_enabled, state.auto_execute, state.auto_interval_hours
+                state.log(
+                    f"التداول التلقائي {'تشغيل' if en else 'إيقاف'}"
+                    + (f" · {'تنفيذ' if ex else 'فحص فقط'} كل {iv:g}س" if en else "")
+                )
+                if en:
+                    def _cycle(run_exec: bool) -> None:
+                        do_check(cfg, state, with_portfolio=True)
+                        if run_exec:
+                            do_execute(cfg, state)
+                            do_check(cfg, state)
+                    threading.Thread(target=_cycle, args=(ex,), daemon=True).start()
                 return self._send(200, self._state_dict())
             if self.path == "/api/config":
                 self._apply_config(self._read_json())
