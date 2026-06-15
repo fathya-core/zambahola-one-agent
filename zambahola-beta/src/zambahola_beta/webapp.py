@@ -230,7 +230,8 @@ small{color:var(--mut)}
 <div id="tradetbl" class="sub" style="margin-top:8px"></div></div>
 
 <div class="card"><div class="flex"><b>🧪 باك-تست الاستراتيجية الفعلية (مسح + Regime + وقف خسارة)</b>
-<button id="bt" class="sec sw" style="padding:5px 12px;font-size:12px">شغّل الباك-تست</button></div>
+<span class="sw flex"><button id="bt" class="sec" style="padding:5px 12px;font-size:12px">حديث (~٧ أشهر)</button>
+<button id="btlong" class="sec" style="padding:5px 12px;font-size:12px">سنوات (دورة كاملة)</button></span></div>
 <div id="btres" class="sub" style="margin-top:8px">اضغط لتشغيل محاكاة تاريخية حقيقية لمنطق الوكيل الكامل.</div></div>
 
 <div class="card"><b>مقارنة الاستراتيجيات (سلّة مرجعية)</b><div id="pf" class="sub">اضغط "افحص الآن" لتحميلها…</div></div>
@@ -320,6 +321,7 @@ function renderBacktest(b){
  if(!b.ok){$("btres").textContent="تعذّر: "+(b.error||"");return;}
  const up=b.total_return>=0,bup=(b.btc_hodl_return||0)>=0;
  $("btres").innerHTML=`<table>
+ <tr><td>النطاق</td><td>${b.scope==='years'?'دورة كاملة (سنوات)':'حديث'}</td></tr>
  <tr><td>الفترة</td><td>${(b.start||'').slice(0,10)} → ${(b.end||'').slice(0,10)} (${b.days} يوم · ${b.coins} عملة)</td></tr>
  <tr><td>عائد الاستراتيجية</td><td style="color:${up?'var(--up)':'var(--down)'}"><b>${(b.total_return*100).toFixed(0)}%</b> (CAGR ${(b.cagr*100).toFixed(0)}%)</td></tr>
  <tr><td>مقابل احتفاظ BTC</td><td style="color:${bup?'var(--up)':'var(--down)'}">${b.btc_hodl_return!=null?(b.btc_hodl_return*100).toFixed(0)+'%':'—'}</td></tr>
@@ -327,7 +329,8 @@ function renderBacktest(b){
  <tr><td>أيام رابحة</td><td>${b.positive_days_pct}%</td></tr></table>`;
 }
 async function refresh(){render(await api('/api/state'));}
-$("bt").onclick=async()=>{$("bt").disabled=true;$("bt").textContent="…جارٍ";$("btres").textContent="جارٍ تشغيل المحاكاة التاريخية… (قد تأخذ دقيقة)";try{render(await api('/api/backtest','POST',{}));}finally{$("bt").disabled=false;$("bt").textContent="شغّل الباك-تست";}};
+$("bt").onclick=async()=>{$("bt").disabled=true;$("btlong").disabled=true;$("btres").textContent="جارٍ المحاكاة الحديثة…";try{render(await api('/api/backtest','POST',{long:false}));}finally{$("bt").disabled=false;$("btlong").disabled=false;}};
+$("btlong").onclick=async()=>{$("bt").disabled=true;$("btlong").disabled=true;$("btres").textContent="جارٍ محاكاة سنوات (دورة كاملة)… قد تأخذ دقيقة–دقيقتين";try{render(await api('/api/backtest','POST',{long:true}));}finally{$("bt").disabled=false;$("btlong").disabled=false;}};
 $("check").onclick=async()=>{$("check").disabled=true;$("check").textContent="…جارٍ مسح السوق";render(await api('/api/check','POST'));$("check").disabled=false;$("check").textContent="🔄 افحص السوق الآن";};
 $("exec").onclick=async()=>{if(!confirm((LIVE?"تنفيذ حقيقي بأموال فعلية":"تنفيذ على testnet")+" الآن؟"))return;$("exec").disabled=true;render(await api('/api/execute','POST',{}));$("exec").disabled=false;};
 $("auto").onclick=async()=>{const willEnable=!AUTO;if(willEnable&&$("autoexec").checked&&LIVE&&!confirm("تشغيل تداول تلقائي حقيقي بأموال فعلية؟"))return;render(await api('/api/auto','POST',{enabled:willEnable,execute:$("autoexec").checked,interval_hours:parseFloat($("autoiv").value)||6}));};
@@ -702,19 +705,29 @@ def do_flatten(cfg: AppConfig, state: AppState) -> dict:
     return {"ok": True, "sold": placed}
 
 
-def do_backtest(cfg: AppConfig, state: AppState) -> dict:
-    """Run the real-strategy backtest on the live universe (on demand, heavy)."""
-    from .scan_backtest import backtest_scan
-    from .universe import fetch_frames, fetch_top_symbols
+def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) -> dict:
+    """Run the real-strategy backtest (on demand, heavy).
 
-    symbols = fetch_top_symbols(cfg.universe_size)
-    frames = fetch_frames(symbols, interval=cfg.interval, total=500)
-    res = backtest_scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total)
+    long_history=True uses a curated multi-year basket (BTC/ETH/SOL...) so the
+    test spans a full cycle (bull + bear), not just the recent window.
+    """
+    from .scan_backtest import backtest_scan
+    from .universe import LONG_UNIVERSE, fetch_frames, fetch_top_symbols
+
+    if long_history:
+        symbols, total, min_bars = LONG_UNIVERSE, 1600, 700
+    else:
+        symbols, total, min_bars = fetch_top_symbols(cfg.universe_size), 500, 300
+    frames = fetch_frames(symbols, interval=cfg.interval, total=total, min_bars=120)
+    res = backtest_scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol,
+                        max_total=cfg.max_total, min_bars=min_bars)
+    res["scope"] = "years" if long_history else "recent"
     with state.lock:
         state.backtest = res
     if res.get("ok"):
         btc = res.get("btc_hodl_return")
-        state.log(f"باك-تست الاستراتيجية: عائد {int(res['total_return'] * 100)}% · "
+        scope_ar = "سنوات" if long_history else "حديث"
+        state.log(f"باك-تست ({scope_ar}): عائد {int(res['total_return'] * 100)}% · "
                   f"تراجع {int(res['max_drawdown'] * 100)}% · Sharpe {res['sharpe']}"
                   + (f" مقابل BTC {int(btc * 100)}%" if btc is not None else ""))
     else:
@@ -890,7 +903,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                 do_check(cfg, state)
                 return self._send(200, {**self._state_dict(), "result": res})
             if self.path == "/api/backtest":
-                res = do_backtest(cfg, state)
+                long_hist = bool(self._read_json().get("long", False))
+                res = do_backtest(cfg, state, long_history=long_hist)
                 return self._send(200, {**self._state_dict(), "backtest_result": res})
             if self.path == "/api/resume":
                 with state.lock:

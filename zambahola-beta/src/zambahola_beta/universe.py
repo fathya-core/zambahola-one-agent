@@ -19,6 +19,13 @@ from .strategy import realized_vol, trend_consensus
 
 TICKER_24H = "https://api.binance.com/api/v3/ticker/24hr"
 
+# established coins with multi-year daily history (for a full-cycle backtest)
+LONG_UNIVERSE = [
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "SOLUSDT",
+    "LTCUSDT", "LINKUSDT", "DOTUSDT", "AVAXUSDT", "ATOMUSDT", "XLMUSDT", "TRXUSDT",
+    "ETCUSDT", "BCHUSDT", "FILUSDT", "ALGOUSDT", "NEARUSDT", "EOSUSDT",
+]
+
 # leveraged tokens / stablecoins / wrapped — exclude from the tradable universe
 _EXCLUDE_SUFFIX = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
 _STABLES = {
