@@ -58,6 +58,33 @@ def _config_path() -> Path:
     return Path(os.environ.get("ZAMBAHOLA_DATA_DIR", "data")) / "config.json"
 
 
+def _auto_path() -> Path:
+    return Path(os.environ.get("ZAMBAHOLA_DATA_DIR", "data")) / "auto.json"
+
+
+def _save_auto(state: AppState) -> None:
+    try:
+        p = _auto_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({
+            "auto_enabled": state.auto_enabled,
+            "auto_execute": state.auto_execute,
+            "auto_interval_hours": state.auto_interval_hours,
+        }), "utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _load_auto(state: AppState) -> None:
+    try:
+        d = json.loads(_auto_path().read_text("utf-8"))
+        state.auto_enabled = bool(d.get("auto_enabled", state.auto_enabled))
+        state.auto_execute = bool(d.get("auto_execute", state.auto_execute))
+        state.auto_interval_hours = float(d.get("auto_interval_hours", state.auto_interval_hours))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 _PERSIST_FIELDS = ("mode", "max_total", "universe_size", "top_n", "max_order_usd", "max_total_usd")
 
 
@@ -651,6 +678,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                     if "interval_hours" in body:
                         state.auto_interval_hours = max(0.05, float(body["interval_hours"]))
                     en, ex, iv = state.auto_enabled, state.auto_execute, state.auto_interval_hours
+                _save_auto(state)
                 state.log(
                     f"التداول التلقائي {'تشغيل' if en else 'إيقاف'}"
                     + (f" · {'تنفيذ' if ex else 'فحص فقط'} كل {iv:g}س" if en else "")
@@ -692,7 +720,8 @@ def main(cfg: AppConfig | None = None, *, open_browser: bool = True) -> None:
     _load_config(cfg)  # restore saved budget/settings across restarts (not live)
     state = AppState()
     state.equity_history = _load_equity_history()
-    state.log("بدء اللوحة")
+    _load_auto(state)  # resume autonomous trading after a restart (testnet-safe)
+    state.log("بدء اللوحة" + (" · استئناف التداول التلقائي" if state.auto_enabled else ""))
     threading.Thread(target=_auto_loop, args=(cfg, state), daemon=True).start()
     threading.Thread(target=_refresh_loop, args=(cfg, state), daemon=True).start()
     # initial signal fetch in background so the page loads instantly
