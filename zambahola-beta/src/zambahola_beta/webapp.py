@@ -54,6 +54,36 @@ def _save_equity_history(hist: list) -> None:
         pass
 
 
+def _config_path() -> Path:
+    return Path(os.environ.get("ZAMBAHOLA_DATA_DIR", "data")) / "config.json"
+
+
+_PERSIST_FIELDS = ("mode", "max_total", "universe_size", "top_n", "max_order_usd", "max_total_usd")
+
+
+def _save_config(cfg: AppConfig) -> None:
+    try:
+        p = _config_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({k: getattr(cfg, k) for k in _PERSIST_FIELDS}), "utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _load_config(cfg: AppConfig) -> None:
+    """Restore persisted settings (never `live` — always start on safe testnet)."""
+    try:
+        data = json.loads(_config_path().read_text("utf-8"))
+    except Exception:  # noqa: BLE001
+        return
+    for k in _PERSIST_FIELDS:
+        if k in data:
+            try:
+                setattr(cfg, k, type(getattr(cfg, k))(data[k]))
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def compute_pnl(hist: list) -> dict | None:
     """Account value over time -> return since baseline (the actual performance)."""
     pts = [h for h in hist if isinstance(h, dict) and "eq" in h]
@@ -432,6 +462,21 @@ def _resolve_whitelist(
     return out[:cap]
 
 
+def _order_reason(sym: str, side: str, targets: dict, ranked_map: dict) -> str:
+    """Human reason for a trade so the smart decision is visible in the log."""
+    r = ranked_map.get(sym, {})
+    action = r.get("action")
+    if side == "BUY":
+        return "دخول: ترند صاعد قوي"
+    if action == "STOP":
+        return "وقف خسارة (هبط عن قمّته)"
+    if targets.get(sym, 0) > 0:
+        return "تقليل للوزن المستهدف"
+    if action == "CASH" or r.get("trend_consensus", 0) < 0.5:
+        return "خروج: لا يوجد ترند"
+    return "خروج/إعادة توازن"
+
+
 def do_execute(cfg: AppConfig, state: AppState) -> dict:
     try:
         safety_gate(live=cfg.live)
@@ -469,15 +514,19 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         return {"ok": True, "orders": 0, "buys": 0, "sells": 0}
     net = "خطة: " + (f"شراء {buys}" if buys else "") + (" · " if buys and sells else "") + (f"بيع {sells}" if sells else "")
     state.log(f"{net} (ميزانية ${cfg.max_total_usd:g})")
+    ranked_map = {r["symbol"]: r for r in sig.get("ranked", [])}
     placed = 0
     for o in plan.orders:
+        why = _order_reason(o.symbol, o.side, sig.get("targets", {}), ranked_map)
         try:
             res = client.market_order(o.symbol, o.side, quote_qty=o.usd)
             placed += 1
             side_ar = "شراء" if o.side == "BUY" else "بيع"
-            state.log(f"{'حقيقي' if cfg.live else 'testnet'} {side_ar} {o.symbol} ${o.usd} → {res.get('status')}")
+            ok = str(res.get("status", "")).upper() in ("FILLED", "NEW", "PARTIALLY_FILLED")
+            mark = "✓ تم" if ok else f"({res.get('status')})"
+            state.log(f"{'حقيقي' if cfg.live else 'testnet'} {side_ar} {o.symbol} ${o.usd} {mark} — {why}")
         except Exception as exc:  # noqa: BLE001
-            state.log(f"فشل {o.side} {o.symbol}: {exc}")
+            state.log(f"✗ فشل {o.side} {o.symbol}: {exc}")
     return {"ok": True, "orders": placed, "buys": buys, "sells": sells}
 
 
@@ -569,6 +618,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.max_total_usd = max(0.0, float(body["max_total_usd"]))
             if body.get("mode") in ("scan", "ensemble", "rotation", "trend"):
                 cfg.mode = body["mode"]
+            _save_config(cfg)
             state.log("تحديث الإعدادات: " + json.dumps(body, ensure_ascii=False))
 
         def do_GET(self):
@@ -636,6 +686,7 @@ def _refresh_loop(cfg: AppConfig, state: AppState) -> None:
 
 def main(cfg: AppConfig | None = None, *, open_browser: bool = True) -> None:
     cfg = cfg or AppConfig()
+    _load_config(cfg)  # restore saved budget/settings across restarts (not live)
     state = AppState()
     state.equity_history = _load_equity_history()
     state.log("بدء اللوحة")
