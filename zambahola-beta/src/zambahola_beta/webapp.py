@@ -87,7 +87,7 @@ def _load_auto(state: AppState) -> None:
 
 
 _PERSIST_FIELDS = (
-    "mode", "max_total", "universe_size", "top_n", "max_order_usd", "max_total_usd",
+    "mode", "interval", "max_total", "universe_size", "top_n", "max_order_usd", "max_total_usd",
     "rebalance_band", "take_profit_pct", "take_profit_frac", "breaker_pct", "max_correlation",
 )
 
@@ -193,6 +193,13 @@ small{color:var(--mut)}
    <button class="sec lv" data-v="3">رافعة 3x ⚠</button>
   </div><small id="levnote" style="color:var(--mut)"></small></div>
 </div>
+<div style="margin-top:8px"><div class="k">الإطار الزمني (أسرع = أنشط)</div>
+ <div class="flex" id="tf">
+  <button class="sec tfb" data-v="1d">يومي</button>
+  <button class="sec tfb" data-v="12h">12س</button>
+  <button class="sec tfb" data-v="8h">8س</button>
+  <button class="sec tfb" data-v="4h">4س ⚡</button>
+ </div><small id="tfnote" style="color:var(--mut)"></small></div>
 <div class="row" style="margin-top:6px">
  <div><div class="k">عدد العملات الممسوحة</div><input id="uni" type="number" min="5" max="60" style="width:90px"></div>
  <div><div class="k">عدد المراكز (أقوى ترند)</div><input id="topn" type="number" min="1" max="15" style="width:90px"></div>
@@ -261,6 +268,8 @@ function render(s){
  $("live").className=s.live?"":"sec";
  $("livewarn").textContent=s.live?"تداول بأموال حقيقية — يتطلّب ZAMBAHOLA_I_ACCEPT_REAL_TRADING=RISK":"";
  document.querySelectorAll(".lv").forEach(b=>b.className=(parseFloat(b.dataset.v)===s.max_total)?"lv":"sec lv");
+ document.querySelectorAll(".tfb").forEach(b=>b.className=(b.dataset.v===s.interval)?"tfb":"sec tfb");
+ $("tfnote").textContent="الإطار الحالي: "+(s.interval||"1d")+(s.interval&&s.interval!=="1d"?" — أسرع، صفقات أكثر ورسوم أكثر":" — موصى به (مُثبت)");
  $("levnote").textContent=(s.max_total>1)?"⚠ الرافعة >1 تتطلّب حساب فيوتشرز — على spot يُنفَّذ 1x كحد أقصى":"تعرّض على spot (بدون رافعة)";
  setIf("uni",s.universe_size);setIf("topn",s.top_n);setIf("ord",s.max_order_usd);setIf("tot",s.max_total_usd);
  {let sc=s.scanned!=null?("مُسح "+s.scanned+" عملة"):"";if(s.regime!=null){const rp=Math.round(s.regime*100);sc+=" · وضع السوق: "+rp+"% "+(rp>=80?"🟢":(rp>=55?"🟡":"🔴 خطر"));}$("scanned").textContent=sc;}
@@ -337,6 +346,7 @@ $("auto").onclick=async()=>{const willEnable=!AUTO;if(willEnable&&$("autoexec").
 $("autoexec").onchange=async()=>{render(await api('/api/auto','POST',{enabled:AUTO,execute:$("autoexec").checked,interval_hours:parseFloat($("autoiv").value)||6}));};
 $("live").onclick=async()=>{const next=!LIVE;if(next&&!confirm("تفعيل التداول الحقيقي بأموال فعلية؟ تأكد من المفاتيح وZAMBAHOLA_I_ACCEPT_REAL_TRADING=RISK"))return;render(await api('/api/config','POST',{live:next}));};
 document.querySelectorAll(".lv").forEach(b=>b.onclick=async()=>{render(await api('/api/config','POST',{max_total:parseFloat(b.dataset.v)}));});
+document.querySelectorAll(".tfb").forEach(b=>b.onclick=async()=>{if(b.dataset.v!=="1d"&&!confirm("إطار أسرع = صفقات ورسوم أكثر وضجيج أكثر. متأكد؟"))return;render(await api('/api/config','POST',{interval:b.dataset.v}));});
 $("save").onclick=async()=>{render(await api('/api/config','POST',{universe_size:+$("uni").value,top_n:+$("topn").value,max_order_usd:+$("ord").value,max_total_usd:+$("tot").value}));};
 $("perfreset").onclick=async()=>{if(!confirm("تصفير سجل الأداء والبدء من القيمة الحالية؟"))return;render(await api('/api/perf-reset','POST',{}));};
 $("ledgerreset").onclick=async()=>{if(!confirm("تصفير سجل الصفقات والأرباح المحقّقة؟"))return;render(await api('/api/ledger-reset','POST',{}));};
@@ -719,9 +729,11 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
     else:
         symbols, total, min_bars = fetch_top_symbols(cfg.universe_size), 500, 300
     frames = fetch_frames(symbols, interval=cfg.interval, total=total, min_bars=120)
+    ppy = {"1d": 365, "12h": 730, "8h": 1095, "6h": 1460, "4h": 2190, "1h": 8760}.get(cfg.interval, 365)
     res = backtest_scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol,
-                        max_total=cfg.max_total, min_bars=min_bars)
+                        max_total=cfg.max_total, min_bars=min_bars, periods_per_year=ppy)
     res["scope"] = "years" if long_history else "recent"
+    res["interval"] = cfg.interval
     with state.lock:
         state.backtest = res
     if res.get("ok"):
@@ -797,6 +809,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "ranked": state.signal.get("ranked") if state.signal else None,
                     "live": cfg.live,
                     "mode": cfg.mode,
+                    "interval": cfg.interval,
                     "max_total": cfg.max_total,
                     "universe_size": cfg.universe_size,
                     "top_n": cfg.top_n,
@@ -834,6 +847,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.max_total_usd = max(0.0, float(body["max_total_usd"]))
             if body.get("mode") in ("scan", "ensemble", "rotation", "trend"):
                 cfg.mode = body["mode"]
+            if body.get("interval") in ("1d", "12h", "8h", "6h", "4h", "1h"):
+                cfg.interval = body["interval"]
             if "rebalance_band" in body:
                 cfg.rebalance_band = max(0.0, min(0.9, float(body["rebalance_band"])))
             if "take_profit_pct" in body:

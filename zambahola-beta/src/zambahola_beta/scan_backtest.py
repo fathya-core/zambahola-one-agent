@@ -29,6 +29,7 @@ def backtest_scan(
     leader: str = "BTCUSDT",
     warmup: int = 210,
     min_bars: int = 300,
+    periods_per_year: float = 365.0,
 ) -> dict:
     frames = {s: df for s, df in frames.items() if len(df) >= min_bars}
     if len(frames) < 2:
@@ -105,8 +106,8 @@ def backtest_scan(
         return {"ok": False, "error": "no backtest days"}
     peak = np.maximum.accumulate(eqs)
     mdd = float((eqs / peak - 1.0).min())
-    cagr = float(eq ** (365.0 / days) - 1.0)
-    sharpe = float(pr.mean() / pr.std() * np.sqrt(365)) if pr.std() > 0 else 0.0
+    cagr = float(eq ** (periods_per_year / days) - 1.0)
+    sharpe = float(pr.mean() / pr.std() * np.sqrt(periods_per_year)) if pr.std() > 0 else 0.0
     btc_hodl = None
     if leader in names:
         btc_hodl = float(px[leader].iloc[T - 1] / px[leader].iloc[warmup] - 1.0)
