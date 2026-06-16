@@ -32,6 +32,7 @@ def backtest_scan(
     periods_per_year: float = 365.0,
     regime_floor: float = 0.4,
     conviction_power: float = 1.0,
+    end_index: int | None = None,
 ) -> dict:
     frames = {s: df for s, df in frames.items() if len(df) >= min_bars}
     if len(frames) < 2:
@@ -42,7 +43,8 @@ def backtest_scan(
     px = closes[names].astype(float)
     rets = px.pct_change()
     T = len(closes)
-    if T <= warmup + 5:
+    last = min(end_index, T) if end_index is not None else T
+    if last <= warmup + 5:
         return {"ok": False, "error": "not enough aligned history"}
 
     cons = {n: trend_consensus(px[n]) for n in names}
@@ -58,7 +60,7 @@ def backtest_scan(
     eq = 1.0
     prev_w: dict[str, float] = {n: 0.0 for n in names}
 
-    for t in range(warmup, T - 1):
+    for t in range(warmup, last - 1):
         regime = 1.0
         if btc_cons is not None and not pd.isna(btc_cons.iloc[t]):
             regime = regime_floor + (1.0 - regime_floor) * float(btc_cons.iloc[t])
@@ -112,14 +114,14 @@ def backtest_scan(
     sharpe = float(pr.mean() / pr.std() * np.sqrt(periods_per_year)) if pr.std() > 0 else 0.0
     btc_hodl = None
     if leader in names:
-        btc_hodl = float(px[leader].iloc[T - 1] / px[leader].iloc[warmup] - 1.0)
+        btc_hodl = float(px[leader].iloc[last - 1] / px[leader].iloc[warmup] - 1.0)
 
     return {
         "ok": True,
         "coins": len(names),
         "days": days,
         "start": str(closes["open_time"].iloc[warmup]),
-        "end": str(closes["open_time"].iloc[T - 1]),
+        "end": str(closes["open_time"].iloc[last - 1]),
         "total_return": round(float(eq - 1.0), 4),
         "cagr": round(cagr, 4),
         "sharpe": round(sharpe, 2),
