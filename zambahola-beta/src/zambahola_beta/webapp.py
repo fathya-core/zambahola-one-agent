@@ -230,10 +230,10 @@ small{color:var(--mut)}
 <div class="card"><div class="flex"><b>🧾 سجل الصفقات والأرباح المحقّقة</b>
 <button id="ledgerreset" class="sec sw" style="padding:5px 12px;font-size:12px">صفّر السجل</button></div>
 <div class="row" style="margin-top:8px">
- <div style="min-width:130px"><div class="big" id="realized">—</div><div class="k">ربح محقّق (USDT)</div></div>
+ <div style="min-width:140px"><div class="big" id="stratpnl">—</div><div class="k">ربح الاستراتيجية (محقّق+مفتوح)</div></div>
  <div style="min-width:130px"><div class="big" id="winrate">—</div><div class="k">نسبة الفوز</div></div>
- <div style="min-width:120px"><div class="k">صفقات مغلقة: <span id="closed">0</span></div>
-  <div class="k">رابحة: <span id="wins">0</span> · خاسرة: <span id="losses">0</span></div></div>
+ <div style="min-width:150px"><div class="k">محقّق: <span id="realized">—</span> · مفتوح: <span id="unreal">—</span></div>
+  <div class="k">مستثمَر: $<span id="invested">0</span> · مغلقة: <span id="closed">0</span> (ربح <span id="wins">0</span>/خسارة <span id="losses">0</span>)</div></div>
 </div>
 <div id="tradetbl" class="sub" style="margin-top:8px"></div></div>
 
@@ -301,7 +301,11 @@ function render(s){
  if(s.halted)$("halttxt").textContent="هبط رأس المال "+(s.drawdown_pct!=null?s.drawdown_pct.toFixed(1):"?")+"% عن القمّة (الحد "+s.breaker_pct+"%). اضغط استئناف للعودة.";
  // trade ledger
  const lg=s.ledger||{};
- if(lg.realized_pnl!=null){const up=lg.realized_pnl>=0;$("realized").textContent=(up?'+':'')+'$'+lg.realized_pnl;$("realized").style.color=up?'var(--up)':'var(--down)';}
+ const sp=(lg.strategy_pnl!=null)?lg.strategy_pnl:lg.realized_pnl;
+ if(sp!=null){const up=sp>=0;$("stratpnl").textContent=(up?'+':'')+'$'+sp+(lg.strategy_pnl_pct!=null?' ('+(lg.strategy_pnl_pct>=0?'+':'')+lg.strategy_pnl_pct+'%)':'');$("stratpnl").style.color=up?'var(--up)':'var(--down)';}
+ $("realized").textContent=lg.realized_pnl!=null?('$'+lg.realized_pnl):'—';
+ $("unreal").textContent=lg.unrealized_pnl!=null?('$'+lg.unrealized_pnl):'—';
+ $("invested").textContent=lg.invested!=null?lg.invested:0;
  $("winrate").textContent=lg.win_rate!=null?lg.win_rate+'%':'—';
  $("closed").textContent=lg.trades_closed||0;$("wins").textContent=lg.wins||0;$("losses").textContent=lg.losses||0;
  const tr=s.trades||[];
@@ -829,7 +833,9 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "backtest": state.backtest,
                 }
             # file-backed (read outside the state lock)
-            d["ledger"] = load_ledger().summary()
+            acct = d.get("account") or {}
+            prices = acct.get("_prices") if isinstance(acct, dict) else None
+            d["ledger"] = load_ledger().summary(prices)
             d["trades"] = load_trades(30)
             return d
 

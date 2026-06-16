@@ -80,11 +80,24 @@ class Ledger:
             return None
         return (price / pos.avg - 1.0) * 100
 
-    def summary(self) -> dict:
+    def unrealized(self, prices: dict) -> float:
+        """Open-position PnL vs average cost (strategy positions only)."""
+        tot = 0.0
+        for sym, p in self.positions.items():
+            px = prices.get(sym, 0.0)
+            if p.qty > 1e-12 and px > 0 and p.avg > 0:
+                tot += (px - p.avg) * p.qty
+        return tot
+
+    def invested(self) -> float:
+        """Cost basis currently deployed in open strategy positions."""
+        return sum(p.cost for p in self.positions.values() if p.qty > 1e-12)
+
+    def summary(self, prices: dict | None = None) -> dict:
         n = self.wins + self.losses
         open_pos = {s: {"qty": round(p.qty, 8), "avg": round(p.avg, 6)}
                     for s, p in self.positions.items() if p.qty > 1e-9}
-        return {
+        out = {
             "realized_pnl": round(self.realized, 2),
             "wins": self.wins,
             "losses": self.losses,
@@ -92,6 +105,15 @@ class Ledger:
             "win_rate": round(self.wins / n * 100, 1) if n else None,
             "open_positions": open_pos,
         }
+        if prices is not None:
+            unreal = self.unrealized(prices)
+            invested = self.invested()
+            total = self.realized + unreal
+            out["unrealized_pnl"] = round(unreal, 2)
+            out["invested"] = round(invested, 2)
+            out["strategy_pnl"] = round(total, 2)
+            out["strategy_pnl_pct"] = round(total / invested * 100, 2) if invested > 1 else None
+        return out
 
 
 def load_ledger() -> Ledger:
