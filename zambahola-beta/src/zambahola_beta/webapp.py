@@ -393,6 +393,7 @@ class AppState:
     equity_history: list = field(default_factory=list)
     halted: bool = False  # circuit breaker tripped -> trading paused
     backtest: dict | None = None
+    last_auto_run: float = 0.0  # epoch of last auto cycle (separate from `updated`)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def log(self, msg: str) -> None:
@@ -754,20 +755,20 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
 
 def _auto_loop(cfg: AppConfig, state: AppState) -> None:
     while True:
-        time.sleep(2)
+        time.sleep(5)
         with state.lock:
             enabled = state.auto_enabled
             execute = state.auto_execute
             interval = state.auto_interval_hours
-            last = state.updated
+            last_run = state.last_auto_run
         if not enabled:
             continue
-        # run if never run or interval elapsed
-        due = True
-        if last:
-            due = (time.time() - time.mktime(time.strptime(last, "%Y-%m-%d %H:%M:%S"))) >= interval * 3600
-        if not due:
+        # due strictly off the last AUTO cycle (NOT `updated`, which the 5-min
+        # refresh loop also touches — that previously froze auto-trading)
+        if (time.time() - last_run) < interval * 3600:
             continue
+        with state.lock:
+            state.last_auto_run = time.time()
         try:
             do_check(cfg, state)
             state.log("فحص تلقائي")
@@ -808,6 +809,9 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "pnl": compute_pnl(state.equity_history),
                     "halted": state.halted,
                     "drawdown_pct": _breaker_drawdown(state.equity_history),
+                    "auto_stale": (state.auto_enabled and state.last_auto_run > 0
+                                   and (time.time() - state.last_auto_run)
+                                   > state.auto_interval_hours * 3600 * 1.5),
                     "cash_weight": state.signal.get("cash_weight") if state.signal else None,
                     "scanned": state.signal.get("scanned") if state.signal else None,
                     "regime": state.signal.get("regime") if state.signal else None,
