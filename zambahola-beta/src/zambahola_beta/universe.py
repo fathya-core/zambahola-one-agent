@@ -162,6 +162,8 @@ def scan(
     conviction_power: float = 1.5,
     max_correlation: float = 0.85,
     corr_window: int = 60,
+    held: set | None = None,
+    hold_buffer: int = 2,
     leader: str = "BTCUSDT",
     use_regime: bool = True,
 ) -> dict:
@@ -200,14 +202,17 @@ def scan(
         c = frames[sym]["close"].astype(float)
         return c.pct_change().tail(corr_window).reset_index(drop=True)
 
-    picks: list[dict] = []
+    held = set(held or [])
+    # build a diversified shortlist a bit longer than top_n (grace zone for held)
+    shortlist_n = top_n + (hold_buffer if held else 0)
+    diversified: list[dict] = []
     for s in eligible:
-        if len(picks) >= top_n:
+        if len(diversified) >= shortlist_n:
             break
-        if max_correlation < 1.0 and picks:
+        if max_correlation < 1.0 and diversified:
             r = _ret(s["symbol"])
             too_corr = False
-            for p in picks:
+            for p in diversified:
                 try:
                     c = r.corr(_ret(p["symbol"]))
                 except Exception:  # noqa: BLE001
@@ -217,7 +222,15 @@ def scan(
                     break
             if too_corr:
                 continue
-        picks.append(s)
+        diversified.append(s)
+
+    # hysteresis: keep coins we already hold while they stay in the shortlist
+    # (don't churn on borderline rank flips); fill the rest with the best new trends
+    kept = [s for s in diversified if s["symbol"] in held][:top_n]
+    kept_syms = {s["symbol"] for s in kept}
+    fill = [s for s in diversified if s["symbol"] not in kept_syms]
+    picks = (kept + fill)[:top_n]
+    picks.sort(key=lambda s: s["score"], reverse=True)
 
     targets: dict[str, float] = {}
     if picks:

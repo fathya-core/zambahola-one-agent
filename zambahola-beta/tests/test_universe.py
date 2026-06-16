@@ -91,6 +91,25 @@ def test_scan_diversification_skips_correlated():
     assert not ({"AUSDT", "BUSDT"} <= picks)
 
 
+def test_scan_hysteresis_keeps_held_coin():
+    rng = np.random.default_rng(2)
+    n = 260
+
+    def s(drift: float) -> np.ndarray:
+        return 100 * np.cumprod(1 + rng.normal(drift, 0.01, n))
+
+    frames = {f"C{i}USDT": _frame(s(0.006 - i * 0.0004)) for i in range(6)}
+    base = scan(frames, top_n=4, max_correlation=1.0, held=set())
+    # a coin that was eligible but did NOT make the top 4
+    eligible = [r["symbol"] for r in base["ranked"] if r["action"] in ("INVEST", "UPTREND")]
+    not_picked = [s for s in eligible if s not in base["targets"]]
+    assert not_picked, "need an eligible-but-unpicked coin for this test"
+    cand = not_picked[0]
+    # holding it -> hysteresis keeps it in the book (no churn on a borderline rank)
+    kept = scan(frames, top_n=4, max_correlation=1.0, held={cand}, hold_buffer=2)
+    assert cand in kept["targets"]
+
+
 def test_scan_all_down_goes_cash():
     n = 260
     down = {"AUSDT": _frame(np.linspace(200.0, 100.0, n)),

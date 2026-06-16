@@ -484,9 +484,10 @@ def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str], dict]:
 
     symbols = fetch_top_symbols(cfg.universe_size)
     frames = fetch_frames(symbols, interval=cfg.interval, total=max(cfg.bars, 400))
+    held = {s for s, p in load_ledger().positions.items() if p.qty > 1e-9}
     sc = scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total,
               stop_pct=cfg.stop_pct, conviction_power=cfg.conviction_power,
-              max_correlation=cfg.max_correlation)
+              max_correlation=cfg.max_correlation, held=held)
     as_of = ""
     first = next((s for s in symbols if s in frames), None)
     if first is not None:
