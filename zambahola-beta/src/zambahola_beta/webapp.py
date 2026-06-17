@@ -734,9 +734,11 @@ def do_flatten(cfg: AppConfig, state: AppState, *, full: bool = False, cap: int 
               + f" ({len(candidates)} عملة)")
     placed = 0
     for sym, usd, price in candidates:
+        # 0.92 margin absorbs price drift between price-fetch and execution (avoids -2010)
+        amt = round(usd * 0.92, 2)
         try:
-            client.market_order(sym, "SELL", quote_qty=round(usd * 0.99, 2))
-            rec = led.record("SELL", sym, usd * 0.99, price)
+            client.market_order(sym, "SELL", quote_qty=amt)
+            rec = led.record("SELL", sym, amt, price)
             append_trade({**rec, "mode": "live" if cfg.live else "testnet",
                           "why": "تصفية لبداية نظيفة" if full else "طوارئ: تصفية"})
             placed += 1
