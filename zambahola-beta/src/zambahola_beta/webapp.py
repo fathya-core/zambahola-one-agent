@@ -89,7 +89,7 @@ def _load_auto(state: AppState) -> None:
 _PERSIST_FIELDS = (
     "mode", "interval", "max_total", "universe_size", "top_n", "max_order_usd", "max_total_usd",
     "rebalance_band", "take_profit_pct", "take_profit_frac", "breaker_pct", "max_correlation",
-    "stop_pct", "conviction_power",
+    "stop_pct", "conviction_power", "target_vol",
 )
 
 
@@ -902,6 +902,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.stop_pct = max(0.05, min(0.9, float(body["stop_pct"])))
             if "conviction_power" in body:
                 cfg.conviction_power = max(1.0, min(3.0, float(body["conviction_power"])))
+            if "target_vol" in body:
+                cfg.target_vol = max(0.1, min(3.0, float(body["target_vol"])))
             _save_config(cfg)
             state.log("تحديث الإعدادات: " + json.dumps(body, ensure_ascii=False))
 
