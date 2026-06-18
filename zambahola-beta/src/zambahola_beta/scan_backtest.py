@@ -33,6 +33,8 @@ def backtest_scan(
     regime_floor: float = 0.4,
     conviction_power: float = 1.0,
     end_index: int | None = None,
+    fng_df: "pd.DataFrame | None" = None,
+    fng_greed_cut: float = 0.0,
 ) -> dict:
     frames = {s: df for s, df in frames.items() if len(df) >= min_bars}
     if len(frames) < 2:
@@ -55,6 +57,14 @@ def backtest_scan(
     btc_cons = trend_consensus(px[leader]) if leader in names else None
     btc_mom90 = px[leader].pct_change(90) if leader in names else None
 
+    # align Fear & Greed (sentiment) to the trading dates if provided
+    fng_arr = None
+    if fng_df is not None and fng_greed_cut > 0 and not fng_df.empty:
+        m = pd.DataFrame({"date": pd.to_datetime(closes["open_time"], utc=True).dt.normalize()})
+        fd = fng_df.copy()
+        fd["date"] = pd.to_datetime(fd["date"], utc=True).dt.normalize()
+        fng_arr = m.merge(fd, on="date", how="left")["fng"].ffill().to_numpy()
+
     port_ret: list[float] = []
     equity: list[float] = []
     eq = 1.0
@@ -65,6 +75,11 @@ def backtest_scan(
         if btc_cons is not None and not pd.isna(btc_cons.iloc[t]):
             regime = regime_floor + (1.0 - regime_floor) * float(btc_cons.iloc[t])
         eff_total = max_total * regime
+        # sentiment overlay: trim exposure when the crowd is in extreme greed (froth)
+        if fng_arr is not None:
+            fv = fng_arr[t]
+            if fv == fv and fv > 70:  # not NaN and greedy
+                eff_total *= max(0.0, 1.0 - fng_greed_cut * (fv - 70) / 30.0)
 
         cand: list[tuple[str, float, float]] = []
         for n in names:
