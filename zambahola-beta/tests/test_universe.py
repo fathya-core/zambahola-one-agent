@@ -36,7 +36,7 @@ def test_trend_score_directions():
 
 def test_scan_picks_uptrends_and_ranks_smart():
     # disable the correlation filter here (synthetic linear coins are ~identical)
-    res = scan(_frames(), top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0)
+    res = scan(_frames(), top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0, min_vol=0.0)
     assert res["scanned"] == 3
     # downtrend coin must not be funded
     assert "DOWNUSDT_X" not in res["targets"]
@@ -70,7 +70,7 @@ def test_scan_trailing_stop_excludes_crashed_coin():
 
 
 def test_scan_funded_coins_are_near_highs():
-    res = scan(_frames(), stop_pct=0.25)
+    res = scan(_frames(), stop_pct=0.25, min_vol=0.0)
     for r in res["ranked"]:
         if r["symbol"] in res["targets"]:
             assert r["dd_high"] > -0.25  # never funds a coin past its stop
@@ -121,7 +121,7 @@ def test_scan_all_down_goes_cash():
 
 def test_scan_respects_max_total_leverage():
     # no BTC leader in the synthetic basket -> regime 1.0 -> full max_total
-    res = scan(_frames(), top_n=5, max_total=2.0, max_correlation=1.0)
+    res = scan(_frames(), top_n=5, max_total=2.0, max_correlation=1.0, min_vol=0.0)
     assert abs(sum(res["targets"].values()) - 2.0) < 1e-6
 
 
@@ -140,7 +140,7 @@ def test_scan_regime_cuts_exposure_when_btc_weak():
         "BTCUSDT": _frame(np.linspace(300.0, 100.0, n)),     # market leader DOWN
         "ALTUSDT": _frame(np.linspace(100.0, 320.0, n)),     # a strong alt uptrend
     }
-    res = scan(frames, top_n=5, max_total=1.0)
+    res = scan(frames, top_n=5, max_total=1.0, min_vol=0.0)
     # alt still funded, but total exposure is scaled down by the risk-off regime
     assert res["regime"] < 0.5
     assert 0 < sum(res["targets"].values()) <= res["regime"] + 1e-6

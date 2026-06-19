@@ -32,7 +32,8 @@ _STABLES = {
     "USDCUSDT", "FDUSDUSDT", "TUSDUSDT", "BUSDUSDT", "DAIUSDT", "EURUSDT",
     "USDPUSDT", "USTUSDT", "PAXGUSDT", "WBTCUSDT", "USD1USDT", "USDEUSDT",
     "USDDUSDT", "GUSDUSDT", "FRAXUSDT", "LUSDUSDT", "USDJUSDT", "AEURUSDT",
-    "EURIUSDT", "USDSUSDT", "XUSDUSDT",
+    "EURIUSDT", "USDSUSDT", "XUSDUSDT", "RLUSDUSDT", "USDXUSDT", "BFUSDUSDT",
+    "USDQUSDT", "EURQUSDT",
 }
 
 
@@ -162,6 +163,7 @@ def scan(
     conviction_power: float = 1.5,
     max_correlation: float = 0.85,
     corr_window: int = 60,
+    min_vol: float = 0.10,
     held: set | None = None,
     hold_buffer: int = 2,
     leader: str = "BTCUSDT",
@@ -189,10 +191,12 @@ def scan(
     regime = market_regime(frames, leader) if use_regime else 1.0
     effective_total = max_total * regime
 
-    # eligible = clear uptrend, positive conviction, AND not stopped out
+    # eligible = clear uptrend, positive conviction, not stopped out, AND real
+    # volatility (min_vol auto-excludes stablecoins/pegged tokens — vol ~0)
     eligible = [
         s for s in scored
-        if s["consensus"] >= min_consensus and s["score"] > 0 and not s["stopped"]
+        if s["consensus"] >= min_consensus and s["score"] > 0
+        and not s["stopped"] and s["vol"] >= min_vol
     ]
     eligible.sort(key=lambda s: s["score"], reverse=True)
 
