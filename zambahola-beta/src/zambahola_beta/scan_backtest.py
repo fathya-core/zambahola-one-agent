@@ -35,6 +35,8 @@ def backtest_scan(
     end_index: int | None = None,
     fng_df: "pd.DataFrame | None" = None,
     fng_greed_cut: float = 0.0,
+    allow_short: bool = False,
+    short_consensus: float = 0.25,
 ) -> dict:
     frames = {s: df for s, df in frames.items() if len(df) >= min_bars}
     if len(frames) < 2:
@@ -54,6 +56,7 @@ def backtest_scan(
     mom30 = {n: px[n].pct_change(30) for n in names}
     vol = {n: realized_vol(px[n], 30) for n in names}
     dd = {n: px[n] / px[n].rolling(60).max() - 1.0 for n in names}
+    roll_min = {n: px[n].rolling(60).min() for n in names} if allow_short else {}
     btc_cons = trend_consensus(px[leader]) if leader in names else None
     btc_mom90 = px[leader].pct_change(90) if leader in names else None
 
@@ -107,6 +110,35 @@ def backtest_scan(
             ssum = sum(raw.values()) or 1.0
             for n, rv in raw.items():
                 w[n] = rv / ssum * eff_total
+
+        # SHORT book: short the strongest downtrends; budget grows as BTC weakens
+        if allow_short:
+            short_budget = max_total * max(0.0, 1.0 - regime)
+            if short_budget > 0:
+                scand = []
+                for n in names:
+                    cn, m9, v = cons[n].iloc[t], mom90[n].iloc[t], vol[n].iloc[t]
+                    if pd.isna(cn) or pd.isna(m9) or pd.isna(v) or v < 0.10:
+                        continue
+                    if cn > short_consensus or m9 >= 0:
+                        continue
+                    rmin = roll_min[n].iloc[t]
+                    dlow = (px[n].iloc[t] / rmin - 1.0) if rmin and rmin > 0 else 0.0
+                    if dlow >= stop_pct:  # short stop: bounced too far off the low
+                        continue
+                    sscore = (1.0 - cn) * (max(0.0, -m9 / v if v > 0 else 0.0) + 0.2 * max(0.0, -m9))
+                    if sscore > 0:
+                        scand.append((n, sscore, v))
+                scand.sort(key=lambda x: x[1], reverse=True)
+                spicks = scand[:top_n]
+                if spicks:
+                    raw = {}
+                    for n, score, v in spicks:
+                        vs = min(1.0, target_vol / v) if v > 0 else 0.0
+                        raw[n] = max(0.0, vs) * (max(0.1, score) ** conviction_power)
+                    ssum = sum(raw.values()) or 1.0
+                    for n, rv in raw.items():
+                        w[n] = w.get(n, 0.0) - rv / ssum * short_budget  # negative = short
 
         turnover = sum(abs(w[n] - prev_w[n]) for n in names)
         cost = turnover * cost_bps / 10000.0
