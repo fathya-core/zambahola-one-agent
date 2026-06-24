@@ -64,3 +64,19 @@ def test_win_rate_none_when_no_closed_trades():
     led = Ledger()
     led.record("BUY", "BTCUSDT", usd=100.0, price=100.0)
     assert led.summary()["win_rate"] is None
+
+
+def test_entry_clock_stamped_on_fresh_buy_and_cleared_on_exit():
+    led = Ledger()
+    led.record("BUY", "SYNUSDT", usd=100.0, price=1.0)
+    pos = led.positions["SYNUSDT"]
+    assert pos.t_entry > 0  # clock stamped
+    assert pos.age_hours(now=pos.t_entry + 3600) == 1.0  # one hour later
+    led.record("SELL", "SYNUSDT", usd=100.0, price=1.0)  # full exit
+    assert led.positions["SYNUSDT"].t_entry == 0.0  # clock cleared for next entry
+
+
+def test_age_hours_unknown_entry_treated_as_old():
+    from zambahola_beta.ledger import Position
+    p = Position(qty=1.0, cost=1.0, t_entry=0.0)  # legacy position w/o clock
+    assert p.age_hours() > 1e6  # treated as old -> no min-hold protection

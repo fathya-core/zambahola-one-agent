@@ -90,6 +90,7 @@ _PERSIST_FIELDS = (
     "mode", "interval", "max_total", "universe_size", "top_n", "max_order_usd", "max_total_usd",
     "rebalance_band", "take_profit_pct", "take_profit_frac", "breaker_pct", "max_correlation",
     "stop_pct", "conviction_power", "target_vol", "profit_lock_arm", "profit_lock_giveback",
+    "min_hold_hours",
 )
 
 
@@ -384,6 +385,7 @@ class AppConfig:
     conviction_power: float = 1.5  # concentrate weight toward the strongest trends
     profit_lock_arm: float = 0.25  # arm the profit ratchet once a position is up this %
     profit_lock_giveback: float = 0.08  # FLOOR give-back; actual is vol-adaptive (8%-30%)
+    min_hold_hours: float = 24.0  # anti-churn: hold a new position at least this long (rotation only)
     live: bool = False
     port: int = 8799
 
@@ -652,11 +654,13 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
             daily_vol = (ranked_vol.get(s, 0.0) or 0.0) / (365 ** 0.5)
             giveback_map[s] = max(cfg.profit_lock_giveback, min(0.30, 2.5 * daily_vol))
     # 2a) profit ratchet: a winner that gave back from its peak -> EXIT to lock the gain
+    lock_syms: set[str] = set()
     if not breaker:
         for sym in led.profit_lock_exits(allp, cfg.profit_lock_arm, cfg.profit_lock_giveback,
                                          giveback_map=giveback_map):
             g = led.unrealized_gain_pct(sym, allp.get(sym, 0.0))
             targets[sym] = 0.0  # force full exit (lock profit near the peak)
+            lock_syms.add(sym)
             if sym not in whitelist:
                 whitelist = whitelist + (sym,)
             if sym not in prices and sym in allp:
@@ -669,6 +673,32 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
             if g is not None and g >= cfg.take_profit_pct and targets[sym] > 0:
                 targets[sym] = round(targets[sym] * (1 - cfg.take_profit_frac), 4)
                 state.log(f"💰 جني أرباح {sym}: +{g:.0f}% → بيع {int(cfg.take_profit_frac * 100)}%")
+    # 2c) min-hold anti-churn: a position younger than min_hold_hours is protected from
+    # ROTATION sells (dropped out of the top-N). Real risk exits still fire: profit-lock,
+    # circuit breaker, and a hard stop-loss (price fell >= stop_pct below average cost).
+    if not breaker and cfg.min_hold_hours > 0:
+        usdt = balances.get("USDT", 0.0)
+        hv = {}
+        for s in whitelist:
+            base = s[:-4] if s.endswith("USDT") else s
+            q = balances.get(base, 0.0)
+            px = prices.get(s, 0.0)
+            if q > 0 and px > 0:
+                hv[s] = q * px
+        equity = usdt + sum(hv.values())
+        protected = []
+        for s, p in led.positions.items():
+            if p.qty <= 1e-12 or p.age_hours() >= cfg.min_hold_hours or s in lock_syms:
+                continue
+            px = allp.get(s, 0.0)
+            if px > 0 and p.avg > 0 and (px / p.avg - 1.0) <= -abs(cfg.stop_pct):
+                continue  # hard stop-loss -> allow the sell
+            cur_w = (hv.get(s, 0.0) / equity) if equity > 0 else 0.0
+            if cur_w > 0 and targets.get(s, 0.0) < cur_w:
+                targets[s] = round(cur_w, 4)  # keep it: cancel the rotation sell
+                protected.append(s)
+        if protected:
+            state.log(f"⏳ حد أدنى للاحتفاظ ({cfg.min_hold_hours:g}س): إبقاء {', '.join(protected)} (منع دوران)")
     save_ledger(led)
 
     limits = RiskLimits(max_order_usd=cfg.max_order_usd, max_total_usd=cfg.max_total_usd,
@@ -885,6 +915,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "max_total_usd": cfg.max_total_usd,
                     "breaker_pct": cfg.breaker_pct,
                     "take_profit_pct": cfg.take_profit_pct,
+                    "min_hold_hours": cfg.min_hold_hours,
                     "backtest": state.backtest,
                 }
             # file-backed (read outside the state lock)
@@ -921,6 +952,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.interval = body["interval"]
             if "rebalance_band" in body:
                 cfg.rebalance_band = max(0.0, min(0.9, float(body["rebalance_band"])))
+            if "min_hold_hours" in body:
+                cfg.min_hold_hours = max(0.0, min(240.0, float(body["min_hold_hours"])))
             if "take_profit_pct" in body:
                 cfg.take_profit_pct = max(1.0, float(body["take_profit_pct"]))
             if "take_profit_frac" in body:

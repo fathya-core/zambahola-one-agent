@@ -31,10 +31,16 @@ class Position:
     qty: float = 0.0
     cost: float = 0.0  # total USD cost basis of the current qty
     peak: float = 0.0  # highest price seen since entry (for the profit ratchet)
+    t_entry: float = 0.0  # epoch seconds of first entry (for min-hold anti-churn)
 
     @property
     def avg(self) -> float:
         return self.cost / self.qty if self.qty > 1e-12 else 0.0
+
+    def age_hours(self, now: float | None = None) -> float:
+        if self.t_entry <= 0:
+            return 1e9  # unknown entry time -> treat as old (no protection)
+        return ((now or time.time()) - self.t_entry) / 3600.0
 
 
 @dataclass
@@ -53,6 +59,8 @@ class Ledger:
         gain_pct = None
         side = side.upper()
         if side == "BUY":
+            if pos.qty <= 1e-12:  # fresh entry -> stamp the clock for min-hold
+                pos.t_entry = time.time()
             pos.qty += qty
             pos.cost += usd
             pos.peak = max(pos.peak, price) if pos.peak > 0 else price
@@ -69,6 +77,9 @@ class Ledger:
                     self.wins += 1
                 elif realized < 0:
                     self.losses += 1
+                if pos.qty <= 1e-12:  # fully closed -> clear peak/clock for next entry
+                    pos.peak = 0.0
+                    pos.t_entry = 0.0
         return {
             "t": stamp, "side": side, "symbol": symbol,
             "usd": round(usd, 2), "price": price,
@@ -150,7 +161,7 @@ def load_ledger() -> Ledger:
     try:
         d = json.loads(_ledger_path().read_text("utf-8"))
         positions = {s: Position(qty=float(v.get("qty", 0)), cost=float(v.get("cost", 0)),
-                                 peak=float(v.get("peak", 0)))
+                                 peak=float(v.get("peak", 0)), t_entry=float(v.get("t_entry", 0)))
                      for s, v in d.get("positions", {}).items()}
         return Ledger(positions=positions, realized=float(d.get("realized", 0.0)),
                       wins=int(d.get("wins", 0)), losses=int(d.get("losses", 0)))
@@ -163,7 +174,8 @@ def save_ledger(ledger: Ledger) -> None:
         p = _ledger_path()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({
-            "positions": {s: {"qty": pos.qty, "cost": pos.cost, "peak": pos.peak}
+            "positions": {s: {"qty": pos.qty, "cost": pos.cost, "peak": pos.peak,
+                              "t_entry": pos.t_entry}
                           for s, pos in ledger.positions.items()},
             "realized": ledger.realized, "wins": ledger.wins, "losses": ledger.losses,
         }), "utf-8")
