@@ -89,7 +89,7 @@ def _load_auto(state: AppState) -> None:
 _PERSIST_FIELDS = (
     "mode", "interval", "max_total", "universe_size", "top_n", "max_order_usd", "max_total_usd",
     "rebalance_band", "take_profit_pct", "take_profit_frac", "breaker_pct", "max_correlation",
-    "stop_pct", "conviction_power", "target_vol",
+    "stop_pct", "conviction_power", "target_vol", "profit_lock_arm", "profit_lock_giveback",
 )
 
 
@@ -382,6 +382,8 @@ class AppConfig:
     max_correlation: float = 0.85  # diversification: skip picks too correlated
     stop_pct: float = 0.35  # trailing stop (let winners run; validated on full cycle)
     conviction_power: float = 1.5  # concentrate weight toward the strongest trends
+    profit_lock_arm: float = 0.25  # arm the profit ratchet once a position is up this %
+    profit_lock_giveback: float = 0.12  # then exit if it gives back this % from its peak
     live: bool = False
     port: int = 8799
 
@@ -551,6 +553,11 @@ def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -
     # track actual account value over time (outside the lock)
     if account.get("connected") and account.get("equity_usd") is not None:
         state.record_equity(account["equity_usd"])
+        prices = account.get("_prices") or {}
+        if prices:
+            led = load_ledger()
+            led.update_peaks(prices)
+            save_ledger(led)
 
 
 def _resolve_whitelist(
@@ -625,7 +632,8 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     with state.lock:
         _hist = list(state.equity_history)
     dd = _breaker_drawdown(_hist)
-    if dd is not None and dd <= -abs(cfg.breaker_pct):
+    breaker = dd is not None and dd <= -abs(cfg.breaker_pct)
+    if breaker:
         targets = {}
         with state.lock:
             state.halted = True
@@ -634,13 +642,25 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         state.log(f"⛔ قاطع الدائرة: تراجع رأس المال {dd:.1f}% — تصفية كاملة لنقد وإيقاف التداول")
 
     led = load_ledger()
-    # 2) opportunistic profit-taking: trim winners above the take-profit threshold
+    led.update_peaks(allp)
+    # 2a) profit ratchet: a winner that gave back from its peak -> EXIT to lock the gain
+    if not breaker:
+        for sym in led.profit_lock_exits(allp, cfg.profit_lock_arm, cfg.profit_lock_giveback):
+            g = led.unrealized_gain_pct(sym, allp.get(sym, 0.0))
+            targets[sym] = 0.0  # force full exit (lock profit near the peak)
+            if sym not in whitelist:
+                whitelist = whitelist + (sym,)
+            if sym not in prices and sym in allp:
+                prices[sym] = allp[sym]
+            state.log(f"🔒 قفل ربح {sym}: +{g:.0f}% (تراجع عن القمّة) → بيع كامل")
+    # 2b) opportunistic profit-taking: trim winners above the take-profit threshold
     if targets:
         for sym in list(targets):
             g = led.unrealized_gain_pct(sym, prices.get(sym, 0.0))
             if g is not None and g >= cfg.take_profit_pct and targets[sym] > 0:
                 targets[sym] = round(targets[sym] * (1 - cfg.take_profit_frac), 4)
                 state.log(f"💰 جني أرباح {sym}: +{g:.0f}% → بيع {int(cfg.take_profit_frac * 100)}%")
+    save_ledger(led)
 
     limits = RiskLimits(max_order_usd=cfg.max_order_usd, max_total_usd=cfg.max_total_usd,
                         rebalance_band=cfg.rebalance_band, whitelist=whitelist)
@@ -904,6 +924,10 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.conviction_power = max(1.0, min(3.0, float(body["conviction_power"])))
             if "target_vol" in body:
                 cfg.target_vol = max(0.1, min(3.0, float(body["target_vol"])))
+            if "profit_lock_arm" in body:
+                cfg.profit_lock_arm = max(0.05, min(2.0, float(body["profit_lock_arm"])))
+            if "profit_lock_giveback" in body:
+                cfg.profit_lock_giveback = max(0.03, min(0.5, float(body["profit_lock_giveback"])))
             _save_config(cfg)
             state.log("تحديث الإعدادات: " + json.dumps(body, ensure_ascii=False))
 

@@ -42,6 +42,24 @@ def test_partial_sell_keeps_position():
     assert round(pos.avg, 4) == 1.0    # avg cost unchanged on partial sell
 
 
+def test_profit_lock_ratchet():
+    led = Ledger()
+    led.record("BUY", "SYNUSDT", usd=1000.0, price=1.0)   # entry @1, peak=1
+    led.update_peaks({"SYNUSDT": 2.0})                     # ran to +100%, peak=2
+    # back to 1.7 = +70% gain but -15% off peak -> armed (>=25%) + giveback (>=12%) -> exit
+    assert "SYNUSDT" in led.profit_lock_exits({"SYNUSDT": 1.7}, 0.25, 0.12)
+    # still at the peak -> no give-back -> hold
+    assert led.profit_lock_exits({"SYNUSDT": 2.0}, 0.25, 0.12) == []
+
+
+def test_profit_lock_not_armed_for_small_winner():
+    led = Ledger()
+    led.record("BUY", "XUSDT", usd=100.0, price=1.0)
+    led.update_peaks({"XUSDT": 1.10})            # only +10% (below the 25% arm)
+    # gave back to flat, but never armed -> no forced exit
+    assert led.profit_lock_exits({"XUSDT": 1.0}, 0.25, 0.12) == []
+
+
 def test_win_rate_none_when_no_closed_trades():
     led = Ledger()
     led.record("BUY", "BTCUSDT", usd=100.0, price=100.0)

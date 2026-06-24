@@ -30,6 +30,7 @@ def _trades_path() -> Path:
 class Position:
     qty: float = 0.0
     cost: float = 0.0  # total USD cost basis of the current qty
+    peak: float = 0.0  # highest price seen since entry (for the profit ratchet)
 
     @property
     def avg(self) -> float:
@@ -54,6 +55,7 @@ class Ledger:
         if side == "BUY":
             pos.qty += qty
             pos.cost += usd
+            pos.peak = max(pos.peak, price) if pos.peak > 0 else price
         else:  # SELL
             sell_qty = min(qty, pos.qty)
             avg = pos.avg
@@ -72,6 +74,29 @@ class Ledger:
             "usd": round(usd, 2), "price": price,
             "realized": round(realized, 2), "gain_pct": gain_pct,
         }
+
+    def update_peaks(self, prices: dict) -> None:
+        """Track each open position's running high (for the profit ratchet)."""
+        for sym, p in self.positions.items():
+            px = prices.get(sym, 0.0)
+            if px > 0 and p.qty > 1e-12:
+                p.peak = max(p.peak, px)
+
+    def profit_lock_exits(self, prices: dict, arm_pct: float, giveback_pct: float) -> list[str]:
+        """Positions that ran up >= arm_pct then gave back >= giveback_pct from
+        their peak -> sell to LOCK the gain near the high (anti give-back)."""
+        out = []
+        for sym, p in self.positions.items():
+            if p.qty <= 1e-12 or p.avg <= 0 or p.peak <= 0:
+                continue
+            px = prices.get(sym, 0.0)
+            if px <= 0:
+                continue
+            gain = px / p.avg - 1.0
+            from_peak = px / p.peak - 1.0
+            if gain >= arm_pct and from_peak <= -giveback_pct:
+                out.append(sym)
+        return out
 
     def unrealized_gain_pct(self, symbol: str, price: float) -> float | None:
         """Current open-position gain vs average cost (for profit-taking)."""
@@ -119,7 +144,8 @@ class Ledger:
 def load_ledger() -> Ledger:
     try:
         d = json.loads(_ledger_path().read_text("utf-8"))
-        positions = {s: Position(qty=float(v.get("qty", 0)), cost=float(v.get("cost", 0)))
+        positions = {s: Position(qty=float(v.get("qty", 0)), cost=float(v.get("cost", 0)),
+                                 peak=float(v.get("peak", 0)))
                      for s, v in d.get("positions", {}).items()}
         return Ledger(positions=positions, realized=float(d.get("realized", 0.0)),
                       wins=int(d.get("wins", 0)), losses=int(d.get("losses", 0)))
@@ -132,7 +158,8 @@ def save_ledger(ledger: Ledger) -> None:
         p = _ledger_path()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({
-            "positions": {s: {"qty": pos.qty, "cost": pos.cost} for s, pos in ledger.positions.items()},
+            "positions": {s: {"qty": pos.qty, "cost": pos.cost, "peak": pos.peak}
+                          for s, pos in ledger.positions.items()},
             "realized": ledger.realized, "wins": ledger.wins, "losses": ledger.losses,
         }), "utf-8")
     except Exception:  # noqa: BLE001
