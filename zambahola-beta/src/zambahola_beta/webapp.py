@@ -383,7 +383,7 @@ class AppConfig:
     stop_pct: float = 0.35  # trailing stop (let winners run; validated on full cycle)
     conviction_power: float = 1.5  # concentrate weight toward the strongest trends
     profit_lock_arm: float = 0.25  # arm the profit ratchet once a position is up this %
-    profit_lock_giveback: float = 0.12  # then exit if it gives back this % from its peak
+    profit_lock_giveback: float = 0.08  # FLOOR give-back; actual is vol-adaptive (8%-30%)
     live: bool = False
     port: int = 8799
 
@@ -643,9 +643,18 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
 
     led = load_ledger()
     led.update_peaks(allp)
+    # volatility-adaptive give-back per coin: wild coins get room, calm coins lock
+    # tight (fully automatic, scales with each coin's own daily volatility)
+    ranked_vol = {r["symbol"]: r.get("realized_vol_ann", 0.0) for r in sig.get("ranked", [])}
+    giveback_map = {}
+    for s, p in led.positions.items():
+        if p.qty > 1e-12:
+            daily_vol = (ranked_vol.get(s, 0.0) or 0.0) / (365 ** 0.5)
+            giveback_map[s] = max(cfg.profit_lock_giveback, min(0.30, 2.5 * daily_vol))
     # 2a) profit ratchet: a winner that gave back from its peak -> EXIT to lock the gain
     if not breaker:
-        for sym in led.profit_lock_exits(allp, cfg.profit_lock_arm, cfg.profit_lock_giveback):
+        for sym in led.profit_lock_exits(allp, cfg.profit_lock_arm, cfg.profit_lock_giveback,
+                                         giveback_map=giveback_map):
             g = led.unrealized_gain_pct(sym, allp.get(sym, 0.0))
             targets[sym] = 0.0  # force full exit (lock profit near the peak)
             if sym not in whitelist:

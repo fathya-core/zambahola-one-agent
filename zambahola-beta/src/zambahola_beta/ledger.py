@@ -82,9 +82,13 @@ class Ledger:
             if px > 0 and p.qty > 1e-12:
                 p.peak = max(p.peak, px)
 
-    def profit_lock_exits(self, prices: dict, arm_pct: float, giveback_pct: float) -> list[str]:
-        """Positions that ran up >= arm_pct then gave back >= giveback_pct from
-        their peak -> sell to LOCK the gain near the high (anti give-back)."""
+    def profit_lock_exits(self, prices: dict, arm_pct: float, giveback_pct: float,
+                          giveback_map: dict | None = None) -> list[str]:
+        """Positions that ran up >= arm_pct then gave back from their peak -> sell
+        to LOCK the gain near the high. The give-back threshold is per-position
+        (giveback_map, volatility-adaptive) so a wild coin gets room and a calm
+        coin locks tight — fully automatic, no fixed number."""
+        gm = giveback_map or {}
         out = []
         for sym, p in self.positions.items():
             if p.qty <= 1e-12 or p.avg <= 0 or p.peak <= 0:
@@ -94,7 +98,8 @@ class Ledger:
                 continue
             gain = px / p.avg - 1.0
             from_peak = px / p.peak - 1.0
-            if gain >= arm_pct and from_peak <= -giveback_pct:
+            gb = gm.get(sym, giveback_pct)
+            if gain >= arm_pct and from_peak <= -gb:
                 out.append(sym)
         return out
 
