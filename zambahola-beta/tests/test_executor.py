@@ -114,14 +114,15 @@ def test_plan_rebalance_buy_clamped_to_available_cash():
 
 
 def test_plan_rebalance_sell_clamped_to_holdings():
-    # holding only $50 of BTC, target 0 -> SELL must not exceed holdings
+    # holding only $50 of BTC, target 0 -> SELL uses SELL_MARGIN on wallet value
+    from zambahola_beta.executor import SELL_MARGIN
     limits = RiskLimits(max_order_usd=1000, max_total_usd=10000, min_notional_usd=10,
                         whitelist=("BTCUSDT",))
     balances = {"USDT": 0.0, "BTC": 0.5}  # $50 at price 100
     prices = {"BTCUSDT": 100.0}
     plan = plan_rebalance({"BTCUSDT": 0.0}, balances, prices, limits)
     sells = [o for o in plan.orders if o.side == "SELL"]
-    assert sells and sells[0].usd <= 50.0
+    assert sells and sells[0].usd <= 50.0 * SELL_MARGIN + 0.01
 
 
 def test_no_real_keys_in_env_by_default():

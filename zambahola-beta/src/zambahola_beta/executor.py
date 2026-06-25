@@ -250,6 +250,10 @@ class RebalancePlan:
     notes: list[str] = field(default_factory=list)
 
 
+# margin on SELL quoteOrderQty — absorbs price drift between fetch and fill (Binance -2010)
+SELL_MARGIN = 0.92
+
+
 def plan_rebalance(
     targets: dict[str, float],
     balances: dict[str, float],
@@ -292,8 +296,8 @@ def plan_rebalance(
                 continue
             avail_quote -= usd
             side = "BUY"
-        else:  # SELL — clamp to per-order cap AND what we actually hold
-            usd = min(-delta, limits.max_order_usd, holdings_usd[sym] * 0.99)
+        else:  # SELL — clamp to per-order cap AND wallet (with margin for -2010)
+            usd = min(-delta, limits.max_order_usd, holdings_usd[sym] * SELL_MARGIN)
             if usd < limits.min_notional_usd:
                 continue
             side = "SELL"

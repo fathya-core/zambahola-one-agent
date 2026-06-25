@@ -24,6 +24,7 @@ from pathlib import Path
 
 from .data import fetch_many
 from .executor import (
+    SELL_MARGIN,
     BinanceSpot,
     RiskLimits,
     load_keys,
@@ -398,7 +399,7 @@ class AppConfig:
     port_tp_arm_usd: float = 150.0  # only active once strategy PnL peaked >= this many $
     port_tp_giveback: float = 0.15  # bank when PnL gives back this FRACTION of the peak gain
     port_tp_sell_frac: float = 0.5  # how much of each winner to bank (lock to cash)
-    port_tp_cooldown_h: float = 8.0  # after banking, stay in cash (no new buys) this long
+    port_tp_cooldown_h: float = 3.0  # after banking, park profit in cash (no new buys) this long
     live: bool = False
     port: int = 8799
 
@@ -634,6 +635,33 @@ def _order_reason(sym: str, side: str, targets: dict, ranked_map: dict) -> str:
     return "خروج/إعادة توازن"
 
 
+def _force_sell_symbols(
+    client: BinanceSpot, symbols: set[str], balances: dict, allp: dict,
+    led, cfg: AppConfig, state: AppState, *, why: str, min_usd: float = 10.0,
+) -> int:
+    """Market-sell full wallet holdings for forced exits (stop/lock); uses SELL_MARGIN."""
+    placed = 0
+    for sym in symbols:
+        px = allp.get(sym, 0.0)
+        if px <= 0:
+            continue
+        base = sym[:-4] if sym.endswith("USDT") else sym
+        amt = round(balances.get(base, 0.0) * px * SELL_MARGIN, 2)
+        if amt < min_usd:
+            continue
+        try:
+            client.market_order(sym, "SELL", quote_qty=amt)
+            rec = led.record("SELL", sym, amt, px)
+            append_trade({**rec, "mode": "live" if cfg.live else "testnet", "why": why})
+            balances[base] = max(0.0, balances.get(base, 0.0) - amt / px)
+            placed += 1
+            pnl = f" · ربح ${rec['realized']}" if rec["realized"] else ""
+            state.log(f"{'حقيقي' if cfg.live else 'testnet'} بيع {sym} ${amt} ✓ — {why}{pnl}")
+        except Exception as exc:  # noqa: BLE001
+            state.log(f"✗ فشل بيع {sym}: {exc}")
+    return placed
+
+
 def do_execute(cfg: AppConfig, state: AppState) -> dict:
     try:
         safety_gate(live=cfg.live)
@@ -697,7 +725,9 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
             px = allp.get(s, 0.0)
             if p.qty <= 1e-12 or p.avg <= 0 or px <= 0 or (px / p.avg - 1) <= 0.03:
                 continue  # only bank genuine winners
-            sell_usd = round(p.qty * px * cfg.port_tp_sell_frac * 0.99, 2)
+            base = s[:-4] if s.endswith("USDT") else s
+            wallet_usd = balances.get(base, 0.0) * px
+            sell_usd = round(wallet_usd * cfg.port_tp_sell_frac * SELL_MARGIN, 2)
             if sell_usd < 10:
                 continue
             try:
@@ -706,7 +736,6 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
                 append_trade({**rec, "mode": "live" if cfg.live else "testnet",
                               "why": "جني ربح المحفظة (تراجع عن القمّة)"})
                 banked += rec["realized"]
-                base = s[:-4] if s.endswith("USDT") else s
                 balances[base] = max(0.0, balances.get(base, 0.0) - sell_usd / px)
                 g = (px / p.avg - 1) * 100
                 state.log(f"💰 بنك ربح {s}: +{g:.0f}% بيع {int(cfg.port_tp_sell_frac*100)}% (قفل ${rec['realized']})")
@@ -795,6 +824,18 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
             state.log(f"⏳ حد أدنى للاحتفاظ ({cfg.min_hold_hours:g}س): إبقاء {', '.join(protected)} (منع دوران)")
     save_ledger(led)
 
+    # forced exits (stop-loss / profit-lock) go direct to market — don't rely on
+    # plan_rebalance alone (avoids -2010 and ensures risk sells actually fire).
+    force_syms = lock_syms | risk_exit_syms
+    forced = 0
+    if force_syms and not breaker:
+        forced = _force_sell_symbols(
+            client, force_syms, balances, allp, led, cfg, state,
+            why="خروج إجباري (وقف خسارة / قفل ربح)",
+        )
+        if forced:
+            save_ledger(led)
+
     limits = RiskLimits(max_order_usd=cfg.max_order_usd, max_total_usd=cfg.max_total_usd,
                         rebalance_band=cfg.rebalance_band, whitelist=whitelist)
     plan = plan_rebalance(targets, balances, prices, limits)
@@ -808,13 +849,22 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
             state.log(f"⏸️ تهدئة جني ربح: تجاهل {len(dropped)} شراء — الربح مقفول نقداً ({mins} دقيقة متبقية)")
     buys = sum(1 for o in plan.orders if o.side == "BUY")
     sells = len(plan.orders) - buys
-    if not plan.orders:
-        state.log("لا حاجة لإعادة توازن (المحفظة مطابقة للأهداف ضمن الحدود)")
+    if not plan.orders and forced == 0:
+        parts = []
+        if in_cooldown:
+            parts.append(f"تهدئة جني ربح ({int((state.port_tp_cooldown_until - time.time()) / 60)}د — شراء موقوف)")
+        dust = [s for s in force_syms
+                if balances.get(s[:-4] if s.endswith("USDT") else s, 0) * allp.get(s, 0) * SELL_MARGIN < 10]
+        if dust:
+            parts.append(f"غبار تحت $10: {', '.join(dust)}")
+        state.log("لا أوامر — " + (" · ".join(parts) if parts else "المحفظة مطابقة للأهداف"))
         return {"ok": True, "orders": 0, "buys": 0, "sells": 0}
+    if not plan.orders:
+        return {"ok": True, "orders": forced, "buys": 0, "sells": forced}
     net = "خطة: " + (f"شراء {buys}" if buys else "") + (" · " if buys and sells else "") + (f"بيع {sells}" if sells else "")
     state.log(f"{net} (ميزانية ${cfg.max_total_usd:g})")
     ranked_map = {r["symbol"]: r for r in sig.get("ranked", [])}
-    placed = 0
+    placed = forced
     for o in plan.orders:
         why = _order_reason(o.symbol, o.side, targets, ranked_map)
         try:
@@ -830,7 +880,7 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         except Exception as exc:  # noqa: BLE001
             state.log(f"✗ فشل {o.side} {o.symbol}: {exc}")
     save_ledger(led)
-    return {"ok": True, "orders": placed, "buys": buys, "sells": sells}
+    return {"ok": True, "orders": placed, "buys": buys, "sells": sells + forced}
 
 
 def _breaker_drawdown(hist: list) -> float | None:
@@ -895,8 +945,7 @@ def do_flatten(cfg: AppConfig, state: AppState, *, full: bool = False, cap: int 
               + f" ({len(candidates)} عملة)")
     placed = 0
     for sym, usd, price in candidates:
-        # 0.92 margin absorbs price drift between price-fetch and execution (avoids -2010)
-        amt = round(usd * 0.92, 2)
+        amt = round(usd * SELL_MARGIN, 2)
         try:
             client.market_order(sym, "SELL", quote_qty=amt)
             rec = led.record("SELL", sym, amt, price)
@@ -1090,6 +1139,9 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.port_tp_sell_frac = max(0.1, min(1.0, float(body["port_tp_sell_frac"])))
             if "port_tp_cooldown_h" in body:
                 cfg.port_tp_cooldown_h = max(0.0, float(body["port_tp_cooldown_h"]))
+            if body.get("clear_tp_cooldown"):
+                state.port_tp_cooldown_until = 0.0
+                _save_auto(state)
             if "conviction_power" in body:
                 cfg.conviction_power = max(1.0, min(3.0, float(body["conviction_power"])))
             if "target_vol" in body:
