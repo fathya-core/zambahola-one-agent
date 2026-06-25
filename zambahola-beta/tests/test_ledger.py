@@ -80,3 +80,34 @@ def test_age_hours_unknown_entry_treated_as_old():
     from zambahola_beta.ledger import Position
     p = Position(qty=1.0, cost=1.0, t_entry=0.0)  # legacy position w/o clock
     assert p.age_hours() > 1e6  # treated as old -> no min-hold protection
+
+
+def test_risk_exits_cuts_deep_loser_from_cost():
+    led = Ledger()
+    led.record("BUY", "BICOUSDT", usd=1000.0, price=0.0464)  # entry
+    exits = led.risk_exits({"BICOUSDT": 0.0227}, hard_stop_pct=0.15, trail_stop_pct=0.35)
+    assert exits["BICOUSDT"][0] == "hard_stop"  # -51% from cost -> cut
+
+
+def test_risk_exits_holds_shallow_loser():
+    led = Ledger()
+    led.record("BUY", "XLMUSDT", usd=1000.0, price=0.1928)
+    # only -3.6% from cost, not off-peak enough -> no risk exit
+    assert led.risk_exits({"XLMUSDT": 0.1859}, hard_stop_pct=0.15, trail_stop_pct=0.35) == {}
+
+
+def test_risk_exits_trailing_stop_on_rolled_over_winner():
+    led = Ledger()
+    led.record("BUY", "SYNUSDT", usd=1000.0, price=0.17)
+    led.update_peaks({"SYNUSDT": 0.40})  # ran way up, peak=0.40
+    # back to 0.25: still +47% vs cost (no hard stop) but -37% off peak -> trailing stop
+    exits = led.risk_exits({"SYNUSDT": 0.25}, hard_stop_pct=0.15, trail_stop_pct=0.35)
+    assert exits["SYNUSDT"][0] == "trail_stop"
+
+
+def test_risk_exits_dumps_stablecoin():
+    led = Ledger()
+    led.record("BUY", "RLUSDUSDT", usd=640.0, price=1.0008)
+    exits = led.risk_exits({"RLUSDUSDT": 1.0015}, hard_stop_pct=0.15, trail_stop_pct=0.35,
+                           stables={"RLUSDUSDT"})
+    assert exits["RLUSDUSDT"][0] == "stable"

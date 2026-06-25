@@ -114,6 +114,29 @@ class Ledger:
                 out.append(sym)
         return out
 
+    def risk_exits(self, prices: dict, hard_stop_pct: float, trail_stop_pct: float,
+                   stables: set | tuple = ()) -> dict:
+        """Positions to force-sell for RISK reasons — independent of the scan
+        universe, so a crashed buy that left the top-N still gets stopped out.
+        Returns {symbol: (code, value)} where code in {stable, hard_stop, trail_stop}."""
+        stset = set(stables)
+        out: dict[str, tuple[str, float]] = {}
+        for s, p in self.positions.items():
+            if p.qty <= 1e-12 or p.avg <= 0:
+                continue
+            px = prices.get(s, 0.0)
+            if px <= 0:
+                continue
+            gain = px / p.avg - 1.0
+            frompk = (px / p.peak - 1.0) if p.peak > 0 else 0.0
+            if s in stset:
+                out[s] = ("stable", 0.0)
+            elif gain <= -abs(hard_stop_pct):
+                out[s] = ("hard_stop", gain)
+            elif p.peak > 0 and frompk <= -abs(trail_stop_pct):
+                out[s] = ("trail_stop", frompk)
+        return out
+
     def unrealized_gain_pct(self, symbol: str, price: float) -> float | None:
         """Current open-position gain vs average cost (for profit-taking)."""
         pos = self.positions.get(symbol)
