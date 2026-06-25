@@ -1014,6 +1014,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "max_total": cfg.max_total,
                     "universe_size": cfg.universe_size,
                     "top_n": cfg.top_n,
+                    "max_weight": cfg.max_weight,
                     "max_order_usd": cfg.max_order_usd,
                     "max_total_usd": cfg.max_total_usd,
                     "breaker_pct": cfg.breaker_pct,
