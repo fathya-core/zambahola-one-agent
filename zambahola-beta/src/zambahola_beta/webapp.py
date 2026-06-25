@@ -379,8 +379,8 @@ class AppConfig:
     target_vol: float = 0.6
     max_total: float = 1.0  # gross exposure target (1.0 = full spot; >1 = leverage*)
     universe_size: int = 25  # how many top coins to scan
-    top_n: int = 4  # MAX strongest uptrends to hold (fewer if quality gate trims)
-    max_weight: float = 0.45  # concentration cap: no single coin above 45% of the book
+    top_n: int = 3  # MAX strongest uptrends (auto-shrinks when quality gate filters weak picks)
+    max_weight: float = 0.50  # concentration cap: no single coin above 50% of the book
     max_order_usd: float = 1000.0  # per-order slippage cap (high = don't throttle deployment)
     max_total_usd: float = 1000.0  # total budget to deploy across picks
     rebalance_band: float = 0.2  # fee-aware: ignore drifts < 20% of position
@@ -396,7 +396,7 @@ class AppConfig:
     min_hold_hours: float = 24.0  # anti-churn: hold a new position at least this long (rotation only)
     # portfolio take-profit ratchet: bank winners when the WHOLE book rolls over from its peak
     port_tp_arm_usd: float = 150.0  # only active once strategy PnL peaked >= this many $
-    port_tp_giveback: float = 0.20  # bank when PnL gives back this FRACTION of the peak gain
+    port_tp_giveback: float = 0.15  # bank when PnL gives back this FRACTION of the peak gain
     port_tp_sell_frac: float = 0.5  # how much of each winner to bank (lock to cash)
     port_tp_cooldown_h: float = 8.0  # after banking, stay in cash (no new buys) this long
     live: bool = False
