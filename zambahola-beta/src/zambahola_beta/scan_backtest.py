@@ -25,6 +25,8 @@ def backtest_scan(
     max_total: float = 1.0,
     min_consensus: float = 0.75,
     stop_pct: float = 0.25,
+    max_weight: float = 1.0,
+    require_mom30: bool = True,
     cost_bps: float = 10.0,
     leader: str = "BTCUSDT",
     warmup: int = 210,
@@ -92,6 +94,8 @@ def backtest_scan(
                 continue
             if cn < min_consensus or m9 <= 0 or d <= -stop_pct:
                 continue
+            if require_mom30 and not pd.isna(m3) and m3 <= 0:
+                continue  # live gate: refuse a coin rolling over short-term
             ra = (m9 / v) if v > 0 else 0.0
             ac = (m3 - m9 / 3) if not pd.isna(m3) else 0.0
             rel = (m9 - btc_mom90.iloc[t]) if (btc_mom90 is not None and not pd.isna(btc_mom90.iloc[t])) else 0.0
@@ -110,6 +114,11 @@ def backtest_scan(
             ssum = sum(raw.values()) or 1.0
             for n, rv in raw.items():
                 w[n] = rv / ssum * eff_total
+            if max_weight < 1.0:  # concentration cap (live): trimmed excess -> cash
+                cap = max_weight * eff_total
+                for n in list(w):
+                    if w[n] > cap:
+                        w[n] = cap
 
         # SHORT book: short the strongest downtrends; budget grows as BTC weakens
         if allow_short:

@@ -928,7 +928,8 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
     ppy = {"1d": 365, "12h": 730, "8h": 1095, "6h": 1460, "4h": 2190, "1h": 8760}.get(cfg.interval, 365)
     res = backtest_scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol,
                         max_total=cfg.max_total, min_bars=min_bars, periods_per_year=ppy,
-                        stop_pct=cfg.stop_pct, conviction_power=cfg.conviction_power)
+                        stop_pct=cfg.stop_pct, conviction_power=cfg.conviction_power,
+                        max_weight=cfg.max_weight)
     res["scope"] = "years" if long_history else "recent"
     res["interval"] = cfg.interval
     with state.lock:
