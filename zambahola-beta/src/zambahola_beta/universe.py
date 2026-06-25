@@ -164,6 +164,7 @@ def scan(
     max_correlation: float = 0.85,
     corr_window: int = 60,
     min_vol: float = 0.10,
+    max_weight: float = 1.0,
     held: set | None = None,
     hold_buffer: int = 2,
     leader: str = "BTCUSDT",
@@ -192,10 +193,13 @@ def scan(
     effective_total = max_total * regime
 
     # eligible = clear uptrend, positive conviction, not stopped out, AND real
-    # volatility (min_vol auto-excludes stablecoins/pegged tokens — vol ~0)
+    # volatility (min_vol auto-excludes stablecoins/pegged tokens — vol ~0).
+    # mom30 > 0 also required: refuse a coin that's rolling over short-term even if
+    # its medium trend is still up -> fewer marginal entries, auto-smaller book in
+    # weak markets (we just hold more cash instead of forcing weak picks).
     eligible = [
         s for s in scored
-        if s["consensus"] >= min_consensus and s["score"] > 0
+        if s["consensus"] >= min_consensus and s["score"] > 0 and s["mom30"] > 0
         and not s["stopped"] and s["vol"] >= min_vol
     ]
     eligible.sort(key=lambda s: s["score"], reverse=True)
@@ -247,6 +251,13 @@ def scan(
         ssum = sum(raw.values()) or 1.0
         for sym, w in raw.items():
             targets[sym] = round(w / ssum * effective_total, 4)
+        # concentration cap: no single coin above max_weight of the book; the
+        # trimmed excess simply stays in cash (safer than forcing it into a weaker coin)
+        if max_weight < 1.0:
+            cap = max_weight * effective_total
+            for sym in list(targets):
+                if targets[sym] > cap:
+                    targets[sym] = round(cap, 4)
 
     ranked = []
     for s in sorted(scored, key=lambda s: s["score"], reverse=True):

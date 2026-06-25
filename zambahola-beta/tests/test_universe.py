@@ -49,6 +49,28 @@ def test_scan_picks_uptrends_and_ranks_smart():
     assert res["ranked"][-1]["action"] == "CASH"
 
 
+def test_scan_concentration_cap_limits_single_weight():
+    # with a hard cap, no single coin may exceed max_weight of the book
+    res = scan(_frames(), top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0,
+               min_vol=0.0, max_weight=0.4)
+    assert res["targets"]
+    assert max(res["targets"].values()) <= 0.4 + 1e-9
+
+
+def test_scan_skips_coin_rolling_over_short_term():
+    # 90d uptrend (consensus high) but the last ~30 bars are falling -> mom30 < 0,
+    # so the quality gate must refuse it even though the medium trend is still up.
+    n = 260
+    base = np.linspace(100.0, 300.0, n - 20)
+    dip = np.linspace(300.0, 262.0, 20)
+    rollover = np.concatenate([base, dip])
+    up = np.linspace(100.0, 320.0, n)
+    frames = {"ROLLUSDT": _frame(rollover), "UPUSDT_X": _frame(up)}
+    res = scan(frames, top_n=5, max_correlation=1.0, min_vol=0.0)
+    assert "UPUSDT_X" in res["targets"]
+    assert "ROLLUSDT" not in res["targets"]
+
+
 def test_trend_score_drawdown_from_high():
     close = pd.Series(np.concatenate([np.linspace(100.0, 300.0, 200),
                                       np.linspace(300.0, 210.0, 30)]))

@@ -96,6 +96,7 @@ _PERSIST_FIELDS = (
     "stop_pct", "conviction_power", "target_vol", "profit_lock_arm", "profit_lock_giveback",
     "min_hold_hours", "hard_stop_pct",
     "port_tp_arm", "port_tp_giveback", "port_tp_sell_frac", "port_tp_cooldown_h",
+    "max_weight",
 )
 
 
@@ -378,7 +379,8 @@ class AppConfig:
     target_vol: float = 0.6
     max_total: float = 1.0  # gross exposure target (1.0 = full spot; >1 = leverage*)
     universe_size: int = 25  # how many top coins to scan
-    top_n: int = 5  # how many strongest uptrends to hold
+    top_n: int = 4  # MAX strongest uptrends to hold (fewer if quality gate trims)
+    max_weight: float = 0.45  # concentration cap: no single coin above 45% of the book
     max_order_usd: float = 1000.0  # per-order slippage cap (high = don't throttle deployment)
     max_total_usd: float = 1000.0  # total budget to deploy across picks
     rebalance_band: float = 0.2  # fee-aware: ignore drifts < 20% of position
@@ -506,7 +508,7 @@ def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str], dict]:
     held = {s for s, p in load_ledger().positions.items() if p.qty > 1e-9}
     sc = scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total,
               stop_pct=cfg.stop_pct, conviction_power=cfg.conviction_power,
-              max_correlation=cfg.max_correlation, held=held)
+              max_correlation=cfg.max_correlation, max_weight=cfg.max_weight, held=held)
     as_of = ""
     first = next((s for s in symbols if s in frames), None)
     if first is not None:
@@ -1037,6 +1039,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.universe_size = int(max(5, min(60, int(body["universe_size"]))))
             if "top_n" in body:
                 cfg.top_n = int(max(1, min(15, int(body["top_n"]))))
+            if "max_weight" in body:
+                cfg.max_weight = max(0.1, min(1.0, float(body["max_weight"])))
             if "max_order_usd" in body:
                 cfg.max_order_usd = max(0.0, float(body["max_order_usd"]))
             if "max_total_usd" in body:
