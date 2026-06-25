@@ -238,7 +238,7 @@ small{color:var(--mut)}
 <div class="card"><div class="flex"><b>🧾 سجل الصفقات والأرباح المحقّقة</b>
 <button id="ledgerreset" class="sec sw" style="padding:5px 12px;font-size:12px">صفّر السجل</button></div>
 <div class="row" style="margin-top:8px">
- <div style="min-width:140px"><div class="big" id="stratpnl">—</div><div class="k">ربح الاستراتيجية (محقّق+مفتوح)</div></div>
+ <div style="min-width:140px"><div class="big" id="stratpnl">—</div><div class="k">ربح الاستراتيجية (محقّق+مفتوح · % على الميزانية)</div></div>
  <div style="min-width:130px"><div class="big" id="winrate">—</div><div class="k">نسبة الفوز</div></div>
  <div style="min-width:150px"><div class="k">محقّق: <span id="realized">—</span> · مفتوح: <span id="unreal">—</span></div>
   <div class="k">مستثمَر: $<span id="invested">0</span> · مغلقة: <span id="closed">0</span> (ربح <span id="wins">0</span>/خسارة <span id="losses">0</span>)</div></div>
@@ -1029,6 +1029,13 @@ def make_handler(cfg: AppConfig, state: AppState):
             acct = d.get("account") or {}
             prices = acct.get("_prices") if isinstance(acct, dict) else None
             d["ledger"] = load_ledger().summary(prices)
+            # headline % is return-on-budget (stable) instead of return-on-cost-basis
+            # (which spikes artificially toward 100%+ as winners are banked to cash)
+            tot = d["ledger"].get("strategy_pnl")
+            if tot is not None and cfg.max_total_usd > 0:
+                d["ledger"]["strategy_pnl_pct"] = round(tot / cfg.max_total_usd * 100, 2)
+                d["ledger"]["pnl_basis"] = "budget"
+                d["ledger"]["budget_usd"] = cfg.max_total_usd
             d["trades"] = load_trades(30)
             return d
 
