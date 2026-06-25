@@ -4,10 +4,27 @@ import pandas as pd
 from zambahola_beta.webapp import (
     AppConfig,
     AppState,
+    _port_tp_should_bank,
     _resolve_whitelist,
     compute_pnl,
     compute_signal,
 )
+
+
+def test_port_tp_banks_on_giveback_from_peak():
+    # peaked at +20%, gave back to +15% (>=20% of the 20-pt gain) -> bank
+    assert _port_tp_should_bank(15.0, 20.0, arm=10.0, giveback=0.20) is True
+    # peaked at +20%, only down to +18% (10% give-back, < 20%) -> hold
+    assert _port_tp_should_bank(18.0, 20.0, arm=10.0, giveback=0.20) is False
+
+
+def test_port_tp_not_armed_below_arm():
+    # peak only +6%, below the +10% arm -> never banks
+    assert _port_tp_should_bank(2.0, 6.0, arm=10.0, giveback=0.20) is False
+
+
+def test_port_tp_handles_none_pct():
+    assert _port_tp_should_bank(None, 20.0, arm=10.0, giveback=0.20) is False
 
 
 def _daily(close, start="2020-01-01"):
