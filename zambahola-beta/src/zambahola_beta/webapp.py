@@ -71,7 +71,7 @@ def _save_auto(state: AppState) -> None:
             "auto_enabled": state.auto_enabled,
             "auto_execute": state.auto_execute,
             "auto_interval_hours": state.auto_interval_hours,
-            "pnl_peak_pct": state.pnl_peak_pct,
+            "pnl_peak_usd": state.pnl_peak_usd,
             "port_tp_cooldown_until": state.port_tp_cooldown_until,
         }), "utf-8")
     except Exception:  # noqa: BLE001
@@ -84,7 +84,7 @@ def _load_auto(state: AppState) -> None:
         state.auto_enabled = bool(d.get("auto_enabled", state.auto_enabled))
         state.auto_execute = bool(d.get("auto_execute", state.auto_execute))
         state.auto_interval_hours = float(d.get("auto_interval_hours", state.auto_interval_hours))
-        state.pnl_peak_pct = float(d.get("pnl_peak_pct", state.pnl_peak_pct))
+        state.pnl_peak_usd = float(d.get("pnl_peak_usd", state.pnl_peak_usd))
         state.port_tp_cooldown_until = float(d.get("port_tp_cooldown_until", state.port_tp_cooldown_until))
     except Exception:  # noqa: BLE001
         pass
@@ -95,7 +95,7 @@ _PERSIST_FIELDS = (
     "rebalance_band", "take_profit_pct", "take_profit_frac", "breaker_pct", "max_correlation",
     "stop_pct", "conviction_power", "target_vol", "profit_lock_arm", "profit_lock_giveback",
     "min_hold_hours", "hard_stop_pct",
-    "port_tp_arm", "port_tp_giveback", "port_tp_sell_frac", "port_tp_cooldown_h",
+    "port_tp_arm_usd", "port_tp_giveback", "port_tp_sell_frac", "port_tp_cooldown_h",
     "max_weight",
 )
 
@@ -395,7 +395,7 @@ class AppConfig:
     profit_lock_giveback: float = 0.07  # FLOOR give-back; actual is vol-adaptive (7%-18%)
     min_hold_hours: float = 24.0  # anti-churn: hold a new position at least this long (rotation only)
     # portfolio take-profit ratchet: bank winners when the WHOLE book rolls over from its peak
-    port_tp_arm: float = 10.0  # only active once strategy PnL peaked >= this %
+    port_tp_arm_usd: float = 150.0  # only active once strategy PnL peaked >= this many $
     port_tp_giveback: float = 0.20  # bank when PnL gives back this FRACTION of the peak gain
     port_tp_sell_frac: float = 0.5  # how much of each winner to bank (lock to cash)
     port_tp_cooldown_h: float = 8.0  # after banking, stay in cash (no new buys) this long
@@ -417,7 +417,7 @@ class AppState:
     halted: bool = False  # circuit breaker tripped -> trading paused
     backtest: dict | None = None
     last_auto_run: float = 0.0  # epoch of last auto cycle (separate from `updated`)
-    pnl_peak_pct: float = 0.0  # high-water of strategy PnL% (portfolio take-profit ratchet)
+    pnl_peak_usd: float = 0.0  # high-water of strategy PnL in $ (stable; % distorts as cash grows)
     port_tp_cooldown_until: float = 0.0  # park banked profit in cash until this epoch
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -541,13 +541,14 @@ def _portfolio_records(frames: dict, symbols: list[str], cfg: AppConfig) -> list
         return None
 
 
-def _port_tp_should_bank(cur_pct: float | None, peak_pct: float,
+def _port_tp_should_bank(cur: float | None, peak: float,
                          arm: float, giveback: float) -> bool:
-    """Portfolio take-profit trigger: armed once the book peaked >= arm%, fires when
-    current PnL% gives back >= `giveback` fraction of that peak gain."""
-    if cur_pct is None or peak_pct < arm or peak_pct <= 0:
+    """Portfolio take-profit trigger: armed once the book's $ PnL peaked >= `arm`,
+    fires when it gives back >= `giveback` fraction of that peak gain. Uses $ (not %)
+    because the % spikes artificially as winners are sold to cash (invested shrinks)."""
+    if cur is None or peak < arm or peak <= 0:
         return False
-    return cur_pct <= peak_pct * (1 - giveback)
+    return cur <= peak * (1 - giveback)
 
 
 def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -> None:
@@ -584,9 +585,9 @@ def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -
             led = load_ledger()
             led.update_peaks(prices)
             save_ledger(led)
-            cur_pct = led.summary(prices).get("strategy_pnl_pct")
-            if cur_pct is not None and cur_pct > state.pnl_peak_pct:
-                state.pnl_peak_pct = cur_pct  # high-water mark for the portfolio ratchet
+            cur_usd = led.summary(prices).get("strategy_pnl")
+            if cur_usd is not None and cur_usd > state.pnl_peak_usd:
+                state.pnl_peak_usd = cur_usd  # high-water mark ($) for the portfolio ratchet
                 _save_auto(state)
 
 
@@ -683,13 +684,14 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     led.update_peaks(allp)
     # 1b) PORTFOLIO take-profit ratchet — the whole book rolled over from its peak ->
     # BANK winners to cash (locks realized profit instead of giving it all back).
-    cur_pct = led.summary(allp).get("strategy_pnl_pct")
-    if cur_pct is not None and cur_pct > state.pnl_peak_pct:
-        state.pnl_peak_pct = cur_pct
+    # Tracked in $ (not %) because % spikes artificially as positions are sold to cash.
+    cur_usd = led.summary(allp).get("strategy_pnl")
+    if cur_usd is not None and cur_usd > state.pnl_peak_usd:
+        state.pnl_peak_usd = cur_usd
     now_ts = time.time()
     if (not breaker and now_ts >= state.port_tp_cooldown_until
-            and _port_tp_should_bank(cur_pct, state.pnl_peak_pct,
-                                     cfg.port_tp_arm, cfg.port_tp_giveback)):
+            and _port_tp_should_bank(cur_usd, state.pnl_peak_usd,
+                                     cfg.port_tp_arm_usd, cfg.port_tp_giveback)):
         banked = 0.0
         for s, p in list(led.positions.items()):
             px = allp.get(s, 0.0)
@@ -711,12 +713,12 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
             except Exception as exc:  # noqa: BLE001
                 state.log(f"✗ فشل جني {s}: {exc}")
         if banked != 0.0:
-            peak_was = state.pnl_peak_pct
+            peak_was = state.pnl_peak_usd
             state.port_tp_cooldown_until = now_ts + cfg.port_tp_cooldown_h * 3600
-            state.pnl_peak_pct = cur_pct  # re-arm from the new (lower) level
+            state.pnl_peak_usd = cur_usd  # re-arm from the new (lower) level
             _save_auto(state)
             save_ledger(led)
-            state.log(f"🔒 قفل ربح المحفظة عند +{cur_pct:.1f}% (القمّة +{peak_was:.1f}%) — نقد + تهدئة {cfg.port_tp_cooldown_h:g}س")
+            state.log(f"🔒 قفل ربح المحفظة عند ${cur_usd:.0f} (القمّة ${peak_was:.0f}) — نقد + تهدئة {cfg.port_tp_cooldown_h:g}س")
     in_cooldown = time.time() < state.port_tp_cooldown_until
     # volatility-adaptive give-back per coin: wild coins get room, calm coins lock
     # tight (fully automatic, scales with each coin's own daily volatility)
@@ -1017,9 +1019,9 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "take_profit_pct": cfg.take_profit_pct,
                     "min_hold_hours": cfg.min_hold_hours,
                     "hard_stop_pct": cfg.hard_stop_pct,
-                    "port_tp_arm": cfg.port_tp_arm,
+                    "port_tp_arm_usd": cfg.port_tp_arm_usd,
                     "port_tp_giveback": cfg.port_tp_giveback,
-                    "pnl_peak_pct": round(state.pnl_peak_pct, 2),
+                    "pnl_peak_usd": round(state.pnl_peak_usd, 2),
                     "tp_cooldown_min": max(0, int((state.port_tp_cooldown_until - time.time()) / 60)),
                     "backtest": state.backtest,
                 }
@@ -1071,8 +1073,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.stop_pct = max(0.05, min(0.9, float(body["stop_pct"])))
             if "hard_stop_pct" in body:
                 cfg.hard_stop_pct = max(0.03, min(0.9, float(body["hard_stop_pct"])))
-            if "port_tp_arm" in body:
-                cfg.port_tp_arm = max(2.0, float(body["port_tp_arm"]))
+            if "port_tp_arm_usd" in body:
+                cfg.port_tp_arm_usd = max(10.0, float(body["port_tp_arm_usd"]))
             if "port_tp_giveback" in body:
                 cfg.port_tp_giveback = max(0.05, min(0.9, float(body["port_tp_giveback"])))
             if "port_tp_sell_frac" in body:
@@ -1188,9 +1190,9 @@ def _refresh_loop(cfg: AppConfig, state: AppState) -> None:
                          and time.time() >= state.port_tp_cooldown_until)
             prices = (state.account or {}).get("_prices") or {}
             if ready and prices:
-                cur = load_ledger().summary(prices).get("strategy_pnl_pct")
-                if _port_tp_should_bank(cur, state.pnl_peak_pct,
-                                        cfg.port_tp_arm, cfg.port_tp_giveback):
+                cur = load_ledger().summary(prices).get("strategy_pnl")
+                if _port_tp_should_bank(cur, state.pnl_peak_usd,
+                                        cfg.port_tp_arm_usd, cfg.port_tp_giveback):
                     state.log("⚡ تراجع المحفظة عن القمّة — جني ربح فوري")
                     do_execute(cfg, state)
         except Exception:  # noqa: BLE001

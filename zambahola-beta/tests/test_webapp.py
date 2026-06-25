@@ -12,19 +12,19 @@ from zambahola_beta.webapp import (
 
 
 def test_port_tp_banks_on_giveback_from_peak():
-    # peaked at +20%, gave back to +15% (>=20% of the 20-pt gain) -> bank
-    assert _port_tp_should_bank(15.0, 20.0, arm=10.0, giveback=0.20) is True
-    # peaked at +20%, only down to +18% (10% give-back, < 20%) -> hold
-    assert _port_tp_should_bank(18.0, 20.0, arm=10.0, giveback=0.20) is False
+    # peaked at +$2000, gave back to +$1500 (>=20% of the gain) -> bank
+    assert _port_tp_should_bank(1500.0, 2000.0, arm=150.0, giveback=0.20) is True
+    # peaked at +$2000, only down to +$1800 (10% give-back, < 20%) -> hold
+    assert _port_tp_should_bank(1800.0, 2000.0, arm=150.0, giveback=0.20) is False
 
 
 def test_port_tp_not_armed_below_arm():
-    # peak only +6%, below the +10% arm -> never banks
-    assert _port_tp_should_bank(2.0, 6.0, arm=10.0, giveback=0.20) is False
+    # peak only +$100, below the +$150 arm -> never banks
+    assert _port_tp_should_bank(20.0, 100.0, arm=150.0, giveback=0.20) is False
 
 
-def test_port_tp_handles_none_pct():
-    assert _port_tp_should_bank(None, 20.0, arm=10.0, giveback=0.20) is False
+def test_port_tp_handles_none_pnl():
+    assert _port_tp_should_bank(None, 2000.0, arm=150.0, giveback=0.20) is False
 
 
 def _daily(close, start="2020-01-01"):
