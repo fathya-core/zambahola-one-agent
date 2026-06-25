@@ -98,6 +98,17 @@ def test_resolve_whitelist_union_targets_and_holdings():
     assert "USDTUSDT" not in wl and "DOGEUSDT" not in wl
 
 
+def test_resolve_whitelist_manages_ledger_coin_outside_universe():
+    # a coin we BOUGHT (in ledger) must stay manageable even after it leaves the
+    # scanned universe, so it can be rotated out to cash instead of abandoned.
+    targets = {"SYNUSDT": 0.4}
+    balances = {"USDT": 100.0, "DEXE": 5.0, "JUNK": 9.0}
+    universe = ["SYNUSDT", "WLDUSDT"]  # DEXE no longer scanned
+    wl = _resolve_whitelist(targets, balances, universe=universe, ledger_syms={"DEXEUSDT"})
+    assert "DEXEUSDT" in wl  # held + in ledger -> still managed (can exit)
+    assert "JUNKUSDT" not in wl  # never bought, not in universe -> left alone
+
+
 def test_appstate_log_caps_history():
     st = AppState()
     for i in range(150):

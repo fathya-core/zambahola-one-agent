@@ -592,24 +592,28 @@ def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -
 
 def _resolve_whitelist(
     targets: dict, balances: dict, *, universe: list[str] | None = None,
-    quote: str = "USDT", cap: int = 30,
+    ledger_syms: set | None = None, quote: str = "USDT", cap: int = 50,
 ) -> list[str]:
     """Symbols the executor may trade = targets to ENTER + held coins to EXIT.
 
-    When a `universe` is given (the scanned top markets), held coins OUTSIDE it
-    are ignored — so a testnet faucet wallet stuffed with hundreds of random
-    tokens isn't liquidated; we only manage coins the strategy actually scans.
+    A held coin is managed if it's in the scanned `universe` OR it's a strategy
+    position in `ledger_syms` (a coin we actually bought). Held coins that are
+    neither — e.g. testnet faucet junk we never touched — are left alone so we
+    don't liquidate a wallet stuffed with random airdropped tokens.
     """
     out = list(targets.keys())
     uni = set(universe or [])
+    led = set(ledger_syms or [])
     for base, qty in balances.items():
         if base == quote or qty <= 0:
             continue
         sym = f"{base}{quote}"
         if sym in out:
             continue
-        if uni and sym not in uni:
-            continue  # not part of the scanned strategy universe -> leave it alone
+        # filter only when a universe is given: manage held coins in the universe
+        # OR ones we actually bought (ledger). No universe -> manage all holdings.
+        if uni and sym not in uni and sym not in led:
+            continue
         out.append(sym)
     return out[:cap]
 
@@ -648,8 +652,12 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         sig = compute_signal(frames, mode=cfg.mode, target_vol=cfg.target_vol)
 
     balances = client.balances()
-    # only manage coins in the scanned universe (ignore unrelated faucet tokens)
-    whitelist = _resolve_whitelist(sig["targets"], balances, universe=universe)
+    # manage: scan targets + held faucet coins in the universe + EVERY coin the
+    # strategy actually bought (ledger), even if it has since left the universe —
+    # so a stale held position still gets rotated out to cash, not abandoned.
+    ledger_syms = {s for s, p in load_ledger().positions.items() if p.qty > 1e-9}
+    whitelist = _resolve_whitelist(sig["targets"], balances, universe=universe,
+                                   ledger_syms=ledger_syms)
     try:
         allp = client.all_prices()
     except Exception:  # noqa: BLE001
