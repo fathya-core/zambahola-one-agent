@@ -34,6 +34,8 @@ def backtest_scan(
     periods_per_year: float = 365.0,
     regime_floor: float = 0.4,
     conviction_power: float = 1.0,
+    vol_power: float = 1.0,
+    cap_vol_ref: float = 0.0,
     end_index: int | None = None,
     fng_df: "pd.DataFrame | None" = None,
     fng_greed_cut: float = 0.0,
@@ -109,16 +111,22 @@ def backtest_scan(
         if picks:
             raw = {}
             for n, score, v in picks:
-                vs = min(1.0, target_vol / v) if v > 0 else 0.0
+                vs = min(1.0, (target_vol / v) ** vol_power) if v > 0 else 0.0
                 raw[n] = max(0.0, vs) * (max(0.1, score) ** conviction_power)
             ssum = sum(raw.values()) or 1.0
             for n, rv in raw.items():
                 w[n] = rv / ssum * eff_total
             if max_weight < 1.0:  # concentration cap (live): trimmed excess -> cash
                 cap = max_weight * eff_total
+                vmap = {n: v for n, _, v in picks}
                 for n in list(w):
-                    if w[n] > cap:
-                        w[n] = cap
+                    c = cap
+                    # vol-aware cap: a hyper-volatile coin gets a tighter ceiling so it
+                    # can't dominate the book on score alone (cap_vol_ref=0 disables).
+                    if cap_vol_ref > 0 and vmap.get(n, 0.0) > 0:
+                        c = cap * min(1.0, cap_vol_ref / vmap[n])
+                    if w[n] > c:
+                        w[n] = c
 
         # SHORT book: short the strongest downtrends; budget grows as BTC weakens
         if allow_short:

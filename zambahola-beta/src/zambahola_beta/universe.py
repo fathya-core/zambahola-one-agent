@@ -161,6 +161,8 @@ def scan(
     min_consensus: float = 0.75,
     stop_pct: float = 0.35,
     conviction_power: float = 1.5,
+    vol_power: float = 1.0,
+    cap_vol_ref: float = 0.0,
     max_correlation: float = 0.85,
     corr_window: int = 60,
     min_vol: float = 0.10,
@@ -245,7 +247,9 @@ def scan(
         # weight = vol-target x conviction; normalise to the regime-scaled budget
         raw = {}
         for s in picks:
-            vscale = min(1.0, target_vol / s["vol"]) if s["vol"] > 0 else 0.0
+            # vol-target with an adjustable power: vol_power>1 penalises hyper-volatile
+            # coins much harder, so a 400%-vol coin can't dominate the book on score alone.
+            vscale = min(1.0, (target_vol / s["vol"]) ** vol_power) if s["vol"] > 0 else 0.0
             conviction = max(0.1, s["score"]) ** conviction_power
             raw[s["symbol"]] = max(0.0, vscale) * conviction
         ssum = sum(raw.values()) or 1.0
@@ -255,9 +259,15 @@ def scan(
         # trimmed excess simply stays in cash (safer than forcing it into a weaker coin)
         if max_weight < 1.0:
             cap = max_weight * effective_total
+            vmap = {s["symbol"]: s["vol"] for s in picks}
             for sym in list(targets):
-                if targets[sym] > cap:
-                    targets[sym] = round(cap, 4)
+                c = cap
+                # vol-aware cap: a hyper-volatile coin gets a tighter ceiling so it
+                # can't dominate the book on score alone (cap_vol_ref=0 disables).
+                if cap_vol_ref > 0 and vmap.get(sym, 0.0) > 0:
+                    c = cap * min(1.0, cap_vol_ref / vmap[sym])
+                if targets[sym] > c:
+                    targets[sym] = round(c, 4)
 
     ranked = []
     for s in sorted(scored, key=lambda s: s["score"], reverse=True):

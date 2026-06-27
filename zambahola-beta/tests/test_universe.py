@@ -49,6 +49,43 @@ def test_scan_picks_uptrends_and_ranks_smart():
     assert res["ranked"][-1]["action"] == "CASH"
 
 
+def test_vol_power_shifts_weight_away_from_hypervol_coin():
+    """A higher vol_power should reduce the weight share of a very volatile coin
+    relative to a calmer uptrend of similar trend strength."""
+    n = 260
+    rng = np.random.default_rng(0)
+    calm = np.linspace(100.0, 240.0, n) * (1 + rng.normal(0, 0.005, n)).cumprod()
+    wild = np.linspace(100.0, 240.0, n) * (1 + rng.normal(0, 0.06, n)).cumprod()
+    frames = {"CALMUSDT": _frame(calm), "WILDUSDT": _frame(wild)}
+
+    def share(vp):
+        r = scan(frames, top_n=2, target_vol=0.6, max_total=1.0, max_correlation=1.0,
+                 min_vol=0.0, min_consensus=0.0, vol_power=vp)
+        t = r["targets"]
+        tot = sum(t.values()) or 1.0
+        return t.get("WILDUSDT", 0.0) / tot
+
+    low = share(1.0)
+    high = share(2.5)
+    # stronger vol penalty -> wild coin gets a smaller slice of the book
+    assert high <= low + 1e-9
+
+
+def test_vol_aware_cap_tightens_ceiling_for_volatile_coin():
+    """cap_vol_ref shrinks the per-coin ceiling for a coin whose vol exceeds the ref."""
+    n = 260
+    rng = np.random.default_rng(1)
+    calm = np.linspace(100.0, 260.0, n) * (1 + rng.normal(0, 0.004, n)).cumprod()
+    wild = np.linspace(100.0, 320.0, n) * (1 + rng.normal(0, 0.07, n)).cumprod()
+    frames = {"CALMUSDT": _frame(calm), "WILDUSDT": _frame(wild)}
+    # without vol-aware cap, the strong wild coin can hit the flat 0.5 cap
+    base = scan(frames, top_n=2, target_vol=0.6, max_total=1.0, max_correlation=1.0,
+                min_vol=0.0, min_consensus=0.0, max_weight=0.5, cap_vol_ref=0.0)
+    capped = scan(frames, top_n=2, target_vol=0.6, max_total=1.0, max_correlation=1.0,
+                  min_vol=0.0, min_consensus=0.0, max_weight=0.5, cap_vol_ref=1.0)
+    assert capped["targets"].get("WILDUSDT", 0.0) <= base["targets"].get("WILDUSDT", 0.0) + 1e-9
+
+
 def test_scan_concentration_cap_limits_single_weight():
     # with a hard cap, no single coin may exceed max_weight of the book
     res = scan(_frames(), top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0,

@@ -74,6 +74,7 @@ def _save_auto(state: AppState) -> None:
             "auto_interval_hours": state.auto_interval_hours,
             "pnl_peak_usd": state.pnl_peak_usd,
             "port_tp_cooldown_until": state.port_tp_cooldown_until,
+            "sell_ban_until": state.sell_ban_until,
         }), "utf-8")
     except Exception:  # noqa: BLE001
         pass
@@ -87,6 +88,9 @@ def _load_auto(state: AppState) -> None:
         state.auto_interval_hours = float(d.get("auto_interval_hours", state.auto_interval_hours))
         state.pnl_peak_usd = float(d.get("pnl_peak_usd", state.pnl_peak_usd))
         state.port_tp_cooldown_until = float(d.get("port_tp_cooldown_until", state.port_tp_cooldown_until))
+        raw = d.get("sell_ban_until")
+        if isinstance(raw, dict):
+            state.sell_ban_until = {str(k): float(v) for k, v in raw.items()}
     except Exception:  # noqa: BLE001
         pass
 
@@ -94,10 +98,10 @@ def _load_auto(state: AppState) -> None:
 _PERSIST_FIELDS = (
     "mode", "interval", "max_total", "universe_size", "top_n", "max_order_usd", "max_total_usd",
     "rebalance_band", "take_profit_pct", "take_profit_frac", "breaker_pct", "max_correlation",
-    "stop_pct", "conviction_power", "target_vol", "profit_lock_arm", "profit_lock_giveback",
+    "stop_pct", "conviction_power", "vol_power", "cap_vol_ref", "target_vol", "profit_lock_arm", "profit_lock_giveback",
     "min_hold_hours", "hard_stop_pct",
     "port_tp_arm_usd", "port_tp_giveback", "port_tp_sell_frac", "port_tp_cooldown_h",
-    "max_weight",
+    "max_weight", "reentry_ban_hours",
 )
 
 
@@ -392,6 +396,8 @@ class AppConfig:
     stop_pct: float = 0.35  # trailing stop from PEAK (let winners run; full-cycle validated)
     hard_stop_pct: float = 0.15  # hard stop from COST: cut a loser this far underwater
     conviction_power: float = 1.5  # concentrate weight toward the strongest trends
+    vol_power: float = 2.0  # >1 penalises hyper-volatile coins harder (anti-concentration)
+    cap_vol_ref: float = 1.5  # vol-aware cap ref: a coin's max weight shrinks if vol>ref
     profit_lock_arm: float = 0.15  # arm the profit ratchet once a position is up this %
     profit_lock_giveback: float = 0.07  # FLOOR give-back; actual is vol-adaptive (7%-18%)
     min_hold_hours: float = 24.0  # anti-churn: hold a new position at least this long (rotation only)
@@ -399,7 +405,8 @@ class AppConfig:
     port_tp_arm_usd: float = 150.0  # only active once strategy PnL peaked >= this many $
     port_tp_giveback: float = 0.15  # bank when PnL gives back this FRACTION of the peak gain
     port_tp_sell_frac: float = 0.5  # how much of each winner to bank (lock to cash)
-    port_tp_cooldown_h: float = 3.0  # after banking, park profit in cash (no new buys) this long
+    port_tp_cooldown_h: float = 8.0  # after banking, park profit in cash (no new buys) this long
+    reentry_ban_hours: float = 48.0  # after forced exit, block re-buy this long (anti-churn)
     live: bool = False
     port: int = 8799
 
@@ -420,6 +427,7 @@ class AppState:
     last_auto_run: float = 0.0  # epoch of last auto cycle (separate from `updated`)
     pnl_peak_usd: float = 0.0  # high-water of strategy PnL in $ (stable; % distorts as cash grows)
     port_tp_cooldown_until: float = 0.0  # park banked profit in cash until this epoch
+    sell_ban_until: dict = field(default_factory=dict)  # sym -> epoch; no re-buy after forced sell
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def log(self, msg: str) -> None:
@@ -509,6 +517,7 @@ def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str], dict]:
     held = {s for s, p in load_ledger().positions.items() if p.qty > 1e-9}
     sc = scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total,
               stop_pct=cfg.stop_pct, conviction_power=cfg.conviction_power,
+              vol_power=cfg.vol_power, cap_vol_ref=cfg.cap_vol_ref,
               max_correlation=cfg.max_correlation, max_weight=cfg.max_weight, held=held)
     as_of = ""
     first = next((s for s in symbols if s in frames), None)
@@ -635,12 +644,38 @@ def _order_reason(sym: str, side: str, targets: dict, ranked_map: dict) -> str:
     return "خروج/إعادة توازن"
 
 
+def _active_sell_bans(state: AppState, now: float | None = None) -> dict[str, float]:
+    """Symbols blocked from re-buy after a forced exit."""
+    ts = now if now is not None else time.time()
+    return {s: until for s, until in state.sell_ban_until.items() if until > ts}
+
+
+def _apply_reentry_bans(targets: dict, state: AppState) -> list[str]:
+    """Zero-out buy targets for symbols still under a post-forced-sell ban."""
+    blocked = []
+    for s, w in list(targets.items()):
+        if w > 0 and s in _active_sell_bans(state):
+            targets[s] = 0.0
+            blocked.append(s)
+    return blocked
+
+
+def _ban_symbols(state: AppState, symbols: set[str], hours: float) -> None:
+    if hours <= 0 or not symbols:
+        return
+    until = time.time() + hours * 3600
+    for s in symbols:
+        state.sell_ban_until[s] = until
+    _save_auto(state)
+
+
 def _force_sell_symbols(
     client: BinanceSpot, symbols: set[str], balances: dict, allp: dict,
     led, cfg: AppConfig, state: AppState, *, why: str, min_usd: float = 10.0,
-) -> int:
+) -> tuple[int, list[str]]:
     """Market-sell full wallet holdings for forced exits (stop/lock); uses SELL_MARGIN."""
     placed = 0
+    sold: list[str] = []
     for sym in symbols:
         px = allp.get(sym, 0.0)
         if px <= 0:
@@ -655,11 +690,12 @@ def _force_sell_symbols(
             append_trade({**rec, "mode": "live" if cfg.live else "testnet", "why": why})
             balances[base] = max(0.0, balances.get(base, 0.0) - amt / px)
             placed += 1
+            sold.append(sym)
             pnl = f" · ربح ${rec['realized']}" if rec["realized"] else ""
             state.log(f"{'حقيقي' if cfg.live else 'testnet'} بيع {sym} ${amt} ✓ — {why}{pnl}")
         except Exception as exc:  # noqa: BLE001
             state.log(f"✗ فشل بيع {sym}: {exc}")
-    return placed
+    return placed, sold
 
 
 def do_execute(cfg: AppConfig, state: AppState) -> dict:
@@ -721,6 +757,7 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
             and _port_tp_should_bank(cur_usd, state.pnl_peak_usd,
                                      cfg.port_tp_arm_usd, cfg.port_tp_giveback)):
         banked = 0.0
+        banked_syms: set[str] = set()
         for s, p in list(led.positions.items()):
             px = allp.get(s, 0.0)
             if p.qty <= 1e-12 or p.avg <= 0 or px <= 0 or (px / p.avg - 1) <= 0.03:
@@ -736,6 +773,7 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
                 append_trade({**rec, "mode": "live" if cfg.live else "testnet",
                               "why": "جني ربح المحفظة (تراجع عن القمّة)"})
                 banked += rec["realized"]
+                banked_syms.add(s)
                 balances[base] = max(0.0, balances.get(base, 0.0) - sell_usd / px)
                 g = (px / p.avg - 1) * 100
                 state.log(f"💰 بنك ربح {s}: +{g:.0f}% بيع {int(cfg.port_tp_sell_frac*100)}% (قفل ${rec['realized']})")
@@ -745,6 +783,11 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
             peak_was = state.pnl_peak_usd
             state.port_tp_cooldown_until = now_ts + cfg.port_tp_cooldown_h * 3600
             state.pnl_peak_usd = cur_usd  # re-arm from the new (lower) level
+            # anti give-back: don't immediately RELOAD a coin we just banked a big win
+            # on — that's the exact pattern that gives gains back when it reverses.
+            if cfg.reentry_ban_hours > 0 and banked_syms:
+                _ban_symbols(state, banked_syms, cfg.reentry_ban_hours)
+                state.log(f"🚫 منع إعادة شراء {', '.join(sorted(banked_syms))} لمدة {cfg.reentry_ban_hours:g}س بعد جني الربح")
             _save_auto(state)
             save_ledger(led)
             state.log(f"🔒 قفل ربح المحفظة عند ${cur_usd:.0f} (القمّة ${peak_was:.0f}) — نقد + تهدئة {cfg.port_tp_cooldown_h:g}س")
@@ -798,9 +841,9 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
             if s not in prices:
                 prices[s] = allp.get(s, 0.0)
             state.log(f"🛑 {reason} {s} → بيع كامل")
-    # 2c) min-hold anti-churn: a position younger than min_hold_hours is protected from
-    # ROTATION sells (dropped out of the top-N). Real risk exits still fire: profit-lock,
-    # circuit breaker, and a hard stop-loss (price fell >= stop_pct below average cost).
+    # 2c) min-hold anti-churn: a YOUNG position is protected from a FULL rotation exit
+    # (target=0 — dropped from the book). Trimming overweight (target>0 but below current)
+    # and all risk/profit-lock exits still run normally.
     if not breaker and cfg.min_hold_hours > 0:
         usdt = balances.get("USDT", 0.0)
         hv = {}
@@ -815,26 +858,40 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         for s, p in led.positions.items():
             if (p.qty <= 1e-12 or p.age_hours() >= cfg.min_hold_hours
                     or s in lock_syms or s in risk_exit_syms):
-                continue  # closed / old enough / a real risk exit -> not protected
+                continue
+            tgt = targets.get(s, 0.0)
+            if tgt > 0:
+                continue  # still in book — allow trim-down rebalances
             cur_w = (hv.get(s, 0.0) / equity) if equity > 0 else 0.0
-            if cur_w > 0 and targets.get(s, 0.0) < cur_w:
-                targets[s] = round(cur_w, 4)  # keep it: cancel the rotation sell
+            if cur_w > 0:
+                targets[s] = round(cur_w, 4)  # block full exit only
                 protected.append(s)
         if protected:
-            state.log(f"⏳ حد أدنى للاحتفاظ ({cfg.min_hold_hours:g}س): إبقاء {', '.join(protected)} (منع دوران)")
+            state.log(f"⏳ حد أدنى للاحتفاظ ({cfg.min_hold_hours:g}س): إبقاء {', '.join(protected)} (منع خروج كامل)")
     save_ledger(led)
 
     # forced exits (stop-loss / profit-lock) go direct to market — don't rely on
     # plan_rebalance alone (avoids -2010 and ensures risk sells actually fire).
     force_syms = lock_syms | risk_exit_syms
     forced = 0
+    forced_sold: list[str] = []
     if force_syms and not breaker:
-        forced = _force_sell_symbols(
+        forced, forced_sold = _force_sell_symbols(
             client, force_syms, balances, allp, led, cfg, state,
             why="خروج إجباري (وقف خسارة / قفل ربح)",
         )
+        if forced_sold:
+            _ban_symbols(state, set(forced_sold), cfg.reentry_ban_hours)
+            state.log(
+                f"🚫 منع إعادة شراء {', '.join(forced_sold)} لمدة {cfg.reentry_ban_hours:g}س"
+            )
         if forced:
             save_ledger(led)
+
+    blocked_reentry = _apply_reentry_bans(targets, state)
+    if blocked_reentry:
+        mins = max(int((state.sell_ban_until[s] - time.time()) / 60) for s in blocked_reentry)
+        state.log(f"🚫 إعادة شراء موقوفة: {', '.join(blocked_reentry)} ({mins}د متبقية)")
 
     limits = RiskLimits(max_order_usd=cfg.max_order_usd, max_total_usd=cfg.max_total_usd,
                         rebalance_band=cfg.rebalance_band, whitelist=whitelist)
@@ -978,6 +1035,7 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
     res = backtest_scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol,
                         max_total=cfg.max_total, min_bars=min_bars, periods_per_year=ppy,
                         stop_pct=cfg.stop_pct, conviction_power=cfg.conviction_power,
+                        vol_power=cfg.vol_power, cap_vol_ref=cfg.cap_vol_ref,
                         max_weight=cfg.max_weight)
     res["scope"] = "years" if long_history else "recent"
     res["interval"] = cfg.interval
@@ -1139,11 +1197,24 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.port_tp_sell_frac = max(0.1, min(1.0, float(body["port_tp_sell_frac"])))
             if "port_tp_cooldown_h" in body:
                 cfg.port_tp_cooldown_h = max(0.0, float(body["port_tp_cooldown_h"]))
-            if body.get("clear_tp_cooldown"):
-                state.port_tp_cooldown_until = 0.0
+            if "reentry_ban_hours" in body:
+                cfg.reentry_ban_hours = max(0.0, min(720.0, float(body["reentry_ban_hours"])))
+            if "port_tp_cooldown_until" in body:
+                state.port_tp_cooldown_until = float(body["port_tp_cooldown_until"])
                 _save_auto(state)
+            if body.get("clear_tp_cooldown"):
+                if not body.get("confirm"):
+                    state.log("⚠️ رفض إلغاء التهدئة — أضف confirm:true يدوياً إذا كنت متأكداً")
+                else:
+                    state.port_tp_cooldown_until = 0.0
+                    _save_auto(state)
+                    state.log("⚠️ تم إلغاء تهدئة جني الربح — الشراء مسموح من جديد")
             if "conviction_power" in body:
                 cfg.conviction_power = max(1.0, min(3.0, float(body["conviction_power"])))
+            if "vol_power" in body:
+                cfg.vol_power = max(1.0, min(3.0, float(body["vol_power"])))
+            if "cap_vol_ref" in body:
+                cfg.cap_vol_ref = max(0.0, min(10.0, float(body["cap_vol_ref"])))
             if "target_vol" in body:
                 cfg.target_vol = max(0.1, min(3.0, float(body["target_vol"])))
             if "profit_lock_arm" in body:

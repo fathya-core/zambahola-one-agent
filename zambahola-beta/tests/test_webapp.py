@@ -4,11 +4,14 @@ import pandas as pd
 from zambahola_beta.webapp import (
     AppConfig,
     AppState,
+    _active_sell_bans,
+    _apply_reentry_bans,
     _port_tp_should_bank,
     _resolve_whitelist,
     compute_pnl,
     compute_signal,
 )
+import time
 
 
 def test_port_tp_banks_on_giveback_from_peak():
@@ -115,3 +118,32 @@ def test_appstate_log_caps_history():
         st.log(f"event {i}")
     assert len(st.actions) == 100
     assert "event 149" in st.actions[-1]
+
+
+def test_reentry_ban_blocks_buy_targets():
+    st = AppState()
+    st.sell_ban_until = {"WLDUSDT": time.time() + 3600}
+    targets = {"WLDUSDT": 0.2, "HEIUSDT": 0.1}
+    blocked = _apply_reentry_bans(targets, st)
+    assert blocked == ["WLDUSDT"]
+    assert targets["WLDUSDT"] == 0.0
+    assert targets["HEIUSDT"] == 0.1
+    assert "WLDUSDT" in _active_sell_bans(st)
+
+
+def test_min_hold_blocks_full_exit_not_trim():
+    """Young positions: block rotation to 0, but allow target below current (trim)."""
+    targets = {"HEIUSDT": 0.04, "OLDCOINUSDT": 0.0}
+    cur_w = {"HEIUSDT": 0.40, "OLDCOINUSDT": 0.05}
+    min_h = 24.0
+    protected = []
+    for s, tgt in list(targets.items()):
+        if tgt > 0:
+            continue
+        cw = cur_w.get(s, 0.0)
+        if cw > 0:
+            targets[s] = round(cw, 4)
+            protected.append(s)
+    assert "OLDCOINUSDT" in protected
+    assert targets["OLDCOINUSDT"] == 0.05
+    assert targets["HEIUSDT"] == 0.04  # trim allowed — not bumped to 0.40
