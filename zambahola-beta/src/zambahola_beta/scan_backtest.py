@@ -36,6 +36,7 @@ def backtest_scan(
     conviction_power: float = 1.0,
     vol_power: float = 1.0,
     cap_vol_ref: float = 0.0,
+    stop_cooldown_days: float = 0.0,
     end_index: int | None = None,
     fng_df: "pd.DataFrame | None" = None,
     fng_greed_cut: float = 0.0,
@@ -76,6 +77,7 @@ def backtest_scan(
     equity: list[float] = []
     eq = 1.0
     prev_w: dict[str, float] = {n: 0.0 for n in names}
+    stop_until: dict[str, int] = {}  # anti-whipsaw: no re-entry until this bar index
 
     for t in range(warmup, last - 1):
         regime = 1.0
@@ -94,8 +96,15 @@ def backtest_scan(
             d, m3 = dd[n].iloc[t], mom30[n].iloc[t]
             if pd.isna(cn) or pd.isna(m9) or pd.isna(v):
                 continue
-            if cn < min_consensus or m9 <= 0 or d <= -stop_pct:
+            if d <= -stop_pct:
+                # trailing stop hit -> mark a re-entry cooldown (anti-whipsaw)
+                if stop_cooldown_days > 0:
+                    stop_until[n] = t + int(stop_cooldown_days)
                 continue
+            if cn < min_consensus or m9 <= 0:
+                continue
+            if stop_cooldown_days > 0 and t < stop_until.get(n, -1):
+                continue  # recently stopped out -> don't immediately rebuy into chop
             if require_mom30 and not pd.isna(m3) and m3 <= 0:
                 continue  # live gate: refuse a coin rolling over short-term
             ra = (m9 / v) if v > 0 else 0.0

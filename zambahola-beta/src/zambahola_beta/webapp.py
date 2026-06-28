@@ -101,7 +101,7 @@ _PERSIST_FIELDS = (
     "stop_pct", "conviction_power", "vol_power", "cap_vol_ref", "target_vol", "profit_lock_arm", "profit_lock_giveback",
     "min_hold_hours", "hard_stop_pct",
     "port_tp_arm_usd", "port_tp_giveback", "port_tp_sell_frac", "port_tp_cooldown_h",
-    "max_weight", "reentry_ban_hours",
+    "max_weight", "reentry_ban_hours", "stop_cooldown_hours",
 )
 
 
@@ -407,6 +407,7 @@ class AppConfig:
     port_tp_sell_frac: float = 0.5  # how much of each winner to bank (lock to cash)
     port_tp_cooldown_h: float = 8.0  # after banking, park profit in cash (no new buys) this long
     reentry_ban_hours: float = 48.0  # after forced exit, block re-buy this long (anti-churn)
+    stop_cooldown_hours: float = 336.0  # after a trailing-stop sell, block re-buy (anti-whipsaw, ~14d)
     live: bool = False
     port: int = 8799
 
@@ -922,6 +923,7 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     state.log(f"{net} (ميزانية ${cfg.max_total_usd:g})")
     ranked_map = {r["symbol"]: r for r in sig.get("ranked", [])}
     placed = forced
+    stop_banned: set[str] = set()
     for o in plan.orders:
         why = _order_reason(o.symbol, o.side, targets, ranked_map)
         try:
@@ -934,8 +936,17 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
             mark = "✓ تم" if ok else f"({res.get('status')})"
             pnl = f" · ربح ${rec['realized']}" if (o.side == "SELL" and rec["realized"]) else ""
             state.log(f"{'حقيقي' if cfg.live else 'testnet'} {side_ar} {o.symbol} ${o.usd} {mark} — {why}{pnl}")
+            # anti-whipsaw: a coin sold because it fell off its peak (trailing stop)
+            # must not be rebought into the same chop for a cooldown window.
+            if (o.side == "SELL" and cfg.stop_cooldown_hours > 0
+                    and ranked_map.get(o.symbol, {}).get("action") == "STOP"):
+                stop_banned.add(o.symbol)
         except Exception as exc:  # noqa: BLE001
             state.log(f"✗ فشل {o.side} {o.symbol}: {exc}")
+    if stop_banned:
+        _ban_symbols(state, stop_banned, cfg.stop_cooldown_hours)
+        days = cfg.stop_cooldown_hours / 24.0
+        state.log(f"🚫 منع إعادة شراء بعد وقف الخسارة: {', '.join(sorted(stop_banned))} (~{days:g}ي)")
     save_ledger(led)
     return {"ok": True, "orders": placed, "buys": buys, "sells": sells + forced}
 
@@ -1036,6 +1047,7 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
                         max_total=cfg.max_total, min_bars=min_bars, periods_per_year=ppy,
                         stop_pct=cfg.stop_pct, conviction_power=cfg.conviction_power,
                         vol_power=cfg.vol_power, cap_vol_ref=cfg.cap_vol_ref,
+                        stop_cooldown_days=cfg.stop_cooldown_hours / 24.0,
                         max_weight=cfg.max_weight)
     res["scope"] = "years" if long_history else "recent"
     res["interval"] = cfg.interval
@@ -1199,6 +1211,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.port_tp_cooldown_h = max(0.0, float(body["port_tp_cooldown_h"]))
             if "reentry_ban_hours" in body:
                 cfg.reentry_ban_hours = max(0.0, min(720.0, float(body["reentry_ban_hours"])))
+            if "stop_cooldown_hours" in body:
+                cfg.stop_cooldown_hours = max(0.0, min(2160.0, float(body["stop_cooldown_hours"])))
             if "port_tp_cooldown_until" in body:
                 state.port_tp_cooldown_until = float(body["port_tp_cooldown_until"])
                 _save_auto(state)

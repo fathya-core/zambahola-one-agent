@@ -131,6 +131,12 @@ def test_reentry_ban_blocks_buy_targets():
     assert "WLDUSDT" in _active_sell_bans(st)
 
 
+def test_stop_cooldown_default_is_two_weeks():
+    cfg = AppConfig()
+    assert cfg.stop_cooldown_hours == 336.0  # ~14 days, backtested anti-whipsaw
+    assert cfg.vol_power >= 1.0 and cfg.cap_vol_ref > 0
+
+
 def test_min_hold_blocks_full_exit_not_trim():
     """Young positions: block rotation to 0, but allow target below current (trim)."""
     targets = {"HEIUSDT": 0.04, "OLDCOINUSDT": 0.0}
