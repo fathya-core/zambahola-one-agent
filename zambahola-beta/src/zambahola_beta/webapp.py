@@ -682,8 +682,21 @@ def _force_sell_symbols(
         if px <= 0:
             continue
         base = sym[:-4] if sym.endswith("USDT") else sym
-        amt = round(balances.get(base, 0.0) * px * SELL_MARGIN, 2)
+        wallet_usd = balances.get(base, 0.0) * px
+        amt = round(wallet_usd * SELL_MARGIN, 2)
         if amt < min_usd:
+            # wallet too small to trade — zero phantom ledger qty so we stop retrying
+            p = led.positions.get(sym)
+            if p and p.qty > 1e-12:
+                loss = wallet_usd - p.cost
+                led.realized += loss
+                if loss > 0:
+                    led.wins += 1
+                elif loss < 0:
+                    led.losses += 1
+                p.qty = p.cost = p.peak = p.t_entry = 0.0
+                sold.append(sym)
+                state.log(f"🧹 تصفية غبار {sym} (${wallet_usd:.1f}) — إغلاق في الدفتر")
             continue
         try:
             client.market_order(sym, "SELL", quote_qty=amt)
@@ -886,8 +899,10 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
             state.log(
                 f"🚫 منع إعادة شراء {', '.join(forced_sold)} لمدة {cfg.reentry_ban_hours:g}س"
             )
-        if forced:
+        if forced_sold or forced:
             save_ledger(led)
+            # refresh wallet after forced sells so rebalance plan doesn't double-sell
+            balances = client.balances()
 
     blocked_reentry = _apply_reentry_bans(targets, state)
     if blocked_reentry:
@@ -897,6 +912,12 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     limits = RiskLimits(max_order_usd=cfg.max_order_usd, max_total_usd=cfg.max_total_usd,
                         rebalance_band=cfg.rebalance_band, whitelist=whitelist)
     plan = plan_rebalance(targets, balances, prices, limits)
+    # forced exits already sold via market — don't let plan_rebalance SELL again (-2010)
+    if force_syms:
+        dup = [o for o in plan.orders if o.side == "SELL" and o.symbol in force_syms]
+        if dup:
+            plan.orders[:] = [o for o in plan.orders if not (o.side == "SELL" and o.symbol in force_syms)]
+            state.log(f"⏭️ تجاهل {len(dup)} بيع مكرر (خروج إجباري نُفّذ)")
     # during the take-profit cooldown, keep the banked gain in CASH: allow sells
     # (risk exits) but block new buys so we don't immediately re-deploy the profit.
     if in_cooldown:
