@@ -40,9 +40,10 @@ def test_scan_picks_uptrends_and_ranks_smart():
     assert res["scanned"] == 3
     # downtrend coin must not be funded
     assert "DOWNUSDT_X" not in res["targets"]
-    # both uptrends funded, book sums to ~max_total (no BTC leader -> regime 1.0)
+    # both uptrends funded; book sums to max_total * regime. With 1 of 3 coins in a
+    # downtrend, market breadth trims the regime below 1.0 (multi-factor regime).
     assert set(res["targets"]) == {"UPUSDT_X", "MILDUSDT"}
-    assert abs(sum(res["targets"].values()) - 1.0) < 1e-6
+    assert abs(sum(res["targets"].values()) - res["regime"]) < 1e-6
     # smart ranking: an invested uptrend on top, the downtrend last and in cash
     assert res["ranked"][0]["action"] == "INVEST"
     assert res["ranked"][-1]["symbol"] == "DOWNUSDT_X"
@@ -179,9 +180,9 @@ def test_scan_all_down_goes_cash():
 
 
 def test_scan_respects_max_total_leverage():
-    # no BTC leader in the synthetic basket -> regime 1.0 -> full max_total
+    # book scales with max_total (leverage) * regime; assert it tracks the cap
     res = scan(_frames(), top_n=5, max_total=2.0, max_correlation=1.0, min_vol=0.0)
-    assert abs(sum(res["targets"].values()) - 2.0) < 1e-6
+    assert abs(sum(res["targets"].values()) - 2.0 * res["regime"]) < 1e-6
 
 
 def test_market_regime_scales_with_leader():
@@ -200,8 +201,9 @@ def test_scan_regime_cuts_exposure_when_btc_weak():
         "ALTUSDT": _frame(np.linspace(100.0, 320.0, n)),     # a strong alt uptrend
     }
     res = scan(frames, top_n=5, max_total=1.0, min_vol=0.0)
-    # alt still funded, but total exposure is scaled down by the risk-off regime
-    assert res["regime"] < 0.5
+    # alt still funded, but total exposure is scaled down by the risk-off regime.
+    # BTC down + only half the (2-coin) universe up -> regime well below neutral.
+    assert res["regime"] < 0.6
     assert 0 < sum(res["targets"].values()) <= res["regime"] + 1e-6
 
 

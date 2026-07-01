@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import time
@@ -171,9 +172,54 @@ class BinanceSpot:
         self.recv_window = recv_window
         self.session = requests.Session()
         self.session.headers.update({"X-MBX-APIKEY": keys.api_key})
+        self._time_offset_ms = 0  # server-clock sync (set via sync_time)
+        self._filters: dict[str, dict] = {}  # LOT_SIZE/MIN_NOTIONAL cache per symbol
+
+    def sync_time(self) -> int:
+        """Align local clock to Binance server time to avoid -1021 (timestamp
+        outside recvWindow) on live orders when the PC clock drifts."""
+        try:
+            r = self.session.get(f"{self.base}/api/v3/time", timeout=10)
+            r.raise_for_status()
+            server_ms = int(r.json()["serverTime"])
+            self._time_offset_ms = server_ms - int(time.time() * 1000)
+        except Exception:  # noqa: BLE001
+            self._time_offset_ms = 0
+        return self._time_offset_ms
+
+    def symbol_filters(self, symbol: str) -> dict:
+        """Cached LOT_SIZE step + MIN_NOTIONAL for a symbol (real-Binance order
+        filters). Needed to sell an EXACT base quantity with no leftover dust."""
+        if symbol in self._filters:
+            return self._filters[symbol]
+        out = {"step": 0.0, "min_qty": 0.0, "min_notional": 0.0}
+        try:
+            r = self.session.get(f"{self.base}/api/v3/exchangeInfo",
+                                 params={"symbol": symbol}, timeout=15)
+            r.raise_for_status()
+            info = r.json()["symbols"][0]
+            for flt in info.get("filters", []):
+                ft = flt.get("filterType")
+                if ft == "LOT_SIZE":
+                    out["step"] = float(flt.get("stepSize", 0) or 0)
+                    out["min_qty"] = float(flt.get("minQty", 0) or 0)
+                elif ft in ("MIN_NOTIONAL", "NOTIONAL"):
+                    out["min_notional"] = float(flt.get("minNotional", 0) or 0)
+        except Exception:  # noqa: BLE001
+            pass
+        self._filters[symbol] = out
+        return out
+
+    @staticmethod
+    def _round_step(qty: float, step: float) -> float:
+        """Floor a base quantity to the symbol's LOT_SIZE step (avoids -1013)."""
+        if step <= 0:
+            return qty
+        return math.floor(qty / step) * step
 
     def _signed(self, method: str, path: str, params: dict) -> dict:
-        params = {**params, "timestamp": int(time.time() * 1000), "recvWindow": self.recv_window}
+        ts = int(time.time() * 1000) + self._time_offset_ms
+        params = {**params, "timestamp": ts, "recvWindow": self.recv_window}
         query = urllib.parse.urlencode(params)
         query += "&signature=" + sign_query(query, self.keys.api_secret)
         url = f"{self.base}{path}?{query}"
@@ -213,13 +259,24 @@ class BinanceSpot:
         # quoteOrderQty works for BOTH BUY and SELL on spot MARKET orders and
         # avoids LOT_SIZE/precision filters (no need to round base quantity).
         params: dict = {"symbol": symbol, "side": side, "type": "MARKET"}
-        if quote_qty is not None:
-            params["quoteOrderQty"] = round(quote_qty, 2)
-        elif quantity is not None:
+        if quantity is not None:
             params["quantity"] = quantity
+        elif quote_qty is not None:
+            params["quoteOrderQty"] = round(quote_qty, 2)
         else:
             raise ValueError("need quote_qty or quantity")
         return self._signed("POST", "/api/v3/order", params)
+
+    def market_sell_all(self, symbol: str, wallet_qty: float) -> dict:
+        """FULL exit with no leftover: sell the entire base holding by QUANTITY,
+        floored to the symbol's LOT_SIZE step. Unlike a quote-qty sell (which we
+        under-shoot by SELL_MARGIN to dodge -2010 and thus always leave ~8% dust),
+        this liquidates the position cleanly so nothing lingers in the wallet."""
+        flt = self.symbol_filters(symbol)
+        qty = self._round_step(wallet_qty, flt.get("step", 0.0))
+        if qty <= 0:
+            raise RuntimeError(f"{symbol}: qty {wallet_qty} below LOT_SIZE step")
+        return self.market_order(symbol, "SELL", quantity=qty)
 
 
 # ---------- rebalance planning (pure) ----------
@@ -232,6 +289,19 @@ class RiskLimits:
     rebalance_band: float = 0.0  # skip rebalances smaller than band*position (fee-aware)
     whitelist: tuple[str, ...] = ("BTCUSDT", "ETHUSDT")
     quote: str = "USDT"
+    # liquidity-aware sizing: cap each order to `participation` * the coin's 24h
+    # quote volume so we never move a size the market can't absorb without slippage.
+    participation: float = 0.0  # 0 disables the cap
+    vol_usd: dict[str, float] = field(default_factory=dict)  # symbol -> 24h quote vol
+
+    def order_cap(self, sym: str) -> float:
+        """Per-order USD ceiling: the smaller of the flat cap and a participation
+        slice of the symbol's daily volume (falls back to the flat cap if unknown)."""
+        cap = self.max_order_usd
+        v = self.vol_usd.get(sym, 0.0)
+        if self.participation > 0 and v > 0:
+            cap = min(cap, self.participation * v)
+        return cap
 
 
 @dataclass
@@ -289,15 +359,16 @@ def plan_rebalance(
         threshold = limits.min_notional_usd if target_usd <= 0 else max(limits.min_notional_usd, band)
         if abs(delta) < threshold:
             continue
+        cap = limits.order_cap(sym)  # flat cap ∧ liquidity-participation cap
         if delta > 0:  # BUY — clamp to per-order cap AND cash actually available
-            usd = min(delta, limits.max_order_usd, avail_quote * 0.99)
+            usd = min(delta, cap, avail_quote * 0.99)
             if usd < limits.min_notional_usd:
                 plan.notes.append(f"{sym}: want BUY but insufficient {quote}")
                 continue
             avail_quote -= usd
             side = "BUY"
         else:  # SELL — clamp to per-order cap AND wallet (with margin for -2010)
-            usd = min(-delta, limits.max_order_usd, holdings_usd[sym] * SELL_MARGIN)
+            usd = min(-delta, cap, holdings_usd[sym] * SELL_MARGIN)
             if usd < limits.min_notional_usd:
                 continue
             side = "SELL"

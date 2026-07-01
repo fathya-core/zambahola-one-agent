@@ -7,8 +7,9 @@ from zambahola_beta.ledger import Ledger
 
 def test_buy_then_sell_higher_is_a_win():
     led = Ledger()
-    led.record("BUY", "BTCUSDT", usd=1000.0, price=100.0)   # 10 units @ 100
-    rec = led.record("SELL", "BTCUSDT", usd=1200.0, price=120.0)  # sell 10 units @ 120
+    # fee_bps=0 isolates the price-only PnL math (fees covered separately below)
+    led.record("BUY", "BTCUSDT", usd=1000.0, price=100.0, fee_bps=0)   # 10 units @ 100
+    rec = led.record("SELL", "BTCUSDT", usd=1200.0, price=120.0, fee_bps=0)  # 10 @ 120
     assert rec["realized"] == 200.0  # (120-100)*10
     assert rec["gain_pct"] == 20.0
     s = led.summary()
@@ -18,11 +19,21 @@ def test_buy_then_sell_higher_is_a_win():
 
 def test_buy_then_sell_lower_is_a_loss():
     led = Ledger()
-    led.record("BUY", "ETHUSDT", usd=1000.0, price=100.0)
-    rec = led.record("SELL", "ETHUSDT", usd=800.0, price=80.0)
+    led.record("BUY", "ETHUSDT", usd=1000.0, price=100.0, fee_bps=0)
+    rec = led.record("SELL", "ETHUSDT", usd=800.0, price=80.0, fee_bps=0)
     assert rec["realized"] == -200.0
     s = led.summary()
     assert s["losses"] == 1 and s["wins"] == 0 and s["win_rate"] == 0.0
+
+
+def test_fees_reduce_realized_pnl_on_both_sides():
+    """Default fee (10 bps/side) must be booked: a frictionless +200 win shrinks
+    once the exchange takes its cut on the buy AND the sell."""
+    led = Ledger()
+    led.record("BUY", "BTCUSDT", usd=1000.0, price=100.0)   # 0.1% buy fee
+    rec = led.record("SELL", "BTCUSDT", usd=1200.0, price=120.0)  # 0.1% sell fee
+    assert rec["fee"] > 0
+    assert 195.0 < rec["realized"] < 200.0  # ~197.6 after round-trip fees
 
 
 def test_unrealized_gain_tracks_avg_cost():
@@ -35,8 +46,8 @@ def test_unrealized_gain_tracks_avg_cost():
 
 def test_partial_sell_keeps_position():
     led = Ledger()
-    led.record("BUY", "ADAUSDT", usd=1000.0, price=1.0)  # 1000 @ 1
-    led.record("SELL", "ADAUSDT", usd=300.0, price=1.5)  # sell 200 @ 1.5
+    led.record("BUY", "ADAUSDT", usd=1000.0, price=1.0, fee_bps=0)  # 1000 @ 1
+    led.record("SELL", "ADAUSDT", usd=300.0, price=1.5, fee_bps=0)  # sell 200 @ 1.5
     pos = led.positions["ADAUSDT"]
     assert round(pos.qty, 2) == 800.0  # 1000 - 200 left
     assert round(pos.avg, 4) == 1.0    # avg cost unchanged on partial sell

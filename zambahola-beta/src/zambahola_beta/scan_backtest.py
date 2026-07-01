@@ -38,6 +38,7 @@ def backtest_scan(
     cap_vol_ref: float = 0.0,
     stop_cooldown_days: float = 0.0,
     end_index: int | None = None,
+    start_index: int = 0,
     fng_df: "pd.DataFrame | None" = None,
     fng_greed_cut: float = 0.0,
     allow_short: bool = False,
@@ -79,7 +80,8 @@ def backtest_scan(
     prev_w: dict[str, float] = {n: 0.0 for n in names}
     stop_until: dict[str, int] = {}  # anti-whipsaw: no re-entry until this bar index
 
-    for t in range(warmup, last - 1):
+    begin = max(warmup, start_index)  # start_index enables true out-of-sample windows
+    for t in range(begin, last - 1):
         regime = 1.0
         if btc_cons is not None and not pd.isna(btc_cons.iloc[t]):
             regime = regime_floor + (1.0 - regime_floor) * float(btc_cons.iloc[t])
@@ -187,13 +189,13 @@ def backtest_scan(
     sharpe = float(pr.mean() / pr.std() * np.sqrt(periods_per_year)) if pr.std() > 0 else 0.0
     btc_hodl = None
     if leader in names:
-        btc_hodl = float(px[leader].iloc[last - 1] / px[leader].iloc[warmup] - 1.0)
+        btc_hodl = float(px[leader].iloc[last - 1] / px[leader].iloc[begin] - 1.0)
 
     return {
         "ok": True,
         "coins": len(names),
         "days": days,
-        "start": str(closes["open_time"].iloc[warmup]),
+        "start": str(closes["open_time"].iloc[begin]),
         "end": str(closes["open_time"].iloc[last - 1]),
         "total_return": round(float(eq - 1.0), 4),
         "cagr": round(cagr, 4),

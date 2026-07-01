@@ -19,6 +19,15 @@ from .strategy import realized_vol, trend_consensus
 
 TICKER_24H = "https://api.binance.com/api/v3/ticker/24hr"
 
+# last-seen 24h quote volume per symbol (populated by fetch_top_symbols); used by
+# the executor for liquidity-aware order sizing without re-hitting the API.
+_LAST_VOLUMES: dict[str, float] = {}
+
+
+def last_volumes() -> dict[str, float]:
+    """Most recent 24h quote-volume map from the latest fetch_top_symbols call."""
+    return dict(_LAST_VOLUMES)
+
 # established coins with multi-year daily history (for a full-cycle backtest)
 LONG_UNIVERSE = [
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "SOLUSDT",
@@ -72,6 +81,8 @@ def fetch_top_symbols(
             continue
         cand.append((sym, vol))
     cand.sort(key=lambda x: x[1], reverse=True)
+    _LAST_VOLUMES.clear()
+    _LAST_VOLUMES.update({s: v for s, v in cand})
     return [s for s, _ in cand[:n]]
 
 
@@ -154,16 +165,34 @@ def smart_score(s: dict) -> float:
 
 
 def market_regime(frames: dict[str, pd.DataFrame], leader: str = "BTCUSDT") -> float:
-    """Risk-on/off scale in [0.4, 1.0] from the market leader's trend.
-    Alts crash with BTC, so when BTC is weak we cut total exposure (but never
-    to zero — strong relative trends can still earn at reduced size)."""
-    if leader not in frames:
-        return 1.0
-    close = frames[leader]["close"].astype(float).reset_index(drop=True)
-    if len(close) < 200:
-        return 1.0
-    cons = float(trend_consensus(close).iloc[-1])
-    return round(0.4 + 0.6 * cons, 3)
+    """Risk-on/off scale in [0.4, 1.0] from TWO factors, not just BTC:
+
+    1. Leader trend (BTC consensus) — alts crash with BTC.
+    2. Market breadth — the fraction of the scanned universe that is itself in an
+       uptrend. BTC can look fine while the rest of the market rolls over (a
+       classic "BTC-only" trap); breadth catches that internal weakness.
+
+    Combined 60/40 so a strong BTC with collapsing breadth still de-risks. Never
+    goes to zero — strong relative trends can still earn at reduced size."""
+    btc_cons = 1.0
+    if leader in frames:
+        close = frames[leader]["close"].astype(float).reset_index(drop=True)
+        if len(close) >= 200:
+            btc_cons = float(trend_consensus(close).iloc[-1])
+
+    up = 0
+    tot = 0
+    for sym, df in frames.items():
+        c = df["close"].astype(float).reset_index(drop=True)
+        if len(c) < 200:
+            continue
+        tot += 1
+        if float(trend_consensus(c).iloc[-1]) >= 0.5:
+            up += 1
+    breadth = (up / tot) if tot else btc_cons
+
+    combined = 0.6 * btc_cons + 0.4 * breadth
+    return round(0.4 + 0.6 * combined, 3)
 
 
 def scan(

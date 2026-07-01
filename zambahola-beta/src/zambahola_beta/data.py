@@ -14,6 +14,21 @@ import pandas as pd
 import requests
 
 BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
+# failover order for public market data: primary, then Binance's official public
+# data mirror (keeps the scanner alive if the primary host is down/geo-blocked).
+KLINE_HOSTS = (
+    "https://api.binance.com",
+    "https://data-api.binance.vision",
+    "https://api-gcp.binance.com",
+)
+
+# interval string -> milliseconds (for dropping the still-forming last candle)
+_INTERVAL_MS = {
+    "1m": 60_000, "3m": 180_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
+    "1h": 3_600_000, "2h": 7_200_000, "4h": 14_400_000, "6h": 21_600_000,
+    "8h": 28_800_000, "12h": 43_200_000, "1d": 86_400_000, "3d": 259_200_000,
+    "1w": 604_800_000,
+}
 
 # Raw kline columns returned by Binance, in order.
 _RAW_COLS = [
@@ -45,8 +60,15 @@ def fetch_klines(
     *,
     session: requests.Session | None = None,
     sleep_sec: float = 0.25,
+    drop_unclosed: bool = True,
 ) -> pd.DataFrame:
-    """Fetch `total` most-recent klines by paging backward (<=1000/request)."""
+    """Fetch `total` most-recent klines by paging backward (<=1000/request).
+
+    `drop_unclosed=True` removes the still-forming latest candle so signals are
+    computed on CLOSED bars only. Using a live/partial bar's moving close is a
+    subtle look-ahead: the value that triggered a decision keeps changing until
+    the bar closes, causing intraday flip-flops that never appear in a backtest.
+    """
     sess = session or requests.Session()
     limit = 1000
     end_time: int | None = None
@@ -57,9 +79,21 @@ def fetch_klines(
         params = {"symbol": symbol, "interval": interval, "limit": min(limit, remaining)}
         if end_time is not None:
             params["endTime"] = end_time
-        resp = sess.get(BINANCE_KLINES, params=params, timeout=15)
-        resp.raise_for_status()
-        rows = resp.json()
+        rows = None
+        last_exc: Exception | None = None
+        for host in KLINE_HOSTS:  # failover across public data hosts
+            try:
+                resp = sess.get(f"{host}/api/v3/klines", params=params, timeout=15)
+                resp.raise_for_status()
+                rows = resp.json()
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                continue
+        if rows is None:
+            if chunks:  # keep what we already have rather than lose the whole fetch
+                break
+            raise RuntimeError(f"Binance klines failed on all hosts: {last_exc}")
         if not rows:
             break
         frame = _to_frame(rows)
@@ -78,6 +112,14 @@ def fetch_klines(
     df = pd.concat(chunks, ignore_index=True)
     df = df.drop_duplicates(subset="open_time").sort_values("open_time")
     df = df.reset_index(drop=True)
+    # drop the still-forming last candle (its bar-close is in the future)
+    if drop_unclosed and len(df) > 1:
+        step_ms = _INTERVAL_MS.get(interval)
+        if step_ms:
+            now_ms = int(time.time() * 1000)
+            last_open_ms = int(df["open_time"].iloc[-1].value // 1_000_000)
+            if last_open_ms + step_ms > now_ms:  # bar hasn't closed yet
+                df = df.iloc[:-1].reset_index(drop=True)
     return df.tail(total).reset_index(drop=True)
 
 

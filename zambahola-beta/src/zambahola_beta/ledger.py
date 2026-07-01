@@ -14,6 +14,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+# Binance spot taker fee (bps). Real fills pay this on BOTH sides; the ledger books
+# it so realized PnL matches the exchange instead of an optimistic price-only figure.
+FEE_BPS = float(os.environ.get("ZAMBAHOLA_FEE_BPS", "10.0"))
+
+
 def _data_dir() -> Path:
     return Path(os.environ.get("ZAMBAHOLA_DATA_DIR", "data"))
 
@@ -50,9 +55,17 @@ class Ledger:
     wins: int = 0
     losses: int = 0
 
-    def record(self, side: str, symbol: str, usd: float, price: float, *, t: str | None = None) -> dict:
-        """Apply a fill; return the trade record (with realized PnL for SELLs)."""
+    def record(self, side: str, symbol: str, usd: float, price: float, *,
+               t: str | None = None, fee_bps: float | None = None) -> dict:
+        """Apply a fill; return the trade record (with realized PnL for SELLs).
+
+        `fee_bps` (default FEE_BPS) is the exchange taker fee applied to BOTH sides:
+        a BUY's cost basis includes the fee, and a SELL's proceeds are net of it —
+        so realized PnL reflects what the exchange actually credits, not a fantasy
+        price-only figure. Set fee_bps=0 to disable (e.g. legacy tests)."""
         stamp = t or time.strftime("%Y-%m-%d %H:%M:%S")
+        f = (FEE_BPS if fee_bps is None else fee_bps) / 10000.0
+        fee = abs(usd) * f
         pos = self.positions.setdefault(symbol, Position())
         qty = (usd / price) if price > 0 else 0.0
         realized = 0.0
@@ -61,14 +74,17 @@ class Ledger:
         if side == "BUY":
             if pos.qty <= 1e-12:  # fresh entry -> stamp the clock for min-hold
                 pos.t_entry = time.time()
-            pos.qty += qty
+            # fee is taken in the bought asset -> fewer base units received, but the
+            # full USD (incl. fee) is the cost basis => avg cost rises realistically.
+            pos.qty += (usd - fee) / price if price > 0 else 0.0
             pos.cost += usd
             pos.peak = max(pos.peak, price) if pos.peak > 0 else price
         else:  # SELL
             sell_qty = min(qty, pos.qty)
             avg = pos.avg
             if avg > 0 and sell_qty > 0:
-                realized = (price - avg) * sell_qty
+                gross = price * sell_qty
+                realized = (gross - fee) - avg * sell_qty  # net of sell-side fee
                 gain_pct = round((price / avg - 1.0) * 100, 2)
                 pos.cost -= avg * sell_qty
                 pos.qty -= sell_qty
@@ -82,7 +98,7 @@ class Ledger:
                     pos.t_entry = 0.0
         return {
             "t": stamp, "side": side, "symbol": symbol,
-            "usd": round(usd, 2), "price": price,
+            "usd": round(usd, 2), "price": price, "fee": round(fee, 4),
             "realized": round(realized, 2), "gain_pct": gain_pct,
         }
 

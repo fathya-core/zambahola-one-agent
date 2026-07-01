@@ -141,7 +141,6 @@ def test_min_hold_blocks_full_exit_not_trim():
     """Young positions: block rotation to 0, but allow target below current (trim)."""
     targets = {"HEIUSDT": 0.04, "OLDCOINUSDT": 0.0}
     cur_w = {"HEIUSDT": 0.40, "OLDCOINUSDT": 0.05}
-    min_h = 24.0
     protected = []
     for s, tgt in list(targets.items()):
         if tgt > 0:

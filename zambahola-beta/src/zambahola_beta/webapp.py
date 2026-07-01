@@ -101,7 +101,7 @@ _PERSIST_FIELDS = (
     "stop_pct", "conviction_power", "vol_power", "cap_vol_ref", "target_vol", "profit_lock_arm", "profit_lock_giveback",
     "min_hold_hours", "hard_stop_pct",
     "port_tp_arm_usd", "port_tp_giveback", "port_tp_sell_frac", "port_tp_cooldown_h",
-    "max_weight", "reentry_ban_hours", "stop_cooldown_hours",
+    "max_weight", "reentry_ban_hours", "stop_cooldown_hours", "participation_cap",
 )
 
 
@@ -385,10 +385,11 @@ class AppConfig:
     max_total: float = 1.0  # gross exposure target (1.0 = full spot; >1 = leverage*)
     universe_size: int = 25  # how many top coins to scan
     min_quote_volume_usd: float = 50_000_000.0  # LIQUIDITY FLOOR: skip thin coins (testnet-only edge)
-    top_n: int = 3  # MAX strongest uptrends (auto-shrinks when quality gate filters weak picks)
-    max_weight: float = 0.50  # concentration cap: no single coin above 50% of the book
+    top_n: int = 5  # MAX strongest uptrends (5 spreads risk + generalises better than 3 in walk-forward)
+    max_weight: float = 0.35  # concentration cap: no single coin above 35% of the book (lower = safer)
     max_order_usd: float = 1000.0  # per-order slippage cap (high = don't throttle deployment)
     max_total_usd: float = 1000.0  # total budget to deploy across picks
+    participation_cap: float = 0.005  # liquidity-aware: cap each order to 0.5% of the coin's 24h volume
     rebalance_band: float = 0.2  # fee-aware: ignore drifts < 20% of position
     take_profit_pct: float = 15.0  # trim a winner once it's up this % from avg cost
     take_profit_frac: float = 0.3  # how much of the position to trim (opportunistic)
@@ -507,7 +508,9 @@ def _connect(live: bool) -> BinanceSpot | None:
         keys = load_keys(testnet=not live)
     except RuntimeError:
         return None
-    return BinanceSpot(keys, testnet=not live)
+    client = BinanceSpot(keys, testnet=not live)
+    client.sync_time()  # align to server clock -> avoid -1021 on signed orders
+    return client
 
 
 def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str], dict]:
@@ -683,7 +686,8 @@ def _force_sell_symbols(
         if px <= 0:
             continue
         base = sym[:-4] if sym.endswith("USDT") else sym
-        wallet_usd = balances.get(base, 0.0) * px
+        wallet_qty = balances.get(base, 0.0)
+        wallet_usd = wallet_qty * px
         amt = round(wallet_usd * SELL_MARGIN, 2)
         if amt < min_usd:
             # wallet too small to trade — zero phantom ledger qty so we stop retrying
@@ -700,17 +704,53 @@ def _force_sell_symbols(
                 state.log(f"🧹 تصفية غبار {sym} (${wallet_usd:.1f}) — إغلاق في الدفتر")
             continue
         try:
-            client.market_order(sym, "SELL", quote_qty=amt)
-            rec = led.record("SELL", sym, amt, px)
+            # FULL exit: sell the entire base qty (LOT_SIZE-floored) so nothing is
+            # left behind. Falls back to a quote-qty sell if the qty route fails.
+            try:
+                client.market_sell_all(sym, wallet_qty)
+                gross = round(wallet_usd, 2)
+            except Exception:  # noqa: BLE001
+                client.market_order(sym, "SELL", quote_qty=amt)
+                gross = amt
+            rec = led.record("SELL", sym, gross, px)
             append_trade({**rec, "mode": "live" if cfg.live else "testnet", "why": why})
-            balances[base] = max(0.0, balances.get(base, 0.0) - amt / px)
+            balances[base] = 0.0
             placed += 1
             sold.append(sym)
             pnl = f" · ربح ${rec['realized']}" if rec["realized"] else ""
-            state.log(f"{'حقيقي' if cfg.live else 'testnet'} بيع {sym} ${amt} ✓ — {why}{pnl}")
+            state.log(f"{'حقيقي' if cfg.live else 'testnet'} بيع {sym} ${gross} ✓ — {why}{pnl}")
         except Exception as exc:  # noqa: BLE001
             state.log(f"✗ فشل بيع {sym}: {exc}")
     return placed, sold
+
+
+def _reconcile_ledger(led, balances: dict, allp: dict, state: AppState) -> bool:
+    """Idempotency guard: make the ledger match the real wallet every cycle.
+
+    If a failed/partial/out-of-band order left the ledger claiming MORE base units
+    than the wallet actually holds, book the missing quantity as sold at the current
+    price and shrink (or close) the position. This kills phantom holdings (e.g. a
+    coin the ledger thinks is open but the wallet emptied) so risk/rebalance logic
+    stops acting on ghosts. We never invent cost basis for surplus wallet coins."""
+    changed = False
+    for sym, p in list(led.positions.items()):
+        if p.qty <= 1e-9:
+            continue
+        base = sym[:-4] if sym.endswith("USDT") else sym
+        wallet_qty = balances.get(base, 0.0)
+        px = allp.get(sym, 0.0)
+        if px <= 0:
+            continue
+        missing = p.qty - wallet_qty
+        # only act when the ledger is materially AHEAD of the wallet (>1% and >$1)
+        if missing > p.qty * 0.01 and missing * px > 1.0:
+            rec = led.record("SELL", sym, missing * px, px)
+            append_trade({**rec, "mode": "live" if state else "testnet",
+                          "why": "reconcile-phantom"})
+            state.log(f"🔧 مطابقة {sym}: إغلاق {missing:.6g} وحدة وهمية "
+                      f"(ربح/خسارة ${rec['realized']})")
+            changed = True
+    return changed
 
 
 def do_execute(cfg: AppConfig, state: AppState) -> dict:
@@ -746,21 +786,27 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     whitelist = tuple(s for s in whitelist if s in prices)
 
     targets = {s: w for s, w in sig["targets"].items()}
-    # 1) circuit breaker: account fell too far from its peak -> flatten to cash + halt
-    with state.lock:
-        _hist = list(state.equity_history)
-    dd = _breaker_drawdown(_hist)
-    breaker = dd is not None and dd <= -abs(cfg.breaker_pct)
+    led = load_ledger()
+    if _reconcile_ledger(led, balances, allp, state):
+        save_ledger(led)
+    led.update_peaks(allp)
+    # 1) circuit breaker on STRATEGY drawdown (not raw account equity): if the
+    # strategy's own PnL gives back > breaker_pct of the budget from its peak,
+    # flatten to cash + halt. This tracks the strategy's health directly instead
+    # of the whole wallet (which on testnet is dominated by faucet cash and would
+    # never trip; in live it could contain unrelated assets).
+    cur_pnl = led.summary(allp).get("strategy_pnl")
+    strat_dd_pct = None
+    if cur_pnl is not None and cfg.max_total_usd > 0:
+        strat_dd_pct = (cur_pnl - state.pnl_peak_usd) / cfg.max_total_usd * 100
+    breaker = strat_dd_pct is not None and strat_dd_pct <= -abs(cfg.breaker_pct)
     if breaker:
         targets = {}
         with state.lock:
             state.halted = True
             state.auto_execute = False
         _save_auto(state)
-        state.log(f"⛔ قاطع الدائرة: تراجع رأس المال {dd:.1f}% — تصفية كاملة لنقد وإيقاف التداول")
-
-    led = load_ledger()
-    led.update_peaks(allp)
+        state.log(f"⛔ قاطع الدائرة: تراجع أداء الاستراتيجية {strat_dd_pct:.1f}% من القمّة — تصفية كاملة لنقد وإيقاف التداول")
     # 1b) PORTFOLIO take-profit ratchet — the whole book rolled over from its peak ->
     # BANK winners to cash (locks realized profit instead of giving it all back).
     # Tracked in $ (not %) because % spikes artificially as positions are sold to cash.
@@ -910,8 +956,10 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         mins = max(int((state.sell_ban_until[s] - time.time()) / 60) for s in blocked_reentry)
         state.log(f"🚫 إعادة شراء موقوفة: {', '.join(blocked_reentry)} ({mins}د متبقية)")
 
+    from .universe import last_volumes
     limits = RiskLimits(max_order_usd=cfg.max_order_usd, max_total_usd=cfg.max_total_usd,
-                        rebalance_band=cfg.rebalance_band, whitelist=whitelist)
+                        rebalance_band=cfg.rebalance_band, whitelist=whitelist,
+                        participation=cfg.participation_cap, vol_usd=last_volumes())
     plan = plan_rebalance(targets, balances, prices, limits)
     # forced exits already sold via market — don't let plan_rebalance SELL again (-2010)
     if force_syms:
@@ -949,15 +997,30 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     for o in plan.orders:
         why = _order_reason(o.symbol, o.side, targets, ranked_map)
         try:
-            res = client.market_order(o.symbol, o.side, quote_qty=o.usd)
+            base = o.symbol[:-4] if o.symbol.endswith("USDT") else o.symbol
+            px = prices.get(o.symbol, 0.0)
+            full_exit = (o.side == "SELL" and targets.get(o.symbol, 0.0) <= 0
+                         and balances.get(base, 0.0) > 0)
+            if full_exit:
+                # clean full liquidation by base qty -> no 8% SELL_MARGIN dust left
+                try:
+                    res = client.market_sell_all(o.symbol, balances.get(base, 0.0))
+                    usd = round(balances.get(base, 0.0) * px, 2) if px > 0 else o.usd
+                    balances[base] = 0.0
+                except Exception:  # noqa: BLE001 -- fall back to quote-qty sell
+                    res = client.market_order(o.symbol, o.side, quote_qty=o.usd)
+                    usd = o.usd
+            else:
+                res = client.market_order(o.symbol, o.side, quote_qty=o.usd)
+                usd = o.usd
             placed += 1
-            rec = led.record(o.side, o.symbol, o.usd, prices.get(o.symbol, 0.0))
+            rec = led.record(o.side, o.symbol, usd, px)
             append_trade({**rec, "mode": "live" if cfg.live else "testnet", "why": why})
             side_ar = "شراء" if o.side == "BUY" else "بيع"
             ok = str(res.get("status", "")).upper() in ("FILLED", "NEW", "PARTIALLY_FILLED")
             mark = "✓ تم" if ok else f"({res.get('status')})"
             pnl = f" · ربح ${rec['realized']}" if (o.side == "SELL" and rec["realized"]) else ""
-            state.log(f"{'حقيقي' if cfg.live else 'testnet'} {side_ar} {o.symbol} ${o.usd} {mark} — {why}{pnl}")
+            state.log(f"{'حقيقي' if cfg.live else 'testnet'} {side_ar} {o.symbol} ${usd} {mark} — {why}{pnl}")
             # anti-whipsaw: a coin sold because it fell off its peak (trailing stop)
             # must not be rebought into the same chop for a cooldown window.
             if (o.side == "SELL" and cfg.stop_cooldown_hours > 0
@@ -1065,22 +1128,53 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
         symbols, total, min_bars = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd), 500, 300
     frames = fetch_frames(symbols, interval=cfg.interval, total=total, min_bars=120)
     ppy = {"1d": 365, "12h": 730, "8h": 1095, "6h": 1460, "4h": 2190, "1h": 8760}.get(cfg.interval, 365)
-    res = backtest_scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol,
-                        max_total=cfg.max_total, min_bars=min_bars, periods_per_year=ppy,
-                        stop_pct=cfg.stop_pct, conviction_power=cfg.conviction_power,
-                        vol_power=cfg.vol_power, cap_vol_ref=cfg.cap_vol_ref,
-                        stop_cooldown_days=cfg.stop_cooldown_hours / 24.0,
-                        max_weight=cfg.max_weight)
+    # realistic frictions: 0.1% fee + ~0.1% slippage per side (testnet is frictionless,
+    # so an un-costed backtest massively overstates a high-turnover strategy's edge).
+    common = dict(top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total,
+                  min_bars=min_bars, periods_per_year=ppy, stop_pct=cfg.stop_pct,
+                  conviction_power=cfg.conviction_power, vol_power=cfg.vol_power,
+                  cap_vol_ref=cfg.cap_vol_ref, stop_cooldown_days=cfg.stop_cooldown_hours / 24.0,
+                  max_weight=cfg.max_weight, cost_bps=20.0)
+    res = backtest_scan(frames, **common)
     res["scope"] = "years" if long_history else "recent"
     res["interval"] = cfg.interval
+    # walk-forward efficiency: split 70/30 and measure how much of the in-sample
+    # Sharpe survives out-of-sample. WFE < ~0.5 => the result is likely overfit and
+    # should NOT be trusted for live sizing. This is the honesty check on tuning.
+    if res.get("ok") and res.get("days", 0) > 60:
+        warmup = 210
+        split = warmup + int(res["days"] * 0.7)
+        try:
+            is_res = backtest_scan(frames, end_index=split, **common)
+            oos_res = backtest_scan(frames, start_index=split, **common)
+            is_sh = is_res.get("sharpe") if is_res.get("ok") else None
+            oos_sh = oos_res.get("sharpe") if oos_res.get("ok") else None
+            res["is_sharpe"] = is_sh
+            res["oos_sharpe"] = oos_sh
+            if is_sh and is_sh != 0:
+                res["wfe"] = round(oos_sh / is_sh, 2)
+                res["overfit_warning"] = res["wfe"] < 0.5
+        except Exception as exc:  # noqa: BLE001
+            res["wfe_error"] = str(exc)
+    # survivorship caveat: the universe is TODAY's liquid coins, so delisted/failed
+    # coins that would have hurt returns are absent -> real-world results run lower.
+    res["survivorship_warning"] = (
+        "الباك-تست يستخدم العملات السائلة حاليًا فقط (لا يشمل المشطوبة/الفاشلة) — "
+        "توقّع أداءً واقعيًا أقل من المعروض."
+    )
     with state.lock:
         state.backtest = res
     if res.get("ok"):
         btc = res.get("btc_hodl_return")
         scope_ar = "سنوات" if long_history else "حديث"
+        wfe = res.get("wfe")
+        wfe_txt = ""
+        if wfe is not None:
+            flag = " ⚠ overfit" if res.get("overfit_warning") else ""
+            wfe_txt = f" · WFE {wfe}{flag}"
         state.log(f"باك-تست ({scope_ar}): عائد {int(res['total_return'] * 100)}% · "
                   f"تراجع {int(res['max_drawdown'] * 100)}% · Sharpe {res['sharpe']}"
-                  + (f" مقابل BTC {int(btc * 100)}%" if btc is not None else ""))
+                  + (f" مقابل BTC {int(btc * 100)}%" if btc is not None else "") + wfe_txt)
     else:
         state.log("باك-تست فشل: " + str(res.get("error", "")))
     return res
