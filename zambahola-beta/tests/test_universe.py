@@ -233,5 +233,17 @@ def test_fetch_top_symbols_filters_and_sorts():
         {"symbol": "BTCUPUSDT", "quoteVolume": "5000"},  # leveraged -> excluded
         {"symbol": "ETHBTC", "quoteVolume": "7000"},     # not USDT -> excluded
     ]
-    out = fetch_top_symbols(2, session=_Sess(payload))
+    # min_quote_volume=0 to isolate the filter/sort logic from the liquidity floor
+    out = fetch_top_symbols(2, min_quote_volume=0.0, session=_Sess(payload))
+    assert out == ["BTCUSDT", "ETHUSDT"]
+
+
+def test_fetch_top_symbols_liquidity_floor_and_ascii():
+    payload = [
+        {"symbol": "BTCUSDT", "quoteVolume": "80000000"},   # liquid -> kept
+        {"symbol": "ETHUSDT", "quoteVolume": "60000000"},   # liquid -> kept
+        {"symbol": "THINUSDT", "quoteVolume": "1000000"},   # thin -> dropped
+        {"symbol": "币安人生USDT", "quoteVolume": "90000000"},  # non-ascii -> dropped
+    ]
+    out = fetch_top_symbols(10, min_quote_volume=50_000_000.0, session=_Sess(payload))
     assert out == ["BTCUSDT", "ETHUSDT"]

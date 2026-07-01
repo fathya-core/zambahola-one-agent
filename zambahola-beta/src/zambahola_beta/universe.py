@@ -38,9 +38,21 @@ _STABLES = {
 
 
 def fetch_top_symbols(
-    n: int = 25, *, quote: str = "USDT", session: requests.Session | None = None
+    n: int = 25,
+    *,
+    quote: str = "USDT",
+    min_quote_volume: float = 50_000_000.0,
+    session: requests.Session | None = None,
 ) -> list[str]:
-    """Top `n` `quote` markets by 24h quote volume (excludes leveraged/stables)."""
+    """Top `n` `quote` markets by 24h quote volume (excludes leveraged/stables).
+
+    `min_quote_volume` is a hard LIQUIDITY FLOOR (24h quote volume in USDT): thin
+    small-caps below it are dropped entirely. This matters because on testnet fills
+    are frictionless, but in real trading a market order into a $2-10M/day coin
+    slips badly — so we only ever trade genuinely liquid markets where testnet
+    behaviour actually transfers to live. Symbols must also be pure-ASCII tickers
+    (real Binance uses Latin symbols; anything else is filtered defensively).
+    """
     sess = session or requests.Session()
     r = sess.get(TICKER_24H, timeout=20)
     r.raise_for_status()
@@ -48,13 +60,15 @@ def fetch_top_symbols(
     cand = []
     for t in rows:
         sym = t.get("symbol", "")
-        if not sym.endswith(quote):
+        if not sym.endswith(quote) or not sym.isascii():
             continue
         if sym in _STABLES or any(sym.endswith(s) for s in _EXCLUDE_SUFFIX):
             continue
         try:
             vol = float(t.get("quoteVolume", 0.0))
         except (TypeError, ValueError):
+            continue
+        if vol < min_quote_volume:
             continue
         cand.append((sym, vol))
     cand.sort(key=lambda x: x[1], reverse=True)

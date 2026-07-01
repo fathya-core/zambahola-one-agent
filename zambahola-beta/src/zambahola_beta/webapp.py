@@ -96,7 +96,7 @@ def _load_auto(state: AppState) -> None:
 
 
 _PERSIST_FIELDS = (
-    "mode", "interval", "max_total", "universe_size", "top_n", "max_order_usd", "max_total_usd",
+    "mode", "interval", "max_total", "universe_size", "min_quote_volume_usd", "top_n", "max_order_usd", "max_total_usd",
     "rebalance_band", "take_profit_pct", "take_profit_frac", "breaker_pct", "max_correlation",
     "stop_pct", "conviction_power", "vol_power", "cap_vol_ref", "target_vol", "profit_lock_arm", "profit_lock_giveback",
     "min_hold_hours", "hard_stop_pct",
@@ -384,6 +384,7 @@ class AppConfig:
     target_vol: float = 0.6
     max_total: float = 1.0  # gross exposure target (1.0 = full spot; >1 = leverage*)
     universe_size: int = 25  # how many top coins to scan
+    min_quote_volume_usd: float = 50_000_000.0  # LIQUIDITY FLOOR: skip thin coins (testnet-only edge)
     top_n: int = 3  # MAX strongest uptrends (auto-shrinks when quality gate filters weak picks)
     max_weight: float = 0.50  # concentration cap: no single coin above 50% of the book
     max_order_usd: float = 1000.0  # per-order slippage cap (high = don't throttle deployment)
@@ -513,7 +514,7 @@ def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str], dict]:
     """Market-wide scan -> (signal dict, scanned symbols by volume, frames)."""
     from .universe import fetch_frames, fetch_top_symbols, scan
 
-    symbols = fetch_top_symbols(cfg.universe_size)
+    symbols = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd)
     frames = fetch_frames(symbols, interval=cfg.interval, total=max(cfg.bars, 400))
     held = {s for s, p in load_ledger().positions.items() if p.qty > 1e-9}
     sc = scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total,
@@ -1003,7 +1004,7 @@ def do_flatten(cfg: AppConfig, state: AppState, *, full: bool = False, cap: int 
         if cfg.mode == "scan":
             try:
                 from .universe import fetch_top_symbols
-                universe = fetch_top_symbols(cfg.universe_size)
+                universe = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd)
             except Exception:  # noqa: BLE001
                 universe = None
         else:
@@ -1061,7 +1062,7 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
     if long_history:
         symbols, total, min_bars = LONG_UNIVERSE, 1600, 700
     else:
-        symbols, total, min_bars = fetch_top_symbols(cfg.universe_size), 500, 300
+        symbols, total, min_bars = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd), 500, 300
     frames = fetch_frames(symbols, interval=cfg.interval, total=total, min_bars=120)
     ppy = {"1d": 365, "12h": 730, "8h": 1095, "6h": 1460, "4h": 2190, "1h": 8760}.get(cfg.interval, 365)
     res = backtest_scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol,
