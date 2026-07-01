@@ -515,6 +515,27 @@ def _connect(live: bool) -> BinanceSpot | None:
     return client
 
 
+def _live_prices(symbols: list[str]) -> dict[str, float]:
+    """Current spot prices for display — signals run on CLOSED candles (no
+    look-ahead), but the price SHOWN to the user must be the live market, not the
+    last daily close (which can be ~24h stale for a coin that moved a lot). Uses
+    the public ticker with host failover; returns {} on failure (display falls
+    back to the candle close)."""
+    import requests as _rq
+
+    from .data import KLINE_HOSTS
+    for host in KLINE_HOSTS:
+        try:
+            r = _rq.get(f"{host}/api/v3/ticker/price", timeout=10)
+            r.raise_for_status()
+            want = set(symbols)
+            return {d["symbol"]: float(d["price"]) for d in r.json()
+                    if d["symbol"] in want}
+        except Exception:  # noqa: BLE001
+            continue
+    return {}
+
+
 def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str], dict]:
     """Market-wide scan -> (signal dict, scanned symbols by volume, frames)."""
     from .universe import fetch_frames, fetch_top_symbols, scan
@@ -531,15 +552,24 @@ def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str], dict]:
     first = next((s for s in symbols if s in frames), None)
     if first is not None:
         as_of = str(frames[first]["open_time"].iloc[-1])
+    # overlay live prices for DISPLAY only (keeps signal math on closed candles)
+    live = _live_prices([r["symbol"] for r in sc["ranked"]])
+    ranked = sc["ranked"][:12]
+    for r in ranked:
+        lp = live.get(r["symbol"])
+        if lp and lp > 0:
+            r["candle_close"] = r["price"]  # what the signal used
+            r["price"] = round(lp, 6)       # what the market shows now
     sig = {
         "as_of": as_of,
+        "price_live": bool(live),
         "mode": "scan",
         "scanned": sc["scanned"],
         "regime": sc.get("regime", 1.0),
         "targets": sc["targets"],
         "cash_weight": sc["cash_weight"],
-        "ranked": sc["ranked"][:12],
-        "reasons": {r["symbol"]: r for r in sc["ranked"][:8]},
+        "ranked": ranked,
+        "reasons": {r["symbol"]: r for r in ranked[:8]},
     }
     return sig, symbols, frames
 
