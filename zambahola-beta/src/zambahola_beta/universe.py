@@ -229,10 +229,15 @@ def scan(
     hold_buffer: int = 2,
     leader: str = "BTCUSDT",
     use_regime: bool = True,
+    exclude: set | None = None,
 ) -> dict:
     """Rank coins by a smart composite score, allocate to the strongest
     uptrends (vol-targeted, conviction-tilted), scaled by market regime, with a
-    trailing stop that refuses coins that have fallen hard from their highs."""
+    trailing stop that refuses coins that have fallen hard from their highs.
+
+    `exclude` drops symbols from PICK eligibility (e.g. coins under a re-entry
+    ban) so the book fills with the next-best available uptrend instead of leaving
+    that capital idle in cash — the ban is honoured without wasting the slot."""
     lead_close = None
     if leader in frames:
         lead_close = frames[leader]["close"].astype(float).reset_index(drop=True)
@@ -257,10 +262,11 @@ def scan(
     # mom30 > 0 also required: refuse a coin that's rolling over short-term even if
     # its medium trend is still up -> fewer marginal entries, auto-smaller book in
     # weak markets (we just hold more cash instead of forcing weak picks).
+    banned = set(exclude or [])
     eligible = [
         s for s in scored
         if s["consensus"] >= min_consensus and s["score"] > 0 and s["mom30"] > 0
-        and not s["stopped"] and s["vol"] >= min_vol
+        and not s["stopped"] and s["vol"] >= min_vol and s["symbol"] not in banned
     ]
     eligible.sort(key=lambda s: s["score"], reverse=True)
 

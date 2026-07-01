@@ -536,8 +536,12 @@ def _live_prices(symbols: list[str]) -> dict[str, float]:
     return {}
 
 
-def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str], dict]:
-    """Market-wide scan -> (signal dict, scanned symbols by volume, frames)."""
+def _scan_signal(cfg: AppConfig, *, exclude: set | None = None) -> tuple[dict, list[str], dict]:
+    """Market-wide scan -> (signal dict, scanned symbols by volume, frames).
+
+    `exclude` = symbols under an active re-entry ban; they're dropped from PICK
+    eligibility so the book fills with the next-best available uptrend instead of
+    parking that capital in cash because the top pick happens to be locked out."""
     from .universe import fetch_frames, fetch_top_symbols, scan
 
     symbols = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd,
@@ -547,7 +551,8 @@ def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str], dict]:
     sc = scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total,
               stop_pct=cfg.stop_pct, conviction_power=cfg.conviction_power,
               vol_power=cfg.vol_power, cap_vol_ref=cfg.cap_vol_ref,
-              max_correlation=cfg.max_correlation, max_weight=cfg.max_weight, held=held)
+              max_correlation=cfg.max_correlation, max_weight=cfg.max_weight, held=held,
+              exclude=exclude)
     as_of = ""
     first = next((s for s in symbols if s in frames), None)
     if first is not None:
@@ -601,7 +606,7 @@ def _port_tp_should_bank(cur: float | None, peak: float,
 
 def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -> None:
     if cfg.mode == "scan":
-        sig, symbols, frames = _scan_signal(cfg)
+        sig, symbols, frames = _scan_signal(cfg, exclude=set(_active_sell_bans(state)))
     else:
         symbols = list(cfg.assets)
         frames = fetch_many(symbols, interval=cfg.interval, total=max(cfg.bars, 400))
@@ -798,7 +803,7 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         return {"ok": False, "error": "no keys"}
 
     if cfg.mode == "scan":
-        sig, universe, _ = _scan_signal(cfg)
+        sig, universe, _ = _scan_signal(cfg, exclude=set(_active_sell_bans(state)))
     else:
         universe = list(cfg.assets)
         frames = fetch_many(universe, interval=cfg.interval, total=max(cfg.bars, 400))

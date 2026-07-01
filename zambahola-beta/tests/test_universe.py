@@ -50,6 +50,24 @@ def test_scan_picks_uptrends_and_ranks_smart():
     assert res["ranked"][-1]["action"] == "CASH"
 
 
+def test_scan_exclude_falls_through_to_next_best():
+    """A banned top pick must not just idle capital — the excluded coin drops out
+    of picks and the next-best uptrend gets funded instead."""
+    n = 260
+    frames = {
+        "TOPUSDT": _frame(np.linspace(100.0, 400.0, n)),   # strongest uptrend
+        "NEXTUSDT": _frame(np.linspace(100.0, 250.0, n)),  # solid uptrend
+    }
+    full = scan(frames, top_n=1, max_total=1.0, max_correlation=1.0, min_vol=0.0)
+    picked = next(iter(full["targets"]))            # whichever the scan ranks first
+    other = "NEXTUSDT" if picked == "TOPUSDT" else "TOPUSDT"
+    # ban the winning pick -> the slot should go to the other, not to cash
+    ex = scan(frames, top_n=1, max_total=1.0, max_correlation=1.0, min_vol=0.0,
+              exclude={picked})
+    assert picked not in ex["targets"]
+    assert other in ex["targets"]
+
+
 def test_vol_power_shifts_weight_away_from_hypervol_coin():
     """A higher vol_power should reduce the weight share of a very volatile coin
     relative to a calmer uptrend of similar trend strength."""
