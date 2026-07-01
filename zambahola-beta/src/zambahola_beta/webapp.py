@@ -384,7 +384,7 @@ class AppConfig:
     mode: str = "scan"  # scan = market-wide trend scanner (default), or ensemble
     target_vol: float = 0.6
     max_total: float = 1.0  # gross exposure target (1.0 = full spot; >1 = leverage*)
-    universe_size: int = 25  # how many top coins to scan
+    universe_size: int = 50  # how many top coins to scan (wide = catch uptrends beyond the mega-caps)
     min_quote_volume_usd: float = 50_000_000.0  # fixed LIQUIDITY FLOOR (used only when adaptive off)
     adaptive_liquidity: bool = True  # dynamic floor: top-N above the $5M dust guard, adapts to market
     top_n: int = 5  # MAX strongest uptrends (5 spreads risk + generalises better than 3 in walk-forward)
