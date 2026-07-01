@@ -848,6 +848,7 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         state.pnl_peak_usd = cur_usd
     now_ts = time.time()
     if (not breaker and now_ts >= state.port_tp_cooldown_until
+            and led.invested() > 0
             and _port_tp_should_bank(cur_usd, state.pnl_peak_usd,
                                      cfg.port_tp_arm_usd, cfg.port_tp_giveback)):
         banked = 0.0
@@ -1445,6 +1446,12 @@ def make_handler(cfg: AppConfig, state: AppState):
                 return self._send(200, self._state_dict())
             if self.path == "/api/ledger-reset":
                 reset_ledger()
+                # reset the PnL high-water too, else the ratchet compares a flat
+                # (cash) book against a stale peak and "banks profit" every cycle
+                with state.lock:
+                    state.pnl_peak_usd = 0.0
+                    state.port_tp_cooldown_until = 0.0
+                _save_auto(state)
                 state.log("تصفير سجل الصفقات والأرباح المحقّقة")
                 return self._send(200, self._state_dict())
             if self.path == "/api/flatten":
@@ -1492,9 +1499,12 @@ def _refresh_loop(cfg: AppConfig, state: AppState) -> None:
                          and time.time() >= state.port_tp_cooldown_until)
             prices = (state.account or {}).get("_prices") or {}
             if ready and prices:
-                cur = load_ledger().summary(prices).get("strategy_pnl")
-                if _port_tp_should_bank(cur, state.pnl_peak_usd,
-                                        cfg.port_tp_arm_usd, cfg.port_tp_giveback):
+                _led = load_ledger()
+                cur = _led.summary(prices).get("strategy_pnl")
+                # only react if we actually HOLD something to bank — otherwise a
+                # stale peak vs a flat (cash) book would log/execute every cycle.
+                if _led.invested() > 0 and _port_tp_should_bank(
+                        cur, state.pnl_peak_usd, cfg.port_tp_arm_usd, cfg.port_tp_giveback):
                     state.log("⚡ تراجع المحفظة عن القمّة — جني ربح فوري")
                     do_execute(cfg, state)
         except Exception:  # noqa: BLE001
