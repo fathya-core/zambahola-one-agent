@@ -102,6 +102,7 @@ _PERSIST_FIELDS = (
     "min_hold_hours", "hard_stop_pct",
     "port_tp_arm_usd", "port_tp_giveback", "port_tp_sell_frac", "port_tp_cooldown_h",
     "max_weight", "reentry_ban_hours", "stop_cooldown_hours", "participation_cap",
+    "adaptive_liquidity",
 )
 
 
@@ -384,7 +385,8 @@ class AppConfig:
     target_vol: float = 0.6
     max_total: float = 1.0  # gross exposure target (1.0 = full spot; >1 = leverage*)
     universe_size: int = 25  # how many top coins to scan
-    min_quote_volume_usd: float = 50_000_000.0  # LIQUIDITY FLOOR: skip thin coins (testnet-only edge)
+    min_quote_volume_usd: float = 50_000_000.0  # fixed LIQUIDITY FLOOR (used only when adaptive off)
+    adaptive_liquidity: bool = True  # dynamic floor: top-N above the $5M dust guard, adapts to market
     top_n: int = 5  # MAX strongest uptrends (5 spreads risk + generalises better than 3 in walk-forward)
     max_weight: float = 0.35  # concentration cap: no single coin above 35% of the book (lower = safer)
     max_order_usd: float = 1000.0  # per-order slippage cap (high = don't throttle deployment)
@@ -517,7 +519,8 @@ def _scan_signal(cfg: AppConfig) -> tuple[dict, list[str], dict]:
     """Market-wide scan -> (signal dict, scanned symbols by volume, frames)."""
     from .universe import fetch_frames, fetch_top_symbols, scan
 
-    symbols = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd)
+    symbols = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd,
+                                adaptive=cfg.adaptive_liquidity)
     frames = fetch_frames(symbols, interval=cfg.interval, total=max(cfg.bars, 400))
     held = {s for s, p in load_ledger().positions.items() if p.qty > 1e-9}
     sc = scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total,
@@ -1067,7 +1070,8 @@ def do_flatten(cfg: AppConfig, state: AppState, *, full: bool = False, cap: int 
         if cfg.mode == "scan":
             try:
                 from .universe import fetch_top_symbols
-                universe = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd)
+                universe = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd,
+                                             adaptive=cfg.adaptive_liquidity)
             except Exception:  # noqa: BLE001
                 universe = None
         else:
@@ -1089,7 +1093,7 @@ def do_flatten(cfg: AppConfig, state: AppState, *, full: bool = False, cap: int 
             continue
         if uni is not None and sym not in uni:
             continue
-        candidates.append((sym, usd, price))
+        candidates.append((sym, usd, price, qty))
         remaining += usd
     candidates.sort(key=lambda x: x[1], reverse=True)
     candidates = candidates[:cap]
@@ -1097,10 +1101,16 @@ def do_flatten(cfg: AppConfig, state: AppState, *, full: bool = False, cap: int 
     state.log(("♻️ بداية نظيفة: تصفية كل الأصول لـUSDT" if full else "🛑 طوارئ: تصفية المراكز لنقد")
               + f" ({len(candidates)} عملة)")
     placed = 0
-    for sym, usd, price in candidates:
-        amt = round(usd * SELL_MARGIN, 2)
+    for sym, usd, price, qty in candidates:
         try:
-            client.market_order(sym, "SELL", quote_qty=amt)
+            # full-qty exit (LOT_SIZE-floored) empties the wallet with no 8% dust;
+            # fall back to a quote-qty sell if the exact-qty route is rejected.
+            try:
+                client.market_sell_all(sym, qty)
+                amt = round(usd, 2)
+            except Exception:  # noqa: BLE001
+                amt = round(usd * SELL_MARGIN, 2)
+                client.market_order(sym, "SELL", quote_qty=amt)
             rec = led.record("SELL", sym, amt, price)
             append_trade({**rec, "mode": "live" if cfg.live else "testnet",
                           "why": "تصفية لبداية نظيفة" if full else "طوارئ: تصفية"})
@@ -1125,7 +1135,7 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
     if long_history:
         symbols, total, min_bars = LONG_UNIVERSE, 1600, 700
     else:
-        symbols, total, min_bars = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd), 500, 300
+        symbols, total, min_bars = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd, adaptive=cfg.adaptive_liquidity), 500, 300
     frames = fetch_frames(symbols, interval=cfg.interval, total=total, min_bars=120)
     ppy = {"1d": 365, "12h": 730, "8h": 1095, "6h": 1460, "4h": 2190, "1h": 8760}.get(cfg.interval, 365)
     # realistic frictions: 0.1% fee + ~0.1% slippage per side (testnet is frictionless,

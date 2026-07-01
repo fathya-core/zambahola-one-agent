@@ -249,3 +249,20 @@ def test_fetch_top_symbols_liquidity_floor_and_ascii():
     ]
     out = fetch_top_symbols(10, min_quote_volume=50_000_000.0, session=_Sess(payload))
     assert out == ["BTCUSDT", "ETHUSDT"]
+
+
+def test_adaptive_floor_uses_dust_guard_not_fixed_floor():
+    """Dynamic mode ignores the high fixed floor and keeps everything above the
+    $5M dust guard, so a quiet-market mid-cap ($8M) still makes the universe."""
+    payload = [
+        {"symbol": "BTCUSDT", "quoteVolume": "80000000"},   # big -> kept
+        {"symbol": "MIDUSDT", "quoteVolume": "8000000"},    # $8M: below fixed 50M, above dust
+        {"symbol": "DUSTUSDT", "quoteVolume": "2000000"},   # $2M: below dust guard -> dropped
+    ]
+    # fixed mode with a 50M floor would keep only BTC
+    fixed = fetch_top_symbols(10, min_quote_volume=50_000_000.0, session=_Sess(payload))
+    assert fixed == ["BTCUSDT"]
+    # adaptive mode keeps the $8M mid-cap too (dynamic floor = dust guard), drops $2M dust
+    adaptive = fetch_top_symbols(10, min_quote_volume=50_000_000.0, adaptive=True,
+                                 session=_Sess(payload))
+    assert adaptive == ["BTCUSDT", "MIDUSDT"]

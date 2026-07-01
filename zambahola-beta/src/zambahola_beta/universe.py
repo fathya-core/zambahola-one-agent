@@ -46,22 +46,37 @@ _STABLES = {
 }
 
 
+# absolute dust guard: never trade a coin below this 24h quote volume regardless of
+# market conditions — real-world slippage on a market order into a sub-$5M/day coin
+# is unacceptable, so this is the hard live-safety floor beneath the dynamic one.
+DUST_FLOOR_USD = 5_000_000.0
+
+
 def fetch_top_symbols(
     n: int = 25,
     *,
     quote: str = "USDT",
     min_quote_volume: float = 50_000_000.0,
+    adaptive: bool = False,
     session: requests.Session | None = None,
 ) -> list[str]:
     """Top `n` `quote` markets by 24h quote volume (excludes leveraged/stables).
 
-    `min_quote_volume` is a hard LIQUIDITY FLOOR (24h quote volume in USDT): thin
-    small-caps below it are dropped entirely. This matters because on testnet fills
-    are frictionless, but in real trading a market order into a $2-10M/day coin
-    slips badly — so we only ever trade genuinely liquid markets where testnet
-    behaviour actually transfers to live. Symbols must also be pure-ASCII tickers
-    (real Binance uses Latin symbols; anything else is filtered defensively).
+    Two liquidity modes:
+
+    - Fixed (`adaptive=False`): drop everything below `min_quote_volume`. Safe but
+      in a quiet market this can starve the universe to a handful of coins.
+    - Dynamic (`adaptive=True`): keep everything above the hard DUST_FLOOR_USD guard
+      and take the top `n` by volume. The *effective* floor then floats with the
+      market — high when volume is plentiful, lower (but never below the dust guard)
+      when the whole market is quiet — so the agent always has a workable universe
+      of the most-liquid coins AVAILABLE, while order-sizing (participation cap)
+      separately protects each fill against slippage on the thinner names.
+
+    Symbols must be pure-ASCII tickers (real Binance uses Latin symbols; anything
+    else is filtered defensively). The 24h volume map is cached in _LAST_VOLUMES.
     """
+    floor = DUST_FLOOR_USD if adaptive else min_quote_volume
     sess = session or requests.Session()
     r = sess.get(TICKER_24H, timeout=20)
     r.raise_for_status()
@@ -77,7 +92,7 @@ def fetch_top_symbols(
             vol = float(t.get("quoteVolume", 0.0))
         except (TypeError, ValueError):
             continue
-        if vol < min_quote_volume:
+        if vol < floor:
             continue
         cand.append((sym, vol))
     cand.sort(key=lambda x: x[1], reverse=True)
