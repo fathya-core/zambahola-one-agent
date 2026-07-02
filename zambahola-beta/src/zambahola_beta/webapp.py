@@ -384,9 +384,10 @@ function render(s){
      `<div style="margin-top:5px;height:6px;background:#1b2740;border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${clr}"></div></div>`+
      `<div style="margin-top:3px" class="k">${rd.closed}/${rd.min_trades||50} صفقة نحو حكم موثوق — تلقائي بالكامل</div>`;}
   else if(el){el.textContent='جاهزية الواقع: تُحسب تلقائياً بعد أول صفقة مغلقة';}}
- {const bm=s.benchmark;if(bm&&bm.ok){const ab=bm.alpha_vs_btc_pct;const clr=ab!=null?(ab>=0?'var(--up)':'var(--down)'):'var(--mut)';
-   $("benchstat").innerHTML=`<b style="color:${clr}">مقابل السوق (محلي)</b> · استراتيجية ${bm.strategy_return_pct}% · BTC ${bm.btc_hodl_pct??'—'}% · EW ${bm.equal_weight_pct??'—'}% · α=${ab??'—'}%`;
-  }else if($("benchstat")){$("benchstat").textContent='مقابل السوق: يُحدَّث تلقائياً مع منحنى المحفظة';}
+ {const bm=s.benchmark;const be=$("benchstat");if(bm&&bm.ok){const ab=bm.alpha_vs_btc_pct;const clr=ab!=null?(ab>=0?'var(--up)':'var(--down)'):'var(--mut)';
+   const bh=(bm.btc_hodl_pct!=null?bm.btc_hodl_pct:'—');const ew=(bm.equal_weight_pct!=null?bm.equal_weight_pct:'—');const av=(ab!=null?ab:'—');
+   if(be)be.innerHTML=`<b style="color:${clr}">مقابل السوق (محلي)</b> · استراتيجية ${bm.strategy_return_pct}% · BTC ${bh}% · EW ${ew}% · α=${av}%`;
+ }else if(be){be.textContent='مقابل السوق: يُحدَّث تلقائياً مع منحنى المحفظة';}}
  const tr=s.trades||[];
  if(tr.length){let h='<table><tr><th>الوقت</th><th>النوع</th><th>العملة</th><th>$</th><th>ربح</th><th>السبب</th></tr>';
   tr.slice().reverse().forEach(t=>{const sell=t.side==='SELL';const rp=t.realized||0;h+=`<tr><td>${(t.t||'').slice(5,16)}</td><td>${sell?'بيع':'شراء'}</td><td><b>${t.symbol}</b></td><td>${t.usd}</td><td style="color:${rp>0?'var(--up)':(rp<0?'var(--down)':'var(--mut)')}">${rp?((rp>0?'+':'')+'$'+rp):'—'}</td><td class="k">${t.why||''}</td></tr>`;});
