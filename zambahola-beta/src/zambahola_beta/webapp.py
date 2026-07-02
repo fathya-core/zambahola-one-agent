@@ -32,11 +32,48 @@ from .executor import (
     safety_gate,
 )
 from .ledger import append_trade, load_ledger, load_trades, reset_ledger, save_ledger
+from .perf import readiness as _readiness_of
 from .strategy import compare_portfolios, current_allocation
 
 
 def _perf_path() -> Path:
     return Path(os.environ.get("ZAMBAHOLA_DATA_DIR", "data")) / "equity_history.json"
+
+
+def _data_dir() -> Path:
+    return Path(os.environ.get("ZAMBAHOLA_DATA_DIR", "data"))
+
+
+_LAST_READY: dict[str, int] = {"closed": -1}
+
+
+def compute_readiness() -> dict:
+    """Directional-readiness snapshot from the live ledger (no side effects)."""
+    try:
+        return _readiness_of(_data_dir() / "trades.jsonl")
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def refresh_readiness(state: "AppState") -> dict:
+    """Compute readiness, persist READINESS.json, and log ONE line whenever a new
+    trade closes (so the phone/dashboard always shows an up-to-date GO/NO-GO)."""
+    r = compute_readiness()
+    if not r:
+        return r
+    try:
+        p = _data_dir() / "READINESS.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(r, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+    if r.get("closed", 0) != _LAST_READY.get("closed"):
+        _LAST_READY["closed"] = r.get("closed", 0)
+        pf = "∞" if r.get("profit_factor") is None else f"{r['profit_factor']:.2f}"
+        icon = "✅" if r.get("ready") else "⏳"
+        tail = "GO" if r.get("ready") else f"يلزم {r.get('need_more', 0)} صفقة"
+        state.log(f"{icon} جاهزية: {r['closed']} صفقة · إصابة {r['hit_rate']:.0f}% · PF {pf} · {tail}")
+    return r
 
 
 def _load_equity_history() -> list:
@@ -249,6 +286,7 @@ small{color:var(--mut)}
  <div style="min-width:150px"><div class="k">محقّق: <span id="realized">—</span> · مفتوح: <span id="unreal">—</span></div>
   <div class="k">مستثمَر: $<span id="invested">0</span> · مغلقة: <span id="closed">0</span> (ربح <span id="wins">0</span>/خسارة <span id="losses">0</span>)</div></div>
 </div>
+<div id="readystat" class="k" style="margin-top:8px;padding:7px 10px;border-radius:8px;background:#0d1526"></div>
 <div id="tradetbl" class="sub" style="margin-top:8px"></div></div>
 
 <div class="card"><div class="flex"><b>🧪 باك-تست الاستراتيجية الفعلية (مسح + Regime + وقف خسارة)</b>
@@ -322,6 +360,14 @@ function render(s){
  $("invested").textContent=lg.invested!=null?lg.invested:0;
  $("winrate").textContent=lg.win_rate!=null?lg.win_rate+'%':'—';
  $("closed").textContent=lg.trades_closed||0;$("wins").textContent=lg.wins||0;$("losses").textContent=lg.losses||0;
+ {const rd=s.readiness;const el=$("readystat");if(rd&&rd.closed!=null){const pf=rd.profit_factor==null?'∞':rd.profit_factor.toFixed(2);
+   const go=rd.ready;const clr=go?'var(--up)':(rd.verdict==='NO-GO: perf'?'var(--down)':'#f5a623');
+   const badge=go?'✅ جاهز (GO)':(rd.need_more>0?('⏳ يلزم '+rd.need_more+' صفقة'):'🔴 الأداء دون العتبة');
+   const pct=Math.min(100,Math.round(rd.closed/(rd.min_trades||50)*100));
+   el.innerHTML=`<b style="color:${clr}">جاهزية الواقع: ${badge}</b> · إصابة ${rd.hit_rate}% (هدف ${rd.gate_hit}%) · PF ${pf}`+
+     `<div style="margin-top:5px;height:6px;background:#1b2740;border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${clr}"></div></div>`+
+     `<div style="margin-top:3px" class="k">${rd.closed}/${rd.min_trades||50} صفقة نحو حكم موثوق — تلقائي بالكامل</div>`;}
+  else if(el){el.textContent='جاهزية الواقع: تُحسب تلقائياً بعد أول صفقة مغلقة';}}
  const tr=s.trades||[];
  if(tr.length){let h='<table><tr><th>الوقت</th><th>النوع</th><th>العملة</th><th>$</th><th>ربح</th><th>السبب</th></tr>';
   tr.slice().reverse().forEach(t=>{const sell=t.side==='SELL';const rp=t.realized||0;h+=`<tr><td>${(t.t||'').slice(5,16)}</td><td>${sell?'بيع':'شراء'}</td><td><b>${t.symbol}</b></td><td>${t.usd}</td><td style="color:${rp>0?'var(--up)':(rp<0?'var(--down)':'var(--mut)')}">${rp?((rp>0?'+':'')+'$'+rp):'—'}</td><td class="k">${t.why||''}</td></tr>`;});
@@ -1321,6 +1367,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                 d["ledger"]["pnl_basis"] = "budget"
                 d["ledger"]["budget_usd"] = cfg.max_total_usd
             d["trades"] = load_trades(30)
+            d["readiness"] = compute_readiness()
             return d
 
         def _read_json(self) -> dict:
@@ -1404,6 +1451,8 @@ def make_handler(cfg: AppConfig, state: AppState):
         def do_GET(self):
             if self.path == "/" or self.path.startswith("/index"):
                 return self._send(200, DASHBOARD_HTML.encode(), "text/html; charset=utf-8")
+            if self.path == "/api/readiness":
+                return self._send(200, compute_readiness())
             if self.path == "/api/state":
                 return self._send(200, self._state_dict())
             return self._send(404, {"error": "not found"})
@@ -1500,6 +1549,7 @@ def _refresh_loop(cfg: AppConfig, state: AppState) -> None:
         time.sleep(300)
         try:
             do_check(cfg, state)
+            refresh_readiness(state)  # keep READINESS.json + GO/NO-GO fresh, hands-off
             with state.lock:
                 ready = (state.auto_enabled and state.auto_execute and not state.halted
                          and time.time() >= state.port_tp_cooldown_until)
