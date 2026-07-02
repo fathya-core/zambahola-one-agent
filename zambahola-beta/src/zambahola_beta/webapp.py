@@ -46,12 +46,13 @@ def _data_dir() -> Path:
     return Path(os.environ.get("ZAMBAHOLA_DATA_DIR", "data"))
 
 
-# Progressive trailing-stop tiers (peak_gain_threshold, trail_pct). As a winner's
-# peak profit grows, the allowed give-back tightens so a +50% runner locks near
-# the high instead of round-tripping the full base 35%. Small/young winners keep
-# the wide base trail (survive noise). Inspired by opencrypto's progressive SL.
+# Progressive trailing-stop tiers (peak_gain_threshold, trail_pct). Inspired by
+# opencrypto, but a multi-year A/B (_trailsweep) showed tightening HURTS this
+# strategy badly: it cuts winners early (avg winner +80% -> +44%) and doubles
+# trade count into whipsaw, dropping mean compounded return from +25% to +6%.
+# So progressive_trail defaults OFF; these tiers exist only for experimentation.
 _TRAIL_TIERS = (
-    (0.60, 0.10),  # up >=60% from cost at peak -> lock within 10% of the high
+    (0.60, 0.10),
     (0.40, 0.13),
     (0.25, 0.18),
     (0.15, 0.25),
@@ -461,8 +462,8 @@ class AppConfig:
     take_profit_frac: float = 0.3  # how much of the position to trim (opportunistic)
     breaker_pct: float = 18.0  # halt + go cash if equity falls this % from peak
     max_correlation: float = 0.85  # diversification: skip picks too correlated
-    stop_pct: float = 0.35  # base trailing stop from PEAK (wide until a winner is in real profit)
-    progressive_trail: bool = True  # tighten the trailing stop as peak gain grows (lock big winners)
+    stop_pct: float = 0.35  # trailing stop from PEAK — wide "let winners run" (backtested best)
+    progressive_trail: bool = False  # OFF: A/B showed tightening cuts winners early (+25% -> +6% comp). Kept for experiments only.
     hard_stop_pct: float = 0.15  # hard stop from COST: cut a loser this far underwater
     conviction_power: float = 1.5  # concentrate weight toward the strongest trends
     vol_power: float = 2.0  # >1 penalises hyper-volatile coins harder (anti-concentration)
