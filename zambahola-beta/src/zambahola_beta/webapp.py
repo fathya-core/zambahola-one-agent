@@ -406,8 +406,8 @@ class AppConfig:
     profit_lock_giveback: float = 0.07  # FLOOR give-back; actual is vol-adaptive (7%-18%)
     min_hold_hours: float = 24.0  # anti-churn: hold a new position at least this long (rotation only)
     # portfolio take-profit ratchet: bank winners when the WHOLE book rolls over from its peak
-    port_tp_arm_usd: float = 150.0  # only active once strategy PnL peaked >= this many $
-    port_tp_giveback: float = 0.15  # bank when PnL gives back this FRACTION of the peak gain
+    port_tp_arm_usd: float = 2500.0  # only active once strategy PnL peaked >= this many $ (~5% of capital; hair-trigger banking kills winners early)
+    port_tp_giveback: float = 0.3  # bank when PnL gives back this FRACTION of the peak gain (let winners breathe)
     port_tp_sell_frac: float = 0.5  # how much of each winner to bank (lock to cash)
     port_tp_cooldown_h: float = 8.0  # after banking, park profit in cash (no new buys) this long
     reentry_ban_hours: float = 48.0  # after forced exit, block re-buy this long (anti-churn)
@@ -852,10 +852,11 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     if cur_usd is not None and cur_usd > state.pnl_peak_usd:
         state.pnl_peak_usd = cur_usd
     now_ts = time.time()
+    port_tp_arm = max(cfg.port_tp_arm_usd, 0.05 * cfg.max_total_usd)  # never arm below 5% of capital
     if (not breaker and now_ts >= state.port_tp_cooldown_until
             and led.invested() > 0
             and _port_tp_should_bank(cur_usd, state.pnl_peak_usd,
-                                     cfg.port_tp_arm_usd, cfg.port_tp_giveback)):
+                                     port_tp_arm, cfg.port_tp_giveback)):
         banked = 0.0
         banked_syms: set[str] = set()
         for s, p in list(led.positions.items()):
@@ -1509,7 +1510,9 @@ def _refresh_loop(cfg: AppConfig, state: AppState) -> None:
                 # only react if we actually HOLD something to bank — otherwise a
                 # stale peak vs a flat (cash) book would log/execute every cycle.
                 if _led.invested() > 0 and _port_tp_should_bank(
-                        cur, state.pnl_peak_usd, cfg.port_tp_arm_usd, cfg.port_tp_giveback):
+                        cur, state.pnl_peak_usd,
+                        max(cfg.port_tp_arm_usd, 0.05 * cfg.max_total_usd),
+                        cfg.port_tp_giveback):
                     state.log("⚡ تراجع المحفظة عن القمّة — جني ربح فوري")
                     do_execute(cfg, state)
         except Exception:  # noqa: BLE001
