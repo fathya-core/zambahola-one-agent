@@ -46,6 +46,18 @@ def _data_dir() -> Path:
     return Path(os.environ.get("ZAMBAHOLA_DATA_DIR", "data"))
 
 
+# Progressive trailing-stop tiers (peak_gain_threshold, trail_pct). As a winner's
+# peak profit grows, the allowed give-back tightens so a +50% runner locks near
+# the high instead of round-tripping the full base 35%. Small/young winners keep
+# the wide base trail (survive noise). Inspired by opencrypto's progressive SL.
+_TRAIL_TIERS = (
+    (0.60, 0.10),  # up >=60% from cost at peak -> lock within 10% of the high
+    (0.40, 0.13),
+    (0.25, 0.18),
+    (0.15, 0.25),
+)
+
+
 _LAST_READY: dict[str, int] = {"closed": -1}
 
 
@@ -141,7 +153,7 @@ _PERSIST_FIELDS = (
     "min_hold_hours", "hard_stop_pct",
     "port_tp_arm_usd", "port_tp_giveback", "port_tp_sell_frac", "port_tp_cooldown_h",
     "max_weight", "reentry_ban_hours", "stop_cooldown_hours", "participation_cap",
-    "adaptive_liquidity",
+    "adaptive_liquidity", "progressive_trail",
 )
 
 
@@ -449,7 +461,8 @@ class AppConfig:
     take_profit_frac: float = 0.3  # how much of the position to trim (opportunistic)
     breaker_pct: float = 18.0  # halt + go cash if equity falls this % from peak
     max_correlation: float = 0.85  # diversification: skip picks too correlated
-    stop_pct: float = 0.35  # trailing stop from PEAK (let winners run; full-cycle validated)
+    stop_pct: float = 0.35  # base trailing stop from PEAK (wide until a winner is in real profit)
+    progressive_trail: bool = True  # tighten the trailing stop as peak gain grows (lock big winners)
     hard_stop_pct: float = 0.15  # hard stop from COST: cut a loser this far underwater
     conviction_power: float = 1.5  # concentrate weight toward the strongest trends
     vol_power: float = 2.0  # >1 penalises hyper-volatile coins harder (anti-concentration)
@@ -979,7 +992,9 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     risk_exit_syms: set[str] = set()
     if not breaker:
         from .universe import _STABLES
-        exits = led.risk_exits(allp, cfg.hard_stop_pct, cfg.stop_pct, stables=_STABLES)
+        tiers = _TRAIL_TIERS if cfg.progressive_trail else None
+        exits = led.risk_exits(allp, cfg.hard_stop_pct, cfg.stop_pct, stables=_STABLES,
+                               trail_tiers=tiers)
         for s, (code, val) in exits.items():
             if code == "stable":
                 reason = "عملة مستقرة (وزن ميّت)"

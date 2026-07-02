@@ -122,3 +122,30 @@ def test_risk_exits_dumps_stablecoin():
     exits = led.risk_exits({"RLUSDUSDT": 1.0015}, hard_stop_pct=0.15, trail_stop_pct=0.35,
                            stables={"RLUSDUSDT"})
     assert exits["RLUSDUSDT"][0] == "stable"
+
+
+_TIERS = ((0.60, 0.10), (0.40, 0.13), (0.25, 0.18), (0.15, 0.25))
+
+
+def test_progressive_trail_locks_big_winner_earlier():
+    """A +100% peak winner should stop out on a shallow give-back that the fixed
+    35% trail would ignore — locking the gain instead of round-tripping it."""
+    led = Ledger()
+    led.record("BUY", "SYNUSDT", usd=1000.0, price=0.10)
+    led.update_peaks({"SYNUSDT": 0.20})  # peak +100% from cost
+    px = 0.176  # -12% off peak, still +76% vs cost
+    # fixed trail: -12% > -35% -> NO exit
+    assert led.risk_exits({"SYNUSDT": px}, 0.15, 0.35) == {}
+    # progressive: peak_gain>=0.60 -> 10% trail -> -12% <= -10% -> EXIT
+    prog = led.risk_exits({"SYNUSDT": px}, 0.15, 0.35, trail_tiers=_TIERS)
+    assert prog["SYNUSDT"][0] == "trail_stop"
+
+
+def test_progressive_trail_gives_young_winner_room():
+    """A small +10% peak position keeps the wide base trail (survive noise)."""
+    led = Ledger()
+    led.record("BUY", "JTOUSDT", usd=1000.0, price=1.00)
+    led.update_peaks({"JTOUSDT": 1.10})  # peak only +10% from cost (below first tier)
+    px = 0.90  # -18% off peak
+    # no tier applies (peak_gain 0.10 < 0.15) -> base 35% trail -> -18% > -35% -> hold
+    assert led.risk_exits({"JTOUSDT": px}, 0.15, 0.35, trail_tiers=_TIERS) == {}

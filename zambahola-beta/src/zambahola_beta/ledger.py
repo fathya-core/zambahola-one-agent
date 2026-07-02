@@ -131,10 +131,17 @@ class Ledger:
         return out
 
     def risk_exits(self, prices: dict, hard_stop_pct: float, trail_stop_pct: float,
-                   stables: set | tuple = ()) -> dict:
+                   stables: set | tuple = (),
+                   trail_tiers: list | tuple | None = None) -> dict:
         """Positions to force-sell for RISK reasons — independent of the scan
         universe, so a crashed buy that left the top-N still gets stopped out.
-        Returns {symbol: (code, value)} where code in {stable, hard_stop, trail_stop}."""
+        Returns {symbol: (code, value)} where code in {stable, hard_stop, trail_stop}.
+
+        `trail_tiers` enables a PROGRESSIVE trailing stop: as a position's peak
+        gain grows, the allowed give-back tightens so big winners lock in more
+        profit instead of round-tripping the whole 35%. Each tier is
+        (min_peak_gain, trail_pct), and the tightest matching tier wins. When
+        None, the fixed `trail_stop_pct` is used (backward-compatible)."""
         stset = set(stables)
         out: dict[str, tuple[str, float]] = {}
         for s, p in self.positions.items():
@@ -145,11 +152,17 @@ class Ledger:
                 continue
             gain = px / p.avg - 1.0
             frompk = (px / p.peak - 1.0) if p.peak > 0 else 0.0
+            eff_trail = abs(trail_stop_pct)
+            if trail_tiers and p.peak > 0:
+                peak_gain = p.peak / p.avg - 1.0
+                for min_gain, tr in trail_tiers:  # tightest matching tier wins
+                    if peak_gain >= min_gain:
+                        eff_trail = min(eff_trail, abs(tr))
             if s in stset:
                 out[s] = ("stable", 0.0)
             elif gain <= -abs(hard_stop_pct):
                 out[s] = ("hard_stop", gain)
-            elif p.peak > 0 and frompk <= -abs(trail_stop_pct):
+            elif p.peak > 0 and frompk <= -eff_trail:
                 out[s] = ("trail_stop", frompk)
         return out
 
