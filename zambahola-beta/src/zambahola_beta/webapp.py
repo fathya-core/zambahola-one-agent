@@ -33,6 +33,8 @@ from .executor import (
 )
 from .ledger import append_trade, load_ledger, load_trades, reset_ledger, save_ledger
 from .perf import readiness as _readiness_of
+from .benchmark import refresh_benchmark, compute_benchmark
+from .research import research_digest
 from .strategy import compare_portfolios, current_allocation
 
 
@@ -287,6 +289,7 @@ small{color:var(--mut)}
   <div class="k">مستثمَر: $<span id="invested">0</span> · مغلقة: <span id="closed">0</span> (ربح <span id="wins">0</span>/خسارة <span id="losses">0</span>)</div></div>
 </div>
 <div id="readystat" class="k" style="margin-top:8px;padding:7px 10px;border-radius:8px;background:#0d1526"></div>
+<div id="benchstat" class="k" style="margin-top:8px;padding:7px 10px;border-radius:8px;background:#0d1526"></div>
 <div id="tradetbl" class="sub" style="margin-top:8px"></div></div>
 
 <div class="card"><div class="flex"><b>🧪 باك-تست الاستراتيجية الفعلية (مسح + Regime + وقف خسارة)</b>
@@ -368,6 +371,9 @@ function render(s){
      `<div style="margin-top:5px;height:6px;background:#1b2740;border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${clr}"></div></div>`+
      `<div style="margin-top:3px" class="k">${rd.closed}/${rd.min_trades||50} صفقة نحو حكم موثوق — تلقائي بالكامل</div>`;}
   else if(el){el.textContent='جاهزية الواقع: تُحسب تلقائياً بعد أول صفقة مغلقة';}}
+ {const bm=s.benchmark;if(bm&&bm.ok){const ab=bm.alpha_vs_btc_pct;const clr=ab!=null?(ab>=0?'var(--up)':'var(--down)'):'var(--mut)';
+   $("benchstat").innerHTML=`<b style="color:${clr}">مقابل السوق (محلي)</b> · استراتيجية ${bm.strategy_return_pct}% · BTC ${bm.btc_hodl_pct??'—'}% · EW ${bm.equal_weight_pct??'—'}% · α=${ab??'—'}%`;
+  }else if($("benchstat")){$("benchstat").textContent='مقابل السوق: يُحدَّث تلقائياً مع منحنى المحفظة';}
  const tr=s.trades||[];
  if(tr.length){let h='<table><tr><th>الوقت</th><th>النوع</th><th>العملة</th><th>$</th><th>ربح</th><th>السبب</th></tr>';
   tr.slice().reverse().forEach(t=>{const sell=t.side==='SELL';const rp=t.realized||0;h+=`<tr><td>${(t.t||'').slice(5,16)}</td><td>${sell?'بيع':'شراء'}</td><td><b>${t.symbol}</b></td><td>${t.usd}</td><td style="color:${rp>0?'var(--up)':(rp<0?'var(--down)':'var(--mut)')}">${rp?((rp>0?'+':'')+'$'+rp):'—'}</td><td class="k">${t.why||''}</td></tr>`;});
@@ -1368,6 +1374,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                 d["ledger"]["budget_usd"] = cfg.max_total_usd
             d["trades"] = load_trades(30)
             d["readiness"] = compute_readiness()
+            d["benchmark"] = compute_benchmark()
+            d["research"] = research_digest()
             return d
 
         def _read_json(self) -> dict:
@@ -1453,6 +1461,10 @@ def make_handler(cfg: AppConfig, state: AppState):
                 return self._send(200, DASHBOARD_HTML.encode(), "text/html; charset=utf-8")
             if self.path == "/api/readiness":
                 return self._send(200, compute_readiness())
+            if self.path == "/api/benchmark":
+                return self._send(200, compute_benchmark())
+            if self.path == "/api/research":
+                return self._send(200, research_digest())
             if self.path == "/api/state":
                 return self._send(200, self._state_dict())
             return self._send(404, {"error": "not found"})
@@ -1550,6 +1562,7 @@ def _refresh_loop(cfg: AppConfig, state: AppState) -> None:
         try:
             do_check(cfg, state)
             refresh_readiness(state)  # keep READINESS.json + GO/NO-GO fresh, hands-off
+            refresh_benchmark()  # local vs BTC/EW — no third-party platform needed
             with state.lock:
                 ready = (state.auto_enabled and state.auto_execute and not state.halted
                          and time.time() >= state.port_tp_cooldown_until)
