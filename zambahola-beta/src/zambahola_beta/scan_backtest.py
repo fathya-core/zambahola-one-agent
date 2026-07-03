@@ -46,6 +46,7 @@ def backtest_scan(
     starter_frac: float = 0.0,
     starter_max_vol: float = 1.5,
     starter_min_mom30: float = -0.10,
+    starter_regime_min: float = 0.0,
 ) -> dict:
     frames = {s: df for s, df in frames.items() if len(df) >= min_bars}
     if len(frames) < 2:
@@ -117,7 +118,7 @@ def backtest_scan(
                 # softened (not collapsed) may enter at a reduced "starter" weight so
                 # idle cash is deployed into a confirmed uptrend instead of sitting out.
                 if (starter_frac > 0 and m3 > starter_min_mom30
-                        and v <= starter_max_vol):
+                        and v <= starter_max_vol and regime >= starter_regime_min):
                     is_starter = True
                 else:
                     continue

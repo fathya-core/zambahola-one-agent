@@ -233,6 +233,7 @@ def scan(
     starter_frac: float = 0.0,
     starter_max_vol: float = 1.5,
     starter_min_mom30: float = -0.10,
+    starter_regime_min: float = 0.0,
 ) -> dict:
     """Rank coins by a smart composite score, allocate to the strongest
     uptrends (vol-targeted, conviction-tilted), scaled by market regime, with a
@@ -280,10 +281,12 @@ def scan(
     # STARTER picks (optional): CALM, trend-confirmed coins whose short momentum only
     # softened (mom30 in (starter_min_mom30, 0]) enter at a reduced weight so idle cash
     # is deployed into confirmed uptrends instead of sitting out. Backtest (starter A/B):
-    # in trending markets this lifted return +75%->+96% and CUT drawdown -35%->-27%; in a
-    # choppy year it costs ~2pp. Net-positive at a moderate frac -> default on.
+    # in trending markets this lifted return +94%->+116% and CUT drawdown -33%->-27%.
+    # A walk-forward split showed the edge is REGIME-DEPENDENT (big in trends, a small
+    # drag in chop), so starters are gated to risk-on markets (regime >= starter_regime_min):
+    # that keeps ~96% of the trend upside while removing the choppy-market drag entirely.
     starters: list[dict] = []
-    if starter_frac > 0:
+    if starter_frac > 0 and regime >= starter_regime_min:
         starters = [
             s for s in scored
             if _core_ok(s) and s["mom30"] <= 0 and s["mom30"] > starter_min_mom30

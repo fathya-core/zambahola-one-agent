@@ -176,6 +176,28 @@ def test_starter_deploys_idle_cash_when_full_picks_are_capped():
     assert "CALMUSDT" in on["targets"]
 
 
+def test_starter_regime_gate_suppresses_in_weak_market():
+    # the regime gate must switch starters OFF when the market is not risk-on enough,
+    # even though the coin would otherwise qualify (this removes the choppy-market drag).
+    # A downtrending leader (BTC) drags the regime below the gate.
+    n = 260
+    base = np.linspace(100.0, 300.0, n - 20)
+    dip = np.linspace(300.0, 285.0, 20)
+    frames = {
+        "BTCUSDT": _frame(np.linspace(400.0, 120.0, n)),   # leader DOWN -> weak regime
+        "UPUSDT_X": _frame(np.linspace(100.0, 320.0, n)),  # a real uptrend to anchor
+        "ROLLUSDT": _frame(np.concatenate([base, dip])),   # calm rollover -> starter cand.
+    }
+    weak = scan(frames, top_n=5, max_correlation=1.0, min_vol=0.0, starter_frac=0.5)
+    assert weak["regime"] < 0.65  # market is not risk-on
+    ungated = scan(frames, top_n=5, max_correlation=1.0, min_vol=0.0,
+                   starter_frac=0.5, starter_regime_min=0.0)
+    gated = scan(frames, top_n=5, max_correlation=1.0, min_vol=0.0,
+                 starter_frac=0.5, starter_regime_min=0.65)
+    assert "ROLLUSDT" in ungated["targets"]      # no gate -> starter fires
+    assert "ROLLUSDT" not in gated["targets"]    # gate -> suppressed in the weak market
+
+
 def test_starter_refuses_collapsing_coin():
     # a coin that fell hard (>10% in 30d) must NOT be started even with starter on
     n = 260
