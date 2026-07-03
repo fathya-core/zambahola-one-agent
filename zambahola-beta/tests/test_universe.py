@@ -127,6 +127,68 @@ def test_scan_skips_coin_rolling_over_short_term():
     assert "ROLLUSDT" not in res["targets"]
 
 
+def _rollover_frames():
+    """A calm, trend-confirmed coin whose last ~30 bars softened (mom30<=0) but did
+    NOT collapse, plus a strong clean uptrend to anchor the book."""
+    n = 260
+    base = np.linspace(100.0, 300.0, n - 20)
+    dip = np.linspace(300.0, 285.0, 20)  # gentle 5% pullback -> soft-negative mom30
+    rollover = np.concatenate([base, dip])
+    up = np.linspace(100.0, 320.0, n)
+    return {"ROLLUSDT": _frame(rollover), "UPUSDT_X": _frame(up)}
+
+
+def test_starter_off_keeps_rollover_coin_in_cash():
+    # default behaviour: a coin rolling over short-term is refused entirely
+    res = scan(_rollover_frames(), top_n=5, max_correlation=1.0, min_vol=0.0,
+               starter_frac=0.0)
+    assert "ROLLUSDT" not in res["targets"]
+
+
+def test_starter_on_funds_calm_rollover_coin():
+    # with a starter fraction, the calm confirmed uptrend gets an allocation instead
+    # of sitting in cash
+    st = scan(_rollover_frames(), top_n=5, max_correlation=1.0, min_vol=0.0,
+              starter_frac=0.5)
+    assert "ROLLUSDT" in st["targets"]
+    assert st["targets"]["ROLLUSDT"] > 0.0
+
+
+def test_starter_deploys_idle_cash_when_full_picks_are_capped():
+    """The real value: when the only full pick is hyper-volatile it gets cap-trimmed
+    (vol-aware cap) and leaves idle cash. A CALM starter has a loose cap, so it soaks
+    up that trimmed budget -> more of the book is deployed instead of sitting out."""
+    n = 260
+    rng = np.random.default_rng(7)
+    # hyper-volatile clean uptrend -> passes mom30 gate but gets cap-trimmed hard
+    wild = np.linspace(100.0, 400.0, n) * (1 + rng.normal(0, 0.09, n)).cumprod()
+    # calm confirmed uptrend that softened short-term -> a starter candidate
+    base = np.linspace(100.0, 300.0, n - 20)
+    dip = np.linspace(300.0, 288.0, 20)
+    calm_roll = np.concatenate([base, dip]) * (1 + rng.normal(0, 0.003, n)).cumprod()
+    frames = {"WILDUSDT": _frame(wild), "CALMUSDT": _frame(calm_roll)}
+    common = dict(top_n=5, max_correlation=1.0, min_vol=0.0, max_weight=0.35,
+                  cap_vol_ref=1.5, vol_power=2.0, use_regime=False)
+    off = scan(frames, starter_frac=0.0, **common)
+    on = scan(frames, starter_frac=0.5, **common)
+    # starter on deploys strictly more of the book than the cash-heavy default
+    assert sum(on["targets"].values()) > sum(off["targets"].values()) + 1e-6
+    assert "CALMUSDT" in on["targets"]
+
+
+def test_starter_refuses_collapsing_coin():
+    # a coin that fell hard (>10% in 30d) must NOT be started even with starter on
+    n = 260
+    base = np.linspace(100.0, 300.0, n - 20)
+    crash = np.linspace(300.0, 230.0, 20)  # ~23% drop -> below starter_min_mom30
+    collapsing = np.concatenate([base, crash])
+    up = np.linspace(100.0, 320.0, n)
+    frames = {"CRASHUSDT": _frame(collapsing), "UPUSDT_X": _frame(up)}
+    res = scan(frames, top_n=5, max_correlation=1.0, min_vol=0.0,
+               starter_frac=0.5, starter_min_mom30=-0.10)
+    assert "CRASHUSDT" not in res["targets"]
+
+
 def test_trend_score_drawdown_from_high():
     close = pd.Series(np.concatenate([np.linspace(100.0, 300.0, 200),
                                       np.linspace(300.0, 210.0, 30)]))

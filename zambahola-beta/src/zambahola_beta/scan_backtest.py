@@ -43,6 +43,9 @@ def backtest_scan(
     fng_greed_cut: float = 0.0,
     allow_short: bool = False,
     short_consensus: float = 0.25,
+    starter_frac: float = 0.0,
+    starter_max_vol: float = 1.5,
+    starter_min_mom30: float = -0.10,
 ) -> dict:
     frames = {s: df for s, df in frames.items() if len(df) >= min_bars}
     if len(frames) < 2:
@@ -92,7 +95,7 @@ def backtest_scan(
             if fv == fv and fv > 70:  # not NaN and greedy
                 eff_total *= max(0.0, 1.0 - fng_greed_cut * (fv - 70) / 30.0)
 
-        cand: list[tuple[str, float, float]] = []
+        cand: list[tuple[str, float, float, bool]] = []
         for n in names:
             cn, m9, v = cons[n].iloc[t], mom90[n].iloc[t], vol[n].iloc[t]
             d, m3 = dd[n].iloc[t], mom30[n].iloc[t]
@@ -107,29 +110,41 @@ def backtest_scan(
                 continue
             if stop_cooldown_days > 0 and t < stop_until.get(n, -1):
                 continue  # recently stopped out -> don't immediately rebuy into chop
+            is_starter = False
             if require_mom30 and not pd.isna(m3) and m3 <= 0:
-                continue  # live gate: refuse a coin rolling over short-term
+                # live gate: a coin rolling over short-term is normally refused. With
+                # starter_frac>0 a CALM, trend-confirmed coin whose short momentum only
+                # softened (not collapsed) may enter at a reduced "starter" weight so
+                # idle cash is deployed into a confirmed uptrend instead of sitting out.
+                if (starter_frac > 0 and m3 > starter_min_mom30
+                        and v <= starter_max_vol):
+                    is_starter = True
+                else:
+                    continue
             ra = (m9 / v) if v > 0 else 0.0
             ac = (m3 - m9 / 3) if not pd.isna(m3) else 0.0
             rel = (m9 - btc_mom90.iloc[t]) if (btc_mom90 is not None and not pd.isna(btc_mom90.iloc[t])) else 0.0
             score = float(cn) * (max(0.0, ra) + 0.5 * max(0.0, ac) + 0.3 * max(0.0, rel) + 0.2 * max(0.0, m9))
             if score > 0:
-                cand.append((n, score, float(v)))
+                cand.append((n, score, float(v), is_starter))
 
-        cand.sort(key=lambda x: x[1], reverse=True)
+        # full picks first (by score), then starters — starters never displace a
+        # coin that passes the strict gate
+        cand.sort(key=lambda x: (x[3], -x[1]))
         picks = cand[:top_n]
         w = {n: 0.0 for n in names}
         if picks:
             raw = {}
-            for n, score, v in picks:
+            for n, score, v, st in picks:
                 vs = min(1.0, (target_vol / v) ** vol_power) if v > 0 else 0.0
-                raw[n] = max(0.0, vs) * (max(0.1, score) ** conviction_power)
+                mult = starter_frac if st else 1.0
+                raw[n] = max(0.0, vs) * (max(0.1, score) ** conviction_power) * mult
             ssum = sum(raw.values()) or 1.0
             for n, rv in raw.items():
                 w[n] = rv / ssum * eff_total
             if max_weight < 1.0:  # concentration cap (live): trimmed excess -> cash
                 cap = max_weight * eff_total
-                vmap = {n: v for n, _, v in picks}
+                vmap = {n: v for n, _, v, _st in picks}
                 for n in list(w):
                     c = cap
                     # vol-aware cap: a hyper-volatile coin gets a tighter ceiling so it

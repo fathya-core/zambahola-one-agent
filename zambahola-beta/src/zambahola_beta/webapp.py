@@ -155,6 +155,7 @@ _PERSIST_FIELDS = (
     "port_tp_arm_usd", "port_tp_giveback", "port_tp_sell_frac", "port_tp_cooldown_h",
     "max_weight", "reentry_ban_hours", "stop_cooldown_hours", "participation_cap",
     "adaptive_liquidity", "progressive_trail",
+    "starter_frac", "starter_max_vol", "starter_min_mom30",
 )
 
 
@@ -469,6 +470,13 @@ class AppConfig:
     conviction_power: float = 1.5  # concentrate weight toward the strongest trends
     vol_power: float = 2.0  # >1 penalises hyper-volatile coins harder (anti-concentration)
     cap_vol_ref: float = 1.5  # vol-aware cap ref: a coin's max weight shrinks if vol>ref
+    # starter tier: deploy idle cash into CALM, trend-confirmed coins whose short-term
+    # momentum only softened (not collapsed), at a reduced weight. A/B (starter_frac=0.4):
+    # trending window +75%->+96% return, Sharpe 1.00->1.15, drawdown -35%->-27%; choppy
+    # year costs ~2pp -> net-positive, so default ON. 0 = old cash-heavy behaviour.
+    starter_frac: float = 0.4
+    starter_max_vol: float = 1.5  # only calm coins qualify as starters (avoid adding hyper-vol risk)
+    starter_min_mom30: float = -0.10  # don't starter a coin already falling >10% in 30d
     profit_lock_arm: float = 0.15  # arm the profit ratchet once a position is up this %
     profit_lock_giveback: float = 0.07  # FLOOR give-back; actual is vol-adaptive (7%-18%)
     min_hold_hours: float = 24.0  # anti-churn: hold a new position at least this long (rotation only)
@@ -619,7 +627,8 @@ def _scan_signal(cfg: AppConfig, *, exclude: set | None = None) -> tuple[dict, l
               stop_pct=cfg.stop_pct, conviction_power=cfg.conviction_power,
               vol_power=cfg.vol_power, cap_vol_ref=cfg.cap_vol_ref,
               max_correlation=cfg.max_correlation, max_weight=cfg.max_weight, held=held,
-              exclude=exclude)
+              exclude=exclude, starter_frac=cfg.starter_frac,
+              starter_max_vol=cfg.starter_max_vol, starter_min_mom30=cfg.starter_min_mom30)
     as_of = ""
     first = next((s for s in symbols if s in frames), None)
     if first is not None:
@@ -1250,7 +1259,9 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
                   min_bars=min_bars, periods_per_year=ppy, stop_pct=cfg.stop_pct,
                   conviction_power=cfg.conviction_power, vol_power=cfg.vol_power,
                   cap_vol_ref=cfg.cap_vol_ref, stop_cooldown_days=cfg.stop_cooldown_hours / 24.0,
-                  max_weight=cfg.max_weight, cost_bps=20.0)
+                  max_weight=cfg.max_weight, cost_bps=20.0,
+                  starter_frac=cfg.starter_frac, starter_max_vol=cfg.starter_max_vol,
+                  starter_min_mom30=cfg.starter_min_mom30)
     res = backtest_scan(frames, **common)
     res["scope"] = "years" if long_history else "recent"
     res["interval"] = cfg.interval
@@ -1374,6 +1385,9 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "hard_stop_pct": cfg.hard_stop_pct,
                     "port_tp_arm_usd": cfg.port_tp_arm_usd,
                     "port_tp_giveback": cfg.port_tp_giveback,
+                    "starter_frac": cfg.starter_frac,
+                    "starter_max_vol": cfg.starter_max_vol,
+                    "starter_min_mom30": cfg.starter_min_mom30,
                     "pnl_peak_usd": round(state.pnl_peak_usd, 2),
                     "tp_cooldown_min": max(0, int((state.port_tp_cooldown_until - time.time()) / 60)),
                     "backtest": state.backtest,
@@ -1464,6 +1478,12 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.vol_power = max(1.0, min(3.0, float(body["vol_power"])))
             if "cap_vol_ref" in body:
                 cfg.cap_vol_ref = max(0.0, min(10.0, float(body["cap_vol_ref"])))
+            if "starter_frac" in body:
+                cfg.starter_frac = max(0.0, min(1.0, float(body["starter_frac"])))
+            if "starter_max_vol" in body:
+                cfg.starter_max_vol = max(0.1, min(10.0, float(body["starter_max_vol"])))
+            if "starter_min_mom30" in body:
+                cfg.starter_min_mom30 = max(-0.5, min(0.0, float(body["starter_min_mom30"])))
             if "target_vol" in body:
                 cfg.target_vol = max(0.1, min(3.0, float(body["target_vol"])))
             if "profit_lock_arm" in body:
