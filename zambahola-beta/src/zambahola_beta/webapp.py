@@ -860,13 +860,23 @@ def _reconcile_ledger(led, balances: dict, allp: dict, state: AppState) -> bool:
         if px <= 0:
             continue
         missing = p.qty - wallet_qty
-        # only act when the ledger is materially AHEAD of the wallet (>1% and >$1)
-        if missing > p.qty * 0.01 and missing * px > 1.0:
-            rec = led.record("SELL", sym, missing * px, px)
+        if missing <= 0:
+            continue  # wallet has enough (surplus is left alone — no invented basis)
+        missing_usd = missing * px
+        # MATERIAL desync (a real phantom: failed/out-of-band order): book it as a sell
+        # so risk/rebalance logic stops acting on a ghost, and it shows in the audit.
+        if missing > p.qty * 0.05 and missing_usd > 25.0:
+            rec = led.record("SELL", sym, missing_usd, px)
             append_trade({**rec, "mode": "live" if state else "testnet",
                           "why": "reconcile-phantom"})
             state.log(f"🔧 مطابقة {sym}: إغلاق {missing:.6g} وحدة وهمية "
                       f"(ربح/خسارة ${rec['realized']})")
+            changed = True
+        elif missing_usd > 0.01:
+            # DUST (exchange lot-size rounding / fee): silently align the ledger qty
+            # down to the wallet — no phantom trade record, no log spam. Keeps cost
+            # basis so avg cost stays honest.
+            p.qty = wallet_qty
             changed = True
     return changed
 
@@ -1127,20 +1137,30 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
                 # clean full liquidation by base qty -> no 8% SELL_MARGIN dust left
                 try:
                     res = client.market_sell_all(o.symbol, balances.get(base, 0.0))
-                    usd = round(balances.get(base, 0.0) * px, 2) if px > 0 else o.usd
-                    balances[base] = 0.0
                 except Exception:  # noqa: BLE001 -- fall back to quote-qty sell
                     res = client.market_order(o.symbol, o.side, quote_qty=o.usd)
-                    usd = o.usd
             else:
                 res = client.market_order(o.symbol, o.side, quote_qty=o.usd)
-                usd = o.usd
-            placed += 1
-            rec = led.record(o.side, o.symbol, usd, px)
-            append_trade({**rec, "mode": "live" if cfg.live else "testnet", "why": why})
             side_ar = "شراء" if o.side == "BUY" else "بيع"
-            ok = str(res.get("status", "")).upper() in ("FILLED", "NEW", "PARTIALLY_FILLED")
-            mark = "✓ تم" if ok else f"({res.get('status')})"
+            # Book the ACTUAL executed fill (from the exchange response) so the ledger
+            # mirrors the wallet exactly. Using the requested amount instead used to
+            # create phantom positions when an order returned WITHOUT filling (e.g.
+            # EXPIRED on an illiquid testnet symbol) -> reconcile then "closed" that
+            # ghost every cycle = churn + fake losses. If nothing filled, skip cleanly.
+            exec_qty = float(res.get("executedQty", 0) or 0)
+            quote_filled = float(res.get("cummulativeQuoteQty", 0) or 0)
+            status = str(res.get("status", "")).upper()
+            if exec_qty <= 0 or quote_filled <= 0:
+                state.log(f"⚠️ {side_ar} {o.symbol} لم يُنفَّذ ({status or 'no-fill'}) — تخطّي بلا تسجيل وهمي")
+                continue
+            if full_exit:
+                balances[base] = 0.0
+            fill_px = (quote_filled / exec_qty) if exec_qty > 0 else px
+            usd = round(quote_filled, 2)
+            placed += 1
+            rec = led.record(o.side, o.symbol, usd, fill_px)
+            append_trade({**rec, "mode": "live" if cfg.live else "testnet", "why": why})
+            mark = "✓ تم" if status in ("FILLED", "PARTIALLY_FILLED") else f"({status})"
             pnl = f" · ربح ${rec['realized']}" if (o.side == "SELL" and rec["realized"]) else ""
             state.log(f"{'حقيقي' if cfg.live else 'testnet'} {side_ar} {o.symbol} ${usd} {mark} — {why}{pnl}")
             # anti-whipsaw: a coin sold because it fell off its peak (trailing stop)

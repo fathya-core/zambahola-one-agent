@@ -7,10 +7,12 @@ from zambahola_beta.webapp import (
     _active_sell_bans,
     _apply_reentry_bans,
     _port_tp_should_bank,
+    _reconcile_ledger,
     _resolve_whitelist,
     compute_pnl,
     compute_signal,
 )
+from zambahola_beta.ledger import Ledger, Position
 import time
 
 
@@ -135,6 +137,34 @@ def test_stop_cooldown_default_is_two_weeks():
     cfg = AppConfig()
     assert cfg.stop_cooldown_hours == 336.0  # ~14 days, backtested anti-whipsaw
     assert cfg.vol_power >= 1.0 and cfg.cap_vol_ref > 0
+
+
+def test_reconcile_dust_aligns_silently_without_phantom_trade(tmp_path, monkeypatch):
+    # a tiny wallet<ledger gap (exchange lot-size rounding / fee) must NOT book a
+    # phantom trade — just quietly align the ledger qty to the wallet
+    monkeypatch.setenv("ZAMBAHOLA_DATA_DIR", str(tmp_path))
+    led = Ledger(positions={"TIAUSDT": Position(qty=1000.0, cost=100.0, peak=0.11)})
+    st = AppState()
+    changed = _reconcile_ledger(led, {"TIA": 998.0}, {"TIAUSDT": 0.1}, st)
+    assert changed is True
+    assert led.positions["TIAUSDT"].qty == 998.0  # aligned down to wallet
+    assert led.realized == 0.0                     # no phantom PnL booked
+    trades_file = tmp_path / "trades.jsonl"
+    assert not trades_file.exists()                # no reconcile-phantom record written
+
+
+def test_reconcile_books_material_phantom(tmp_path, monkeypatch):
+    # a large ledger-ahead-of-wallet gap (a real failed/out-of-band order) IS booked
+    # as a reconcile-phantom sell so risk logic stops acting on the ghost
+    monkeypatch.setenv("ZAMBAHOLA_DATA_DIR", str(tmp_path))
+    led = Ledger(positions={"SYNUSDT": Position(qty=1000.0, cost=100.0, peak=0.11)})
+    st = AppState()
+    changed = _reconcile_ledger(led, {"SYN": 0.0}, {"SYNUSDT": 0.1}, st)
+    assert changed is True
+    assert led.positions["SYNUSDT"].qty <= 1e-9    # ghost fully closed
+    trades_file = tmp_path / "trades.jsonl"
+    assert trades_file.exists()
+    assert "reconcile-phantom" in trades_file.read_text(encoding="utf-8")
 
 
 def test_min_hold_blocks_full_exit_not_trim():
