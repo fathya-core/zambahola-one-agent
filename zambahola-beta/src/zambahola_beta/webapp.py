@@ -38,6 +38,11 @@ from .research import research_digest
 from .strategy import compare_portfolios, current_allocation
 
 
+# Binance spot min order notional. Balances worth less than this can't be sold
+# (the exchange rejects sub-$10 orders), so they are treated as unsellable dust.
+MIN_NOTIONAL_USD = 10.0
+
+
 def _perf_path() -> Path:
     return Path(os.environ.get("ZAMBAHOLA_DATA_DIR", "data")) / "equity_history.json"
 
@@ -362,7 +367,7 @@ function render(s){
  if(s.cash_weight!=null&&s.cash_weight>0.001)a.innerHTML+=`<div class="card"><div class="flex"><b>نقد</b><span class="sw badge b-mut">${Math.round(s.cash_weight*100)}%</span></div><div class="k" style="margin-top:8px">غير مستثمر — حماية من الهبوط</div></div>`;
  $("acctstatus").innerHTML=s.account?.connected?'<span class="badge b-up">متصل</span>':'<span class="badge b-mut">غير متصل (أضف المفاتيح)</span>';
  $("equity").textContent=s.account?.equity_usd!=null?("$"+s.account.equity_usd):"—";
- if(s.account?.balances){let bt=Object.entries(s.account.balances).map(([k,v])=>k+": "+v).join("  ·  ");const hc=s.account.holdings_count||0,sh=Object.keys(s.account.balances).length-1;if(hc>sh)bt+="   (+"+(hc-sh)+" أخرى)";$("balances").textContent=bt;$("balances").style.color="";}else{$("balances").textContent=s.account?.error||"";$("balances").style.color=s.account?.error?"var(--warn)":"";}
+ if(s.account?.balances){let bt=Object.entries(s.account.balances).map(([k,v])=>k+": "+v).join("  ·  ");const dc=s.account.dust_count||0,du=s.account.dust_usd||0;if(dc>0)bt+="   · غبار testnet: "+dc+" عملة (~$"+du+" غير قابلة للبيع)";$("balances").textContent=bt;$("balances").style.color="";}else{$("balances").textContent=s.account?.error||"";$("balances").style.color=s.account?.error?"var(--warn)":"";}
  $("exec").disabled=!s.account?.connected;$("exec").textContent=s.live?"⚡ نفّذ (حقيقي ⚠)":"⚡ نفّذ (testnet)";
  renderPnl(s.pnl);
  // circuit breaker banner
@@ -572,13 +577,20 @@ def account_snapshot(client: BinanceSpot, assets: tuple[str, ...], *, quote: str
     for s in assets:
         if s in allp:
             prices[s] = allp[s]
-    # keep the UI clean: USDT + top holdings by USD value (faucet wallets have 100s)
+    # keep the UI clean & HONEST: a Binance testnet faucet seeds the wallet with
+    # hundreds of tiny coin balances the agent never traded, all below the $10 min
+    # notional -> physically UNSELLABLE. Separate real holdings from that faucet dust
+    # so the dashboard shows meaningful positions, not 400 lines of junk.
     valued.sort(key=lambda x: x[2], reverse=True)
+    real = [v for v in valued if v[2] >= MIN_NOTIONAL_USD]
+    dust = [v for v in valued if v[2] < MIN_NOTIONAL_USD]
     shown = {quote: round(balances.get(quote, 0.0), 2)}
-    for b, q, _usd in valued[:12]:
+    for b, q, _usd in real[:12]:
         shown[b] = round(q, 6)
     return {"connected": True, "equity_usd": round(equity, 2),
-            "balances": shown, "holdings_count": len(valued), "_prices": prices}
+            "balances": shown, "holdings_count": len(real),
+            "dust_count": len(dust), "dust_usd": round(sum(v[2] for v in dust), 2),
+            "_prices": prices}
 
 
 # ---------- actions ----------
