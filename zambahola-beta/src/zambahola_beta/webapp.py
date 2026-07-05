@@ -309,7 +309,10 @@ small{color:var(--mut)}
 </div>
 <div id="readystat" class="k" style="margin-top:8px;padding:7px 10px;border-radius:8px;background:#0d1526"></div>
 <div id="benchstat" class="k" style="margin-top:8px;padding:7px 10px;border-radius:8px;background:#0d1526"></div>
-<div id="tradetbl" class="sub" style="margin-top:8px"></div></div>
+<div class="k" style="margin-top:10px;margin-bottom:2px"><b>المراكز المفتوحة (ربح/خسارة حيّة)</b></div>
+<div id="opentbl" class="sub"></div>
+<div class="k" style="margin-top:10px;margin-bottom:2px"><b>سجل الحركات</b></div>
+<div id="tradetbl" class="sub" style="margin-top:2px"></div></div>
 
 <div class="card"><div class="flex"><b>🧪 باك-تست الاستراتيجية الفعلية (مسح + Regime + وقف خسارة)</b>
 <span class="sw flex"><button id="bt" class="sec" style="padding:5px 12px;font-size:12px">حديث (~٧ أشهر)</button>
@@ -382,6 +385,10 @@ function render(s){
  $("invested").textContent=lg.invested!=null?lg.invested:0;
  $("winrate").textContent=lg.win_rate!=null?lg.win_rate+'%':'—';
  $("closed").textContent=lg.trades_closed||0;$("wins").textContent=lg.wins||0;$("losses").textContent=lg.losses||0;
+ {const op=lg.open_positions||{};const ks=Object.keys(op);if(ks.length){let oh='<table><tr><th>العملة</th><th>قيمة</th><th>دخول</th><th>حالي</th><th>ربح/خسارة</th></tr>';
+   for(const k of ks){const p=op[k];const u=p.upnl_usd;const uc=(u>0?'var(--up)':(u<0?'var(--down)':'var(--mut)'));const pv=(u!=null)?((u>0?'+':'')+'$'+u+' ('+(p.upnl_pct>0?'+':'')+p.upnl_pct+'%)'):'—';
+     oh+=`<tr><td><b>${k.replace('USDT','')}</b></td><td>${p.value_usd!=null?'$'+p.value_usd:'—'}</td><td>${p.avg}</td><td>${p.price!=null?p.price:'—'}</td><td style="color:${uc}">${pv}</td></tr>`;}
+   $("opentbl").innerHTML=oh+'</table>';}else $("opentbl").textContent="لا مراكز مفتوحة.";}
  {const rd=s.readiness;const el=$("readystat");if(rd&&rd.closed!=null){const pf=rd.profit_factor==null?'∞':rd.profit_factor.toFixed(2);
    const go=rd.ready;const clr=go?'var(--up)':(rd.verdict==='NO-GO: perf'?'var(--down)':'#f5a623');
    const badge=go?'✅ جاهز (GO)':(rd.need_more>0?('⏳ يلزم '+rd.need_more+' صفقة'):'🔴 الأداء دون العتبة');
@@ -396,7 +403,7 @@ function render(s){
  }else if(be){be.textContent='مقابل السوق: يُحدَّث تلقائياً مع منحنى المحفظة';}}
  const tr=s.trades||[];
  if(tr.length){let h='<table><tr><th>الوقت</th><th>النوع</th><th>العملة</th><th>$</th><th>ربح</th><th>السبب</th></tr>';
-  tr.slice().reverse().forEach(t=>{const sell=t.side==='SELL';const rp=t.realized||0;h+=`<tr><td>${(t.t||'').slice(5,16)}</td><td>${sell?'بيع':'شراء'}</td><td><b>${t.symbol}</b></td><td>${t.usd}</td><td style="color:${rp>0?'var(--up)':(rp<0?'var(--down)':'var(--mut)')}">${rp?((rp>0?'+':'')+'$'+rp):'—'}</td><td class="k">${t.why||''}</td></tr>`;});
+  tr.slice().reverse().forEach(t=>{const sell=t.side==='SELL';const rp=t.realized||0;const pl=sell?(`<span style="color:${rp>0?'var(--up)':(rp<0?'var(--down)':'var(--mut)')}">${rp?((rp>0?'+':'')+'$'+rp+(t.gain_pct!=null?' ('+(t.gain_pct>0?'+':'')+t.gain_pct+'%)':'')):'$0'}</span>`):'<span class="k">— دخول</span>';h+=`<tr><td>${(t.t||'').slice(5,16)}</td><td>${sell?'بيع':'شراء'}</td><td><b>${t.symbol.replace('USDT','')}</b></td><td>$${t.usd}</td><td>${pl}</td><td class="k">${t.why||''}</td></tr>`;});
   $("tradetbl").innerHTML=h+'</table>';}else $("tradetbl").textContent="لا صفقات بعد.";
  renderBacktest(s.backtest);
  if(s.portfolio&&s.portfolio.length){let h='<table><tr><th>استراتيجية</th><th>عائد</th><th>CAGR</th><th>Sharpe</th><th>أقصى تراجع</th></tr>';

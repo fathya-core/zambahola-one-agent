@@ -188,8 +188,19 @@ class Ledger:
 
     def summary(self, prices: dict | None = None) -> dict:
         n = self.wins + self.losses
-        open_pos = {s: {"qty": round(p.qty, 8), "avg": round(p.avg, 6)}
-                    for s, p in self.positions.items() if p.qty > 1e-9}
+        open_pos = {}
+        for s, p in self.positions.items():
+            if p.qty <= 1e-9:
+                continue
+            row = {"qty": round(p.qty, 8), "avg": round(p.avg, 6), "cost": round(p.cost, 2)}
+            px = (prices or {}).get(s)
+            if px:
+                val = p.qty * px
+                row["price"] = round(px, 8)
+                row["value_usd"] = round(val, 2)
+                row["upnl_usd"] = round(val - p.cost, 2)
+                row["upnl_pct"] = round((px / p.avg - 1) * 100, 2) if p.avg > 0 else 0.0
+            open_pos[s] = row
         out = {
             "realized_pnl": round(self.realized, 2),
             "wins": self.wins,
