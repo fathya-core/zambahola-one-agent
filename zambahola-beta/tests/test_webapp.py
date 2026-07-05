@@ -6,6 +6,7 @@ from zambahola_beta.webapp import (
     AppState,
     _active_sell_bans,
     _apply_reentry_bans,
+    _falling_knife_skips,
     _port_tp_should_bank,
     _reconcile_ledger,
     _resolve_whitelist,
@@ -182,3 +183,25 @@ def test_min_hold_blocks_full_exit_not_trim():
     assert "OLDCOINUSDT" in protected
     assert targets["OLDCOINUSDT"] == 0.05
     assert targets["HEIUSDT"] == 0.04  # trim allowed — not bumped to 0.40
+
+
+def test_falling_knife_blocks_stale_entry():
+    """A NEW pick that already crashed below the decision candle is skipped to cash."""
+    targets = {"EPICUSDT": 0.10, "ALLOUSDT": 0.06}
+    close_ref = {"EPICUSDT": 0.728, "ALLOUSDT": 0.351}
+    prices = {"EPICUSDT": 0.553, "ALLOUSDT": 0.357}  # EPIC -24% vs close, ALLO +2%
+    knifed = _falling_knife_skips(targets, close_ref, prices, held=set(), max_gap=0.10)
+    assert targets["EPICUSDT"] == 0.0          # falling knife -> blocked
+    assert targets["ALLOUSDT"] == 0.06         # healthy -> untouched
+    assert any("EPIC" in k for k in knifed)
+
+
+def test_falling_knife_leaves_held_positions_alone():
+    """A coin we already hold is never zeroed by the entry guard (exits manage it)."""
+    targets = {"EPICUSDT": 0.10}
+    close_ref = {"EPICUSDT": 0.728}
+    prices = {"EPICUSDT": 0.553}
+    knifed = _falling_knife_skips(targets, close_ref, prices,
+                                  held={"EPICUSDT"}, max_gap=0.10)
+    assert targets["EPICUSDT"] == 0.10  # held -> untouched
+    assert knifed == []

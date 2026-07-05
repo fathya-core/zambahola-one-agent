@@ -161,6 +161,7 @@ _PERSIST_FIELDS = (
     "max_weight", "reentry_ban_hours", "stop_cooldown_hours", "participation_cap",
     "adaptive_liquidity", "progressive_trail",
     "starter_frac", "starter_max_vol", "starter_min_mom30", "starter_regime_min",
+    "max_entry_gap_pct",
 )
 
 
@@ -502,6 +503,13 @@ class AppConfig:
     port_tp_cooldown_h: float = 8.0  # after banking, park profit in cash (no new buys) this long
     reentry_ban_hours: float = 48.0  # after forced exit, block re-buy this long (anti-churn)
     stop_cooldown_hours: float = 336.0  # after a trailing-stop sell, block re-buy (anti-whipsaw, ~14d)
+    # FALLING-KNIFE guard: the signal is computed on CLOSED daily candles but orders
+    # execute at the LIVE price. If a coin has already crashed this far BELOW the close
+    # the buy decision was based on, the uptrend thesis is broken -> skip the new entry
+    # (stay in cash) instead of catching the knife. EPIC lost -$921 entering ~24% below
+    # its decision candle; this blocks exactly that. Execution-layer only (a daily
+    # backtest enters AT the close so gap=0 and it never triggers there).
+    max_entry_gap_pct: float = 0.10
     live: bool = False
     port: int = 8799
 
@@ -800,6 +808,25 @@ def _apply_reentry_bans(targets: dict, state: AppState) -> list[str]:
             targets[s] = 0.0
             blocked.append(s)
     return blocked
+
+
+def _falling_knife_skips(targets: dict, close_ref: dict, prices: dict,
+                         held: set, max_gap: float) -> list[str]:
+    """Zero-out NEW buy targets whose live price is > max_gap below the closed candle
+    the signal ranked them on (a broken/stale uptrend). Held positions are left alone
+    (their exits are managed elsewhere). Mutates ``targets``; returns human labels of
+    the coins that were skipped (e.g. 'EPIC (-24%)')."""
+    knifed: list[str] = []
+    for sym in list(targets):
+        if targets[sym] <= 0 or sym in held:
+            continue
+        ref = close_ref.get(sym)
+        live_px = prices.get(sym, 0.0)
+        if ref and live_px > 0 and live_px < ref * (1 - max_gap):
+            gap = (live_px / ref - 1) * 100
+            targets[sym] = 0.0
+            knifed.append(f"{sym[:-4] if sym.endswith('USDT') else sym} ({gap:.0f}%)")
+    return knifed
 
 
 def _ban_symbols(state: AppState, symbols: set[str], hours: float) -> None:
@@ -1106,6 +1133,19 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     if blocked_reentry:
         mins = max(int((state.sell_ban_until[s] - time.time()) / 60) for s in blocked_reentry)
         state.log(f"🚫 إعادة شراء موقوفة: {', '.join(blocked_reentry)} ({mins}د متبقية)")
+
+    # FALLING-KNIFE guard: refuse a NEW entry (or add) whose live price has already
+    # dropped > max_entry_gap_pct below the CLOSED candle the signal ranked it on. The
+    # uptrend thesis is stale/broken; catching it is how EPIC lost -$921. Held positions
+    # are untouched here (risk_exits/profit-lock manage them) — we only block fresh buys.
+    if cfg.max_entry_gap_pct > 0 and targets:
+        close_ref = {r["symbol"]: r.get("candle_close")
+                     for r in sig.get("ranked", []) if r.get("candle_close")}
+        held_now = {s for s, p in led.positions.items() if p.qty > 1e-9}
+        knifed = _falling_knife_skips(targets, close_ref, prices, held_now,
+                                      cfg.max_entry_gap_pct)
+        if knifed:
+            state.log("🔪 تجنّب سكين طايح — إلغاء دخول: " + " · ".join(knifed))
 
     from .universe import last_volumes
     limits = RiskLimits(max_order_usd=cfg.max_order_usd, max_total_usd=cfg.max_total_usd,
@@ -1433,6 +1473,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "starter_max_vol": cfg.starter_max_vol,
                     "starter_min_mom30": cfg.starter_min_mom30,
                     "starter_regime_min": cfg.starter_regime_min,
+                    "max_entry_gap_pct": cfg.max_entry_gap_pct,
                     "pnl_peak_usd": round(state.pnl_peak_usd, 2),
                     "tp_cooldown_min": max(0, int((state.port_tp_cooldown_until - time.time()) / 60)),
                     "backtest": state.backtest,
@@ -1485,6 +1526,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.rebalance_band = max(0.0, min(0.9, float(body["rebalance_band"])))
             if "min_hold_hours" in body:
                 cfg.min_hold_hours = max(0.0, min(240.0, float(body["min_hold_hours"])))
+            if "max_entry_gap_pct" in body:
+                cfg.max_entry_gap_pct = max(0.0, min(0.5, float(body["max_entry_gap_pct"])))
             if "take_profit_pct" in body:
                 cfg.take_profit_pct = max(1.0, float(body["take_profit_pct"]))
             if "take_profit_frac" in body:
