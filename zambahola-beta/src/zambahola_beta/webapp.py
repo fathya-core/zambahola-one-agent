@@ -275,7 +275,7 @@ small{color:var(--mut)}
   <button class="sec tfb" data-v="4h">4س ⚡</button>
  </div><small id="tfnote" style="color:var(--mut)"></small></div>
 <div class="row" style="margin-top:6px">
- <div><div class="k">عدد العملات الممسوحة</div><input id="uni" type="number" min="5" max="60" style="width:90px"></div>
+ <div><div class="k">عدد العملات الممسوحة</div><input id="uni" type="number" min="5" max="120" style="width:90px"></div>
  <div><div class="k">عدد المراكز (أقوى ترند)</div><input id="topn" type="number" min="1" max="15" style="width:90px"></div>
  <div><div class="k">حد الأمر $</div><input id="ord" type="number" min="0" style="width:90px"></div>
  <div><div class="k">حد الإجمالي $</div><input id="tot" type="number" min="0" style="width:90px"></div>
@@ -464,7 +464,7 @@ class AppConfig:
     mode: str = "scan"  # scan = market-wide trend scanner (default), or ensemble
     target_vol: float = 0.6
     max_total: float = 1.0  # gross exposure target (1.0 = full spot; >1 = leverage*)
-    universe_size: int = 50  # how many top coins to scan (wide = catch uptrends beyond the mega-caps)
+    universe_size: int = 75  # how many top coins to scan (wide = catch uptrends beyond the mega-caps)
     min_quote_volume_usd: float = 50_000_000.0  # fixed LIQUIDITY FLOOR (used only when adaptive off)
     adaptive_liquidity: bool = True  # dynamic floor: top-N above the $5M dust guard, adapts to market
     top_n: int = 5  # MAX strongest uptrends (5 spreads risk + generalises better than 3 in walk-forward)
@@ -1509,7 +1509,7 @@ def make_handler(cfg: AppConfig, state: AppState):
             if "max_total" in body:
                 cfg.max_total = max(0.1, min(3.0, float(body["max_total"])))
             if "universe_size" in body:
-                cfg.universe_size = int(max(5, min(60, int(body["universe_size"]))))
+                cfg.universe_size = int(max(5, min(120, int(body["universe_size"]))))
             if "top_n" in body:
                 cfg.top_n = int(max(1, min(15, int(body["top_n"]))))
             if "max_weight" in body:
@@ -1709,19 +1709,35 @@ def _refresh_loop(cfg: AppConfig, state: AppState) -> None:
             pass
 
 
+class _SingleInstanceServer(ThreadingHTTPServer):
+    # allow_reuse_address MUST be False on Windows: the default True lets a 2nd, 3rd...
+    # process bind the SAME port via SO_REUSEADDR, which is exactly how duplicate agents
+    # piled up. False makes any extra launch fail to bind (WinError 10048) -> we exit.
+    allow_reuse_address = False
+
+
 def main(cfg: AppConfig | None = None, *, open_browser: bool = True) -> None:
     cfg = cfg or AppConfig()
+    url = f"http://127.0.0.1:{cfg.port}"
     _load_config(cfg)  # restore saved budget/settings across restarts (not live)
     state = AppState()
     state.equity_history = _load_equity_history()
     _load_auto(state)  # resume autonomous trading after a restart (testnet-safe)
+    # SINGLE-INSTANCE GUARD: bind the port before starting threads/trading. If it's
+    # already taken, another agent owns it -> exit immediately without starting a second
+    # server, auto-loop, or trading. This is the authoritative lock: no matter how many
+    # times the launcher fires, only one Zambahola runs per port (stops the pile-up that
+    # was eating the machine). allow_reuse_address=False makes the extra bind fail fast.
+    try:
+        httpd = _SingleInstanceServer(("127.0.0.1", cfg.port), make_handler(cfg, state))
+    except OSError:
+        print(f"[beta] ZAMBAHOLA already running on {url} — this instance will exit (no duplicate).")
+        return
     state.log("بدء اللوحة" + (" · استئناف التداول التلقائي" if state.auto_enabled else ""))
     threading.Thread(target=_auto_loop, args=(cfg, state), daemon=True).start()
     threading.Thread(target=_refresh_loop, args=(cfg, state), daemon=True).start()
     # initial signal fetch in background so the page loads instantly
     threading.Thread(target=lambda: do_check(cfg, state, with_portfolio=True), daemon=True).start()
-    httpd = ThreadingHTTPServer(("127.0.0.1", cfg.port), make_handler(cfg, state))
-    url = f"http://127.0.0.1:{cfg.port}"
     print(f"[beta] ZAMBAHOLA BETA Console -> {url}")
     if open_browser:
         try:
