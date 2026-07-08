@@ -479,7 +479,7 @@ class AppConfig:
     max_correlation: float = 0.85  # diversification: skip picks too correlated
     stop_pct: float = 0.35  # trailing stop from PEAK — wide "let winners run" (backtested best)
     progressive_trail: bool = False  # OFF: A/B showed tightening cuts winners early (+25% -> +6% comp). Kept for experiments only.
-    hard_stop_pct: float = 0.15  # hard stop from COST: cut a loser this far underwater
+    hard_stop_pct: float = 0.12  # hard stop from COST: cut a loser this far underwater (tightened from 0.15 to cap single-trade loss)
     conviction_power: float = 1.5  # concentrate weight toward the strongest trends
     vol_power: float = 2.0  # >1 penalises hyper-volatile coins harder (anti-concentration)
     cap_vol_ref: float = 1.5  # vol-aware cap ref: a coin's max weight shrinks if vol>ref
