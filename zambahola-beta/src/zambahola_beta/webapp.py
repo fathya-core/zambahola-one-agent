@@ -129,6 +129,7 @@ def _save_auto(state: AppState) -> None:
             "auto_enabled": state.auto_enabled,
             "auto_execute": state.auto_execute,
             "auto_interval_hours": state.auto_interval_hours,
+            "last_rebalance_candle": state.last_rebalance_candle,
             "pnl_peak_usd": state.pnl_peak_usd,
             "port_tp_cooldown_until": state.port_tp_cooldown_until,
             "sell_ban_until": state.sell_ban_until,
@@ -143,6 +144,7 @@ def _load_auto(state: AppState) -> None:
         state.auto_enabled = bool(d.get("auto_enabled", state.auto_enabled))
         state.auto_execute = bool(d.get("auto_execute", state.auto_execute))
         state.auto_interval_hours = float(d.get("auto_interval_hours", state.auto_interval_hours))
+        state.last_rebalance_candle = str(d.get("last_rebalance_candle", state.last_rebalance_candle))
         state.pnl_peak_usd = float(d.get("pnl_peak_usd", state.pnl_peak_usd))
         state.port_tp_cooldown_until = float(d.get("port_tp_cooldown_until", state.port_tp_cooldown_until))
         raw = d.get("sell_ban_until")
@@ -528,6 +530,7 @@ class AppState:
     halted: bool = False  # circuit breaker tripped -> trading paused
     backtest: dict | None = None
     last_auto_run: float = 0.0  # epoch of last auto cycle (separate from `updated`)
+    last_rebalance_candle: str = ""  # `as_of` of the last candle we ROTATED on (anti-churn)
     pnl_peak_usd: float = 0.0  # high-water of strategy PnL in $ (stable; % distorts as cash grows)
     port_tp_cooldown_until: float = 0.0  # park banked profit in cash until this epoch
     sell_ban_until: dict = field(default_factory=dict)  # sym -> epoch; no re-buy after forced sell
@@ -810,6 +813,18 @@ def _apply_reentry_bans(targets: dict, state: AppState) -> list[str]:
     return blocked
 
 
+def _should_rotate(sig_as_of: str, last_candle: str, force: bool) -> bool:
+    """Anti-churn: rotate (new entries + rebalance trims) ONLY when the signal candle
+    changed since the last rotation, or when explicitly forced (manual button). A daily
+    strategy re-run hourly otherwise churns positions on the SAME candle -> micro-losses.
+    Protection (stops/locks/breaker) runs every cycle regardless of this gate."""
+    if force:
+        return True
+    if not sig_as_of:  # no candle stamp -> don't block (fail open, act)
+        return True
+    return sig_as_of != last_candle
+
+
 def _falling_knife_skips(targets: dict, close_ref: dict, prices: dict,
                          held: set, max_gap: float) -> list[str]:
     """Zero-out NEW buy targets whose live price is > max_gap below the closed candle
@@ -927,7 +942,7 @@ def _reconcile_ledger(led, balances: dict, allp: dict, state: AppState) -> bool:
     return changed
 
 
-def do_execute(cfg: AppConfig, state: AppState) -> dict:
+def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False) -> dict:
     try:
         safety_gate(live=cfg.live)
     except RuntimeError as exc:
@@ -944,6 +959,16 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         universe = list(cfg.assets)
         frames = fetch_many(universe, interval=cfg.interval, total=max(cfg.bars, 400))
         sig = compute_signal(frames, mode=cfg.mode, target_vol=cfg.target_vol)
+
+    # ANTI-CHURN: the strategy signal only changes when a NEW candle closes (daily on
+    # 1d). Running hourly re-ran the SAME daily signal and churned positions in/out on
+    # intraday noise + universe-membership jitter (19/21 sells were "trim to target"
+    # micro-losses). Split protection from rotation: risk exits (stop-loss/profit-lock/
+    # breaker) run EVERY cycle for intraday safety, but ROTATION (new entries + rebalance
+    # trims) only fires on a new candle. This makes live match the daily backtest that
+    # was validated. force_rebalance=True (manual button) overrides for on-demand action.
+    sig_as_of = str(sig.get("as_of", "") or "")
+    rotate = _should_rotate(sig_as_of, state.last_rebalance_candle, force_rebalance)
 
     balances = client.balances()
     # manage: scan targets + held faucet coins in the universe + EVERY coin the
@@ -976,6 +1001,7 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
     breaker = strat_dd_pct is not None and strat_dd_pct <= -abs(cfg.breaker_pct)
     if breaker:
         targets = {}
+        rotate = True  # breaker liquidation runs via plan_rebalance -> must NOT be gated
         with state.lock:
             state.halted = True
             state.auto_execute = False
@@ -1147,6 +1173,22 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         if knifed:
             state.log("🔪 تجنّب سكين طايح — إلغاء دخول: " + " · ".join(knifed))
 
+    # ANTI-CHURN GATE: on the SAME candle, protection (stop-loss/profit-lock/breaker)
+    # already ran above via forced sells — but skip ROTATION (new entries + rebalance
+    # trims), the noise-trading that bled 19/21 trades. Rotation resumes on a new candle.
+    if not rotate:
+        if force_syms:
+            save_ledger(led)
+            return {"ok": True, "orders": forced, "buys": 0, "sells": forced,
+                    "rotated": False}
+        return {"ok": True, "orders": 0, "buys": 0, "sells": 0, "rotated": False}
+    # committed to rotating on THIS candle -> record it now so any subsequent same-candle
+    # cycle (even one that ends with "no orders") skips rotation until a new candle closes.
+    if sig_as_of:
+        with state.lock:
+            state.last_rebalance_candle = sig_as_of
+        _save_auto(state)
+
     from .universe import last_volumes
     limits = RiskLimits(max_order_usd=cfg.max_order_usd, max_total_usd=cfg.max_total_usd,
                         rebalance_band=cfg.rebalance_band, whitelist=whitelist,
@@ -1234,7 +1276,8 @@ def do_execute(cfg: AppConfig, state: AppState) -> dict:
         days = cfg.stop_cooldown_hours / 24.0
         state.log(f"🚫 منع إعادة شراء بعد وقف الخسارة: {', '.join(sorted(stop_banned))} (~{days:g}ي)")
     save_ledger(led)
-    return {"ok": True, "orders": placed, "buys": buys, "sells": sells + forced}
+    return {"ok": True, "orders": placed, "buys": buys, "sells": sells + forced,
+            "rotated": True}
 
 
 def _breaker_drawdown(hist: list) -> float | None:
@@ -1444,6 +1487,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "auto_enabled": state.auto_enabled,
                     "auto_execute": state.auto_execute,
                     "auto_interval_hours": state.auto_interval_hours,
+                    "last_rebalance_candle": state.last_rebalance_candle,
                     "pnl": compute_pnl(state.equity_history),
                     "halted": state.halted,
                     "drawdown_pct": _breaker_drawdown(state.equity_history),
@@ -1601,7 +1645,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                 do_check(cfg, state, with_portfolio=True)
                 return self._send(200, self._state_dict())
             if self.path == "/api/execute":
-                res = do_execute(cfg, state)
+                res = do_execute(cfg, state, force_rebalance=True)  # manual button = act now
                 do_check(cfg, state)
                 return self._send(200, {**self._state_dict(), "result": res})
             if self.path == "/api/auto":
@@ -1625,7 +1669,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                     def _cycle(run_exec: bool) -> None:
                         do_check(cfg, state, with_portfolio=True)
                         if run_exec:
-                            do_execute(cfg, state)
+                            do_execute(cfg, state, force_rebalance=True)  # enabling auto = deploy now
                             do_check(cfg, state)
                     threading.Thread(target=_cycle, args=(ex,), daemon=True).start()
                 return self._send(200, self._state_dict())

@@ -10,6 +10,7 @@ from zambahola_beta.webapp import (
     _port_tp_should_bank,
     _reconcile_ledger,
     _resolve_whitelist,
+    _should_rotate,
     compute_pnl,
     compute_signal,
 )
@@ -205,3 +206,26 @@ def test_falling_knife_leaves_held_positions_alone():
                                   held={"EPICUSDT"}, max_gap=0.10)
     assert targets["EPICUSDT"] == 0.10  # held -> untouched
     assert knifed == []
+
+
+def test_rotate_gate_blocks_same_candle():
+    """Anti-churn: same candle as last rotation -> no rotation (protection still runs)."""
+    stamp = "2026-07-11 00:00:00+00:00"
+    assert _should_rotate(stamp, stamp, force=False) is False
+
+
+def test_rotate_gate_allows_new_candle():
+    """A new daily candle closed -> rotation is allowed."""
+    assert _should_rotate("2026-07-12 00:00:00+00:00",
+                          "2026-07-11 00:00:00+00:00", force=False) is True
+
+
+def test_rotate_gate_force_overrides():
+    """Manual execute button forces rotation even on the same candle."""
+    stamp = "2026-07-11 00:00:00+00:00"
+    assert _should_rotate(stamp, stamp, force=True) is True
+
+
+def test_rotate_gate_fails_open_without_stamp():
+    """No candle stamp (unknown) -> act rather than freeze."""
+    assert _should_rotate("", "whatever", force=False) is True
