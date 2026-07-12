@@ -836,6 +836,16 @@ def _should_rotate(sig_as_of: str, last_candle: str, force: bool) -> bool:
     return sig_as_of != last_candle
 
 
+def _book_drop_exits(held_syms, book: set, exclude: set) -> set:
+    """Held strategy positions no longer among the current picks (`book`) -> prompt exit.
+
+    This is CLEANUP, not churn: the original churn was repeated TRIM-to-target of coins
+    STILL in the book. A coin that fully dropped out of the picks (rank fell / left the
+    liquid universe) should not be held bleeding for a whole day waiting for the next
+    candle — sell it now. `exclude` skips coins already handled by a stop/lock exit."""
+    return {s for s in held_syms if s not in book and s not in exclude}
+
+
 def _falling_knife_skips(targets: dict, close_ref: dict, prices: dict,
                          held: set, max_gap: float) -> list[str]:
     """Zero-out NEW buy targets whose live price is > max_gap below the closed candle
@@ -1117,6 +1127,26 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
             if s not in prices:
                 prices[s] = allp.get(s, 0.0)
             state.log(f"🛑 {reason} {s} → بيع كامل")
+    # 2b3) BOOK-DROP EXITS — a held strategy position no longer among the current picks
+    # (fell out of the book / left the liquid universe) is CLEANUP, not churn: exit it
+    # PROMPTLY every cycle (bypasses the new-candle rotation gate) so we never sit on an
+    # unwanted coin bleeding for a full day. ATM was stuck at -4% for hours because the
+    # candle gate blocked its exit. The original churn was TRIM-to-target of IN-book coins.
+    drop_exit_syms: set[str] = set()
+    if not breaker:
+        book = set(sig.get("targets", {}))
+        held_syms = {s for s, p in led.positions.items() if p.qty > 1e-12}
+        drop_exit_syms = _book_drop_exits(held_syms, book, lock_syms | risk_exit_syms)
+        for s in drop_exit_syms:
+            targets[s] = 0.0
+            if s not in whitelist:
+                whitelist = whitelist + (s,)
+            if s not in prices:
+                prices[s] = allp.get(s, 0.0)
+        if drop_exit_syms:
+            names = ", ".join(sorted(
+                x[:-4] if x.endswith("USDT") else x for x in drop_exit_syms))
+            state.log(f"🔄 تصفية خارج الكتاب: {names} → بيع كامل (ليست ضمن المختارات)")
     # 2c) min-hold anti-churn: a YOUNG position is protected from a FULL rotation exit
     # (target=0 — dropped from the book). Trimming overweight (target>0 but below current)
     # and all risk/profit-lock exits still run normally.
@@ -1167,6 +1197,19 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
         if forced_sold or forced:
             save_ledger(led)
             # refresh wallet after forced sells so rebalance plan doesn't double-sell
+            balances = client.balances()
+    # book-drop cleanup: sell promptly every cycle too, but NO reentry ban — it isn't a
+    # stop-out, so it may be re-bought later if it climbs back into the picks (new candle).
+    if drop_exit_syms and not breaker:
+        d_forced, d_sold = _force_sell_symbols(
+            client, drop_exit_syms, balances, allp, led, cfg, state,
+            why="خروج: خارج الكتاب",
+        )
+        forced += d_forced
+        forced_sold += d_sold
+        force_syms = force_syms | drop_exit_syms  # dedup so plan_rebalance won't resell
+        if d_forced or d_sold:
+            save_ledger(led)
             balances = client.balances()
 
     blocked_reentry = _apply_reentry_bans(targets, state)

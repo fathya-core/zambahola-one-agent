@@ -6,6 +6,7 @@ from zambahola_beta.webapp import (
     AppState,
     _active_sell_bans,
     _apply_reentry_bans,
+    _book_drop_exits,
     _falling_knife_skips,
     _port_tp_should_bank,
     _reconcile_ledger,
@@ -248,3 +249,24 @@ def test_rotate_gate_force_overrides():
 def test_rotate_gate_fails_open_without_stamp():
     """No candle stamp (unknown) -> act rather than freeze."""
     assert _should_rotate("", "whatever", force=False) is True
+
+
+def test_book_drop_exit_sells_coin_that_left_the_picks():
+    """A held coin no longer in the book must exit promptly (ATM stuck -4% bug)."""
+    held = {"ATMUSDT", "DEXEUSDT", "UNIUSDT"}
+    book = {"DEXEUSDT", "UNIUSDT", "AAVEUSDT"}
+    assert _book_drop_exits(held, book, exclude=set()) == {"ATMUSDT"}
+
+
+def test_book_drop_exit_keeps_in_book_positions():
+    """Coins still among the picks are NOT force-exited (trims stay gated)."""
+    held = {"DEXEUSDT", "UNIUSDT"}
+    book = {"DEXEUSDT", "UNIUSDT", "AAVEUSDT"}
+    assert _book_drop_exits(held, book, exclude=set()) == set()
+
+
+def test_book_drop_exit_skips_coins_already_stopped():
+    """A coin already handled by a stop/lock exit is excluded (no double-sell)."""
+    held = {"ATMUSDT", "ZECUSDT"}
+    book = {"DEXEUSDT"}
+    assert _book_drop_exits(held, book, exclude={"ZECUSDT"}) == {"ATMUSDT"}
