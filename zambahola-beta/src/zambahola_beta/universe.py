@@ -165,18 +165,26 @@ def trend_score(close: pd.Series, *, leader: pd.Series | None = None) -> dict:
     }
 
 
-def smart_score(s: dict) -> float:
+def smart_score(s: dict, dd_penalty: float = 0.0) -> float:
     """Composite conviction for an uptrend: reward risk-adjusted momentum,
     acceleration, and relative strength vs the market — gated by trend
-    consensus so we never chase a coin that isn't actually trending up."""
+    consensus so we never chase a coin that isn't actually trending up.
+
+    dd_penalty>0 scales the score DOWN for coins trading deep below their recent
+    high (rolling over), so clean trends near their highs are preferred over
+    'high past-momentum but now bleeding' names. 0 = original behaviour."""
     if s["consensus"] < 0.5 or s["momentum"] <= 0:
         return 0.0
-    return s["consensus"] * (
+    base = s["consensus"] * (
         max(0.0, s["risk_adj"])
         + 0.5 * max(0.0, s["accel"])
         + 0.3 * max(0.0, s["rel_strength"])
         + 0.2 * max(0.0, s["momentum"])
     )
+    if dd_penalty > 0:
+        # dd_high <= 0 (drawdown from recent high); deeper -> larger cut.
+        base *= max(0.0, 1.0 + dd_penalty * s.get("dd_high", 0.0))
+    return base
 
 
 def market_regime(frames: dict[str, pd.DataFrame], leader: str = "BTCUSDT") -> float:
@@ -234,6 +242,8 @@ def scan(
     starter_max_vol: float = 1.5,
     starter_min_mom30: float = -0.10,
     starter_regime_min: float = 0.0,
+    dd_penalty: float = 0.0,
+    entry_max_dd: float = 0.12,
 ) -> dict:
     """Rank coins by a smart composite score, allocate to the strongest
     uptrends (vol-targeted, conviction-tilted), scaled by market regime, with a
@@ -254,7 +264,7 @@ def scan(
         s = trend_score(close, leader=lead_close)
         s["symbol"] = sym
         s["price"] = round(float(close.iloc[-1]), 6)
-        s["score"] = round(smart_score(s), 4)
+        s["score"] = round(smart_score(s, dd_penalty=dd_penalty), 4)
         s["stopped"] = s["dd_high"] <= -abs(stop_pct)
         scored.append(s)
 
@@ -273,8 +283,12 @@ def scan(
                 and not s["stopped"] and s["vol"] >= min_vol
                 and s["symbol"] not in banned)
 
-    # FULL picks: pass the strict short-term-momentum gate (mom30 > 0).
-    full = [s for s in scored if _core_ok(s) and s["mom30"] > 0]
+    # FULL picks: pass the strict short-term-momentum gate (mom30 > 0) AND must be
+    # near their recent high (dd_high > -entry_max_dd). Coins already rolled over
+    # >12% from peak are 'past momentum' traps — refuse new entries (ZEC -24%, TLM
+    # -23% were bleeding names that still scored on stale 90d momentum).
+    full = [s for s in scored if _core_ok(s) and s["mom30"] > 0
+            and s["dd_high"] > -abs(entry_max_dd)]
     for s in full:
         s["_starter"] = False
 
@@ -380,6 +394,7 @@ def scan(
             "price": s["price"],
             "trend_consensus": round(s["consensus"], 2),
             "momentum": s["momentum"],
+            "mom30": s.get("mom30", 0.0),
             "risk_adj": s["risk_adj"],
             "rel_strength": s["rel_strength"],
             "score": s["score"],

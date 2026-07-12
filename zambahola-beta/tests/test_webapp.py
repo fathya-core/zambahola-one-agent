@@ -169,6 +169,25 @@ def test_reconcile_books_material_phantom(tmp_path, monkeypatch):
     assert "reconcile-phantom" in trades_file.read_text(encoding="utf-8")
 
 
+def test_min_hold_allows_exit_when_dropped_from_book():
+    """Young position the signal dropped from picks -> min_hold must NOT block exit."""
+    targets = {"OLDCOINUSDT": 0.0}
+    sig_targets = {"HEIUSDT": 0.04}  # OLDCOIN not in scan book
+    cur_w = {"OLDCOINUSDT": 0.05}
+    protected = []
+    for s, tgt in list(targets.items()):
+        if tgt > 0:
+            continue
+        if s not in sig_targets:
+            continue  # dropped from book -> allow exit
+        cw = cur_w.get(s, 0.0)
+        if cw > 0:
+            targets[s] = round(cw, 4)
+            protected.append(s)
+    assert protected == []
+    assert targets["OLDCOINUSDT"] == 0.0
+
+
 def test_min_hold_blocks_full_exit_not_trim():
     """Young positions: block rotation to 0, but allow target below current (trim)."""
     targets = {"HEIUSDT": 0.04, "OLDCOINUSDT": 0.0}

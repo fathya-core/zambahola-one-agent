@@ -47,6 +47,8 @@ def backtest_scan(
     starter_max_vol: float = 1.5,
     starter_min_mom30: float = -0.10,
     starter_regime_min: float = 0.0,
+    dd_penalty: float = 0.0,
+    entry_max_dd: float = 0.12,
 ) -> dict:
     frames = {s: df for s, df in frames.items() if len(df) >= min_bars}
     if len(frames) < 2:
@@ -122,10 +124,15 @@ def backtest_scan(
                     is_starter = True
                 else:
                     continue
+            elif not pd.isna(d) and float(d) <= -abs(entry_max_dd):
+                continue  # full pick but already rolled over from its high
             ra = (m9 / v) if v > 0 else 0.0
             ac = (m3 - m9 / 3) if not pd.isna(m3) else 0.0
             rel = (m9 - btc_mom90.iloc[t]) if (btc_mom90 is not None and not pd.isna(btc_mom90.iloc[t])) else 0.0
             score = float(cn) * (max(0.0, ra) + 0.5 * max(0.0, ac) + 0.3 * max(0.0, rel) + 0.2 * max(0.0, m9))
+            if dd_penalty > 0 and not pd.isna(d):
+                # prefer clean trends near their highs over deep-pullback names
+                score *= max(0.0, 1.0 + dd_penalty * float(d))
             if score > 0:
                 cand.append((n, score, float(v), is_starter))
 

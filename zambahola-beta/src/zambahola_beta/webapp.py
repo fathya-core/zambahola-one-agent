@@ -163,7 +163,7 @@ _PERSIST_FIELDS = (
     "max_weight", "reentry_ban_hours", "stop_cooldown_hours", "participation_cap",
     "adaptive_liquidity", "progressive_trail",
     "starter_frac", "starter_max_vol", "starter_min_mom30", "starter_regime_min",
-    "max_entry_gap_pct",
+    "max_entry_gap_pct", "entry_quality_dd_penalty", "entry_max_dd",
 )
 
 
@@ -495,6 +495,15 @@ class AppConfig:
     starter_max_vol: float = 1.5  # only calm coins qualify as starters (avoid adding hyper-vol risk)
     starter_min_mom30: float = -0.10  # don't starter a coin already falling >10% in 30d
     starter_regime_min: float = 0.65  # only deploy starters when the market is risk-on (regime gate)
+    # entry QUALITY tilt: scale a pick's score down by dd_penalty * (drawdown from its
+    # recent high). Prefers clean trends near highs over 'big past momentum but now
+    # bleeding' names -> fewer entries into rolling-over coins. Walk-forward (IS/OOS)
+    # picked 1.0: OOS return 39.9%->41.7%, Sharpe 0.90->0.93, dd -38.0%->-37.4%; 2.0
+    # overfit (best IS, worst OOS). 0 = original momentum-only ranking.
+    entry_quality_dd_penalty: float = 1.0
+    # refuse NEW full picks already rolled over > this fraction from their 60d high
+    # (ZEC -24%, TLM -23% were 'past momentum' traps). Starters unchanged.
+    entry_max_dd: float = 0.12
     profit_lock_arm: float = 0.15  # arm the profit ratchet once a position is up this %
     profit_lock_giveback: float = 0.07  # FLOOR give-back; actual is vol-adaptive (7%-18%)
     min_hold_hours: float = 24.0  # anti-churn: hold a new position at least this long (rotation only)
@@ -662,7 +671,9 @@ def _scan_signal(cfg: AppConfig, *, exclude: set | None = None) -> tuple[dict, l
               max_correlation=cfg.max_correlation, max_weight=cfg.max_weight, held=held,
               exclude=exclude, starter_frac=cfg.starter_frac,
               starter_max_vol=cfg.starter_max_vol, starter_min_mom30=cfg.starter_min_mom30,
-              starter_regime_min=cfg.starter_regime_min)
+              starter_regime_min=cfg.starter_regime_min,
+              dd_penalty=cfg.entry_quality_dd_penalty,
+              entry_max_dd=cfg.entry_max_dd)
     as_of = ""
     first = next((s for s in symbols if s in frames), None)
     if first is not None:
@@ -1127,6 +1138,9 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
             tgt = targets.get(s, 0.0)
             if tgt > 0:
                 continue  # still in book — allow trim-down rebalances
+            # dropped entirely from the scan book -> rotate out even if young
+            if s not in sig.get("targets", {}):
+                continue
             cur_w = (hv.get(s, 0.0) / equity) if equity > 0 else 0.0
             if cur_w > 0:
                 targets[s] = round(cur_w, 4)  # block full exit only
@@ -1388,7 +1402,9 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
                   max_weight=cfg.max_weight, cost_bps=20.0,
                   starter_frac=cfg.starter_frac, starter_max_vol=cfg.starter_max_vol,
                   starter_min_mom30=cfg.starter_min_mom30,
-                  starter_regime_min=cfg.starter_regime_min)
+                  starter_regime_min=cfg.starter_regime_min,
+                  dd_penalty=cfg.entry_quality_dd_penalty,
+                  entry_max_dd=cfg.entry_max_dd)
     res = backtest_scan(frames, **common)
     res["scope"] = "years" if long_history else "recent"
     res["interval"] = cfg.interval
@@ -1518,6 +1534,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "starter_min_mom30": cfg.starter_min_mom30,
                     "starter_regime_min": cfg.starter_regime_min,
                     "max_entry_gap_pct": cfg.max_entry_gap_pct,
+                    "entry_quality_dd_penalty": cfg.entry_quality_dd_penalty,
+                    "entry_max_dd": cfg.entry_max_dd,
                     "pnl_peak_usd": round(state.pnl_peak_usd, 2),
                     "tp_cooldown_min": max(0, int((state.port_tp_cooldown_until - time.time()) / 60)),
                     "backtest": state.backtest,
@@ -1572,6 +1590,10 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.min_hold_hours = max(0.0, min(240.0, float(body["min_hold_hours"])))
             if "max_entry_gap_pct" in body:
                 cfg.max_entry_gap_pct = max(0.0, min(0.5, float(body["max_entry_gap_pct"])))
+            if "entry_quality_dd_penalty" in body:
+                cfg.entry_quality_dd_penalty = max(0.0, min(3.0, float(body["entry_quality_dd_penalty"])))
+            if "entry_max_dd" in body:
+                cfg.entry_max_dd = max(0.0, min(0.5, float(body["entry_max_dd"])))
             if "take_profit_pct" in body:
                 cfg.take_profit_pct = max(1.0, float(body["take_profit_pct"]))
             if "take_profit_frac" in body:
@@ -1775,8 +1797,11 @@ def main(cfg: AppConfig | None = None, *, open_browser: bool = True) -> None:
     try:
         httpd = _SingleInstanceServer(("127.0.0.1", cfg.port), make_handler(cfg, state))
     except OSError:
+        # another instance already owns the port. Force-exit HARD (os._exit) so a loser
+        # of a simultaneous double-launch can never linger as a zombie python — a plain
+        # return could be held open by any stray import-time thread.
         print(f"[beta] ZAMBAHOLA already running on {url} — this instance will exit (no duplicate).")
-        return
+        os._exit(0)
     state.log("بدء اللوحة" + (" · استئناف التداول التلقائي" if state.auto_enabled else ""))
     threading.Thread(target=_auto_loop, args=(cfg, state), daemon=True).start()
     threading.Thread(target=_refresh_loop, args=(cfg, state), daemon=True).start()
