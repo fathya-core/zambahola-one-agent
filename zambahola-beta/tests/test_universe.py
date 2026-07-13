@@ -238,6 +238,33 @@ def test_scan_funded_coins_are_near_highs():
             assert r["dd_high"] > -0.25  # never funds a coin past its stop
 
 
+def test_trend_score_reports_spike_and_base():
+    """ret1d and base_prior isolate a one-day pump from a sustained trend."""
+    n = 260
+    pump = np.linspace(100.0, 112.0, n)
+    pump[-7:-1] = np.linspace(112.0, 108.0, 6)   # soft 6-day pullback (dead base)
+    pump[-1] = pump[-2] * 1.44                    # +44% single-day spike
+    s = trend_score(pd.Series(pump).reset_index(drop=True))
+    assert s["ret1d"] >= 0.20 and s["base_prior"] <= 0.0  # pump signature
+
+
+def test_scan_rejects_single_day_pump_keeps_real_trend():
+    """DODO trap: a +44% one-day spike flips consensus->1.0 so the old gate buys the
+    top. The pump filter rejects it while keeping a genuine sustained uptrend (DEXE)."""
+    n = 260
+    real = np.linspace(100.0, 300.0, n)          # sustained multi-week climb
+    pump = np.linspace(100.0, 112.0, n)          # gentle base ...
+    pump[-7:-1] = np.linspace(112.0, 108.0, 6)   # ... 6-day soft pullback (dead base)
+    pump[-1] = pump[-2] * 1.44                    # ... then +44% single-day spike
+    frames = {"REALUSDT": _frame(real), "PUMPUSDT": _frame(pump)}
+    off = scan(frames, top_n=5, max_correlation=1.0, min_vol=0.0, max_spike_1d=0.0)
+    on = scan(frames, top_n=5, max_correlation=1.0, min_vol=0.0,
+              max_spike_1d=0.20, spike_base_max=0.0)
+    assert "PUMPUSDT" in off["targets"]      # old gate buys the pump (the DODO trap)
+    assert "PUMPUSDT" not in on["targets"]   # filter rejects the one-day pump
+    assert "REALUSDT" in on["targets"]       # the genuine trend is preserved
+
+
 def test_scan_diversification_skips_correlated():
     rng = np.random.default_rng(0)
     n = 260

@@ -164,6 +164,7 @@ _PERSIST_FIELDS = (
     "adaptive_liquidity", "progressive_trail",
     "starter_frac", "starter_max_vol", "starter_min_mom30", "starter_regime_min",
     "max_entry_gap_pct", "entry_quality_dd_penalty", "entry_max_dd",
+    "max_spike_1d", "spike_base_max",
 )
 
 
@@ -504,6 +505,14 @@ class AppConfig:
     # refuse NEW full picks already rolled over > this fraction from their 60d high
     # (ZEC -24%, TLM -23% were 'past momentum' traps). Starters unchanged.
     entry_max_dd: float = 0.12
+    # SINGLE-DAY PUMP guard: refuse a NEW full pick whose last day spiked >= max_spike_1d
+    # while the 6-day base BEFORE it was <= spike_base_max (a fresh pump on a dead trend,
+    # not a sustained one). DODO popped +44% in a day on a -5% prior week -> the spike
+    # flipped consensus to 1.0 so the old gate bought the top and it reverted -12% (-$317
+    # real loss). A genuine trend that also popped (DEXE +25% on a +59% base) is kept. A/B
+    # on established coins: identical return/Sharpe (never rejects a real winner).
+    max_spike_1d: float = 0.20
+    spike_base_max: float = 0.0
     profit_lock_arm: float = 0.15  # arm the profit ratchet once a position is up this %
     profit_lock_giveback: float = 0.07  # FLOOR give-back; actual is vol-adaptive (7%-18%)
     min_hold_hours: float = 24.0  # anti-churn: hold a new position at least this long (rotation only)
@@ -673,7 +682,8 @@ def _scan_signal(cfg: AppConfig, *, exclude: set | None = None) -> tuple[dict, l
               starter_max_vol=cfg.starter_max_vol, starter_min_mom30=cfg.starter_min_mom30,
               starter_regime_min=cfg.starter_regime_min,
               dd_penalty=cfg.entry_quality_dd_penalty,
-              entry_max_dd=cfg.entry_max_dd)
+              entry_max_dd=cfg.entry_max_dd,
+              max_spike_1d=cfg.max_spike_1d, spike_base_max=cfg.spike_base_max)
     as_of = ""
     first = next((s for s in symbols if s in frames), None)
     if first is not None:
@@ -1447,7 +1457,8 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
                   starter_min_mom30=cfg.starter_min_mom30,
                   starter_regime_min=cfg.starter_regime_min,
                   dd_penalty=cfg.entry_quality_dd_penalty,
-                  entry_max_dd=cfg.entry_max_dd)
+                  entry_max_dd=cfg.entry_max_dd,
+                  max_spike_1d=cfg.max_spike_1d, spike_base_max=cfg.spike_base_max)
     res = backtest_scan(frames, **common)
     res["scope"] = "years" if long_history else "recent"
     res["interval"] = cfg.interval
@@ -1579,6 +1590,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "max_entry_gap_pct": cfg.max_entry_gap_pct,
                     "entry_quality_dd_penalty": cfg.entry_quality_dd_penalty,
                     "entry_max_dd": cfg.entry_max_dd,
+                    "max_spike_1d": cfg.max_spike_1d,
+                    "spike_base_max": cfg.spike_base_max,
                     "pnl_peak_usd": round(state.pnl_peak_usd, 2),
                     "tp_cooldown_min": max(0, int((state.port_tp_cooldown_until - time.time()) / 60)),
                     "backtest": state.backtest,
@@ -1637,6 +1650,10 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.entry_quality_dd_penalty = max(0.0, min(3.0, float(body["entry_quality_dd_penalty"])))
             if "entry_max_dd" in body:
                 cfg.entry_max_dd = max(0.0, min(0.5, float(body["entry_max_dd"])))
+            if "max_spike_1d" in body:
+                cfg.max_spike_1d = max(0.0, min(1.0, float(body["max_spike_1d"])))
+            if "spike_base_max" in body:
+                cfg.spike_base_max = max(-0.5, min(0.5, float(body["spike_base_max"])))
             if "take_profit_pct" in body:
                 cfg.take_profit_pct = max(1.0, float(body["take_profit_pct"]))
             if "take_profit_frac" in body:

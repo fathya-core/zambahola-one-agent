@@ -49,6 +49,8 @@ def backtest_scan(
     starter_regime_min: float = 0.0,
     dd_penalty: float = 0.0,
     entry_max_dd: float = 0.12,
+    max_spike_1d: float = 0.0,
+    spike_base_max: float = 0.0,
 ) -> dict:
     frames = {s: df for s, df in frames.items() if len(df) >= min_bars}
     if len(frames) < 2:
@@ -68,6 +70,9 @@ def backtest_scan(
     mom30 = {n: px[n].pct_change(30) for n in names}
     vol = {n: realized_vol(px[n], 30) for n in names}
     dd = {n: px[n] / px[n].rolling(60).max() - 1.0 for n in names}
+    # single-day pump detector: last-day return vs the 6-day base ending the day before
+    ret1d = {n: px[n].pct_change(1) for n in names}
+    base_prior = {n: px[n].shift(1) / px[n].shift(7) - 1.0 for n in names}
     roll_min = {n: px[n].rolling(60).min() for n in names} if allow_short else {}
     btc_cons = trend_consensus(px[leader]) if leader in names else None
     btc_mom90 = px[leader].pct_change(90) if leader in names else None
@@ -126,6 +131,11 @@ def backtest_scan(
                     continue
             elif not pd.isna(d) and float(d) <= -abs(entry_max_dd):
                 continue  # full pick but already rolled over from its high
+            if not is_starter and max_spike_1d > 0:
+                r1, bp = ret1d[n].iloc[t], base_prior[n].iloc[t]
+                if (not pd.isna(r1) and not pd.isna(bp)
+                        and r1 >= max_spike_1d and bp <= spike_base_max):
+                    continue  # one-day pump on a dead base (DODO) — not a real trend
             ra = (m9 / v) if v > 0 else 0.0
             ac = (m3 - m9 / 3) if not pd.isna(m3) else 0.0
             rel = (m9 - btc_mom90.iloc[t]) if (btc_mom90 is not None and not pd.isna(btc_mom90.iloc[t])) else 0.0

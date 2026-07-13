@@ -153,6 +153,11 @@ def trend_score(close: pd.Series, *, leader: pd.Series | None = None) -> dict:
     win = min(60, len(close))
     hi = float(close.rolling(win).max().iloc[-1]) if win > 0 else float(close.iloc[-1])
     dd_high = (float(close.iloc[-1]) / hi - 1.0) if hi > 0 else 0.0
+    # single-day spike vs the base trend BEFORE it: a genuine uptrend builds over many
+    # days (base_prior high); a pump is one green day sitting on a dead/negative week
+    # (base_prior <= 0) — the exact DODO trap (+44% in 1 day, -5% the prior 6 days).
+    ret1d = float(close.pct_change(1).iloc[-1]) if len(close) > 1 else 0.0
+    base_prior = (float(close.iloc[-2]) / float(close.iloc[-8]) - 1.0) if len(close) >= 8 else 0.0
     return {
         "consensus": cons,
         "momentum": round(mom90, 4),
@@ -162,6 +167,8 @@ def trend_score(close: pd.Series, *, leader: pd.Series | None = None) -> dict:
         "accel": round(accel, 4),
         "rel_strength": round(rel, 4),
         "dd_high": round(dd_high, 4),
+        "ret1d": round(ret1d, 4),
+        "base_prior": round(base_prior, 4),
     }
 
 
@@ -244,6 +251,8 @@ def scan(
     starter_regime_min: float = 0.0,
     dd_penalty: float = 0.0,
     entry_max_dd: float = 0.12,
+    max_spike_1d: float = 0.0,
+    spike_base_max: float = 0.0,
 ) -> dict:
     """Rank coins by a smart composite score, allocate to the strongest
     uptrends (vol-targeted, conviction-tilted), scaled by market regime, with a
@@ -283,12 +292,22 @@ def scan(
                 and not s["stopped"] and s["vol"] >= min_vol
                 and s["symbol"] not in banned)
 
-    # FULL picks: pass the strict short-term-momentum gate (mom30 > 0) AND must be
-    # near their recent high (dd_high > -entry_max_dd). Coins already rolled over
-    # >12% from peak are 'past momentum' traps — refuse new entries (ZEC -24%, TLM
-    # -23% were bleeding names that still scored on stale 90d momentum).
+    def _not_pump(s: dict) -> bool:
+        # reject a fresh single-day SPIKE sitting on a dead/negative base — that's a
+        # pump, not a sustained trend (DODO +44% in 1 day on a -5% prior 6d -> reverted
+        # -12%). A real trend that also popped today keeps a strongly positive base
+        # (DEXE +25% on a +59% prior 6d) and is NOT rejected. Off when max_spike_1d<=0.
+        if max_spike_1d <= 0:
+            return True
+        return not (s.get("ret1d", 0.0) >= max_spike_1d
+                    and s.get("base_prior", 0.0) <= spike_base_max)
+
+    # FULL picks: pass the strict short-term-momentum gate (mom30 > 0), be near their
+    # recent high (dd_high > -entry_max_dd), and NOT be a one-day pump (_not_pump).
+    # Coins already rolled over >12% from peak are 'past momentum' traps — refuse new
+    # entries (ZEC -24%, TLM -23% bled on stale 90d momentum; DODO was a 1-day spike).
     full = [s for s in scored if _core_ok(s) and s["mom30"] > 0
-            and s["dd_high"] > -abs(entry_max_dd)]
+            and s["dd_high"] > -abs(entry_max_dd) and _not_pump(s)]
     for s in full:
         s["_starter"] = False
 
