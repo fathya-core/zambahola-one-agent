@@ -51,6 +51,7 @@ def backtest_scan(
     entry_max_dd: float = 0.12,
     max_spike_1d: float = 0.0,
     spike_base_max: float = 0.0,
+    min_score_frac: float = 0.0,
 ) -> dict:
     frames = {s: df for s, df in frames.items() if len(df) >= min_bars}
     if len(frames) < 2:
@@ -145,6 +146,16 @@ def backtest_scan(
                 score *= max(0.0, 1.0 + dd_penalty * float(d))
             if score > 0:
                 cand.append((n, score, float(v), is_starter))
+
+        # relative CONVICTION FLOOR: in a weak market only a couple coins score well;
+        # funding marginal-score full picks (UNI 0.05, TRX 0.18 next to DEXE 3.83) just
+        # bleeds -> drop full picks below min_score_frac * the best full score, holding
+        # cash instead. Concentrates capital in real conviction. Starters are exempt.
+        if min_score_frac > 0 and cand:
+            full_scores = [c[1] for c in cand if not c[3]]
+            if full_scores:
+                floor = min_score_frac * max(full_scores)
+                cand = [c for c in cand if c[3] or c[1] >= floor]
 
         # full picks first (by score), then starters — starters never displace a
         # coin that passes the strict gate

@@ -530,7 +530,7 @@ class AppConfig:
     # its decision candle; this blocks exactly that. Execution-layer only (a daily
     # backtest enters AT the close so gap=0 and it never triggers there).
     max_entry_gap_pct: float = 0.10
-    live: bool = False
+    live: bool = False  # SAFE default; enable REAL trading via --live / watchdog -Live / dashboard toggle
     port: int = 8799
 
 
