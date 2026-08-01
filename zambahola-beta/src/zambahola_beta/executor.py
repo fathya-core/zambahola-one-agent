@@ -167,7 +167,9 @@ def sign_query(query: str, secret: str) -> str:
 # ---------- client ----------
 
 class BinanceSpot:
-    def __init__(self, keys: Keys, *, testnet: bool = True, recv_window: int = 5000):
+    # 10s recvWindow (Binance max 60s): tolerant of network jitter and small
+    # clock drift between per-cycle syncs, still tight enough against replay.
+    def __init__(self, keys: Keys, *, testnet: bool = True, recv_window: int = 10000):
         self.keys = keys
         self.base = TESTNET_BASE if testnet else LIVE_BASE
         self.recv_window = recv_window
@@ -178,14 +180,18 @@ class BinanceSpot:
 
     def sync_time(self) -> int:
         """Align local clock to Binance server time to avoid -1021 (timestamp
-        outside recvWindow) on live orders when the PC clock drifts."""
+        outside recvWindow) on live orders when the PC clock drifts.
+
+        On failure the PREVIOUS offset is kept: resetting to 0 would assume the
+        local clock is perfect — exactly wrong on a machine whose clock already
+        needed the correction (e.g. Windows free-running on the CMOS clock)."""
         try:
             r = self.session.get(f"{self.base}/api/v3/time", timeout=10)
             r.raise_for_status()
             server_ms = int(r.json()["serverTime"])
             self._time_offset_ms = server_ms - int(time.time() * 1000)
         except Exception:  # noqa: BLE001
-            self._time_offset_ms = 0
+            pass
         return self._time_offset_ms
 
     def symbol_filters(self, symbol: str) -> dict:
@@ -218,12 +224,18 @@ class BinanceSpot:
             return qty
         return math.floor(qty / step) * step
 
-    def _signed_at(self, base: str, method: str, path: str, params: dict) -> dict:
+    def _signed_at(self, base: str, method: str, path: str, params: dict,
+                   *, _retry: bool = True) -> dict:
         """Signed request against an explicit host (api / papi share the same
-        HMAC scheme and API key — only the base URL differs)."""
+        HMAC scheme and API key — only the base URL differs).
+
+        -1021 (timestamp outside recvWindow) is self-healing: the local clock
+        drifted since the last sync (sleep/resume, un-synced Windows clock), so
+        re-align once and replay with a fresh timestamp. Safe even for orders —
+        -1021 requests are rejected BEFORE any processing, nothing was placed."""
         ts = int(time.time() * 1000) + self._time_offset_ms
-        params = {**params, "timestamp": ts, "recvWindow": self.recv_window}
-        query = urllib.parse.urlencode(params)
+        signed = {**params, "timestamp": ts, "recvWindow": self.recv_window}
+        query = urllib.parse.urlencode(signed)
         query += "&signature=" + sign_query(query, self.keys.api_secret)
         url = f"{base}{path}?{query}"
         resp = self.session.request(method, url, timeout=15)
@@ -231,9 +243,12 @@ class BinanceSpot:
             # surface Binance's {code, msg} instead of a bare HTTP error
             try:
                 err = resp.json()
-                raise RuntimeError(f"Binance {err.get('code')}: {err.get('msg')}")
             except ValueError:
                 raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            if err.get("code") == -1021 and _retry:
+                self.sync_time()
+                return self._signed_at(base, method, path, params, _retry=False)
+            raise RuntimeError(f"Binance {err.get('code')}: {err.get('msg')}")
         return resp.json()
 
     def _signed(self, method: str, path: str, params: dict) -> dict:
@@ -307,7 +322,7 @@ class BinanceMargin(BinanceSpot):
     LEVEL_DELEVERAGE = 1.4
     LEVEL_TARGET = 2.0
 
-    def __init__(self, keys: Keys, *, recv_window: int = 5000):
+    def __init__(self, keys: Keys, *, recv_window: int = 10000):
         super().__init__(keys, testnet=False, recv_window=recv_window)
 
     def deleverage_usd(self, stats: dict) -> float:
@@ -524,7 +539,7 @@ class BinancePortfolioMargin(BinanceMargin):
 _PM_DETECTED: bool | None = None
 
 
-def make_margin_client(keys: Keys, *, recv_window: int = 5000) -> BinanceMargin:
+def make_margin_client(keys: Keys, *, recv_window: int = 10000) -> BinanceMargin:
     """Return the RIGHT margin executor for this account: Portfolio Margin
     accounts (papi reachable) get BinancePortfolioMargin — classic /sapi margin
     orders would fail for them with -3055; everyone else gets BinanceMargin."""

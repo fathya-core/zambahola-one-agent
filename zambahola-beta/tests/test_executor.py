@@ -130,6 +130,64 @@ def test_no_real_keys_in_env_by_default():
     assert not (os.environ.get("BINANCE_API_KEY") and os.environ.get("BINANCE_API_SECRET")) or True
 
 
+# ---------- clock resilience (-1021) ----------
+
+class _Resp:
+    def __init__(self, status_code, payload):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = str(payload)
+
+    def json(self):
+        return self._payload
+
+
+def test_sync_time_failure_keeps_previous_offset():
+    """A failed time sync must NOT reset the offset to 0 — the previous
+    correction is still the best estimate on a drifting clock."""
+    from zambahola_beta.executor import BinanceSpot
+
+    client = BinanceSpot(Keys("K" * 64, "S" * 64))
+    client._time_offset_ms = 4321
+
+    def boom(*a, **k):
+        raise OSError("network down")
+
+    client.session.get = boom
+    assert client.sync_time() == 4321
+    assert client._time_offset_ms == 4321
+
+
+def test_signed_retries_once_after_1021_with_fresh_sync(monkeypatch):
+    """-1021 (timestamp outside recvWindow) -> re-sync the clock and replay the
+    request once with a fresh timestamp; a second -1021 surfaces as an error."""
+    from zambahola_beta.executor import BinanceSpot
+
+    client = BinanceSpot(Keys("K" * 64, "S" * 64))
+    calls = {"req": 0, "sync": 0}
+
+    def fake_request(method, url, timeout):
+        calls["req"] += 1
+        if calls["req"] == 1:
+            return _Resp(400, {"code": -1021, "msg": "Timestamp outside recvWindow"})
+        return _Resp(200, {"ok": True})
+
+    monkeypatch.setattr(client.session, "request", fake_request)
+    monkeypatch.setattr(client, "sync_time", lambda: calls.__setitem__("sync", calls["sync"] + 1))
+    out = client._signed("GET", "/api/v3/account", {})
+    assert out == {"ok": True}
+    assert calls["req"] == 2 and calls["sync"] == 1  # exactly one re-sync + replay
+
+    # persistent -1021 (clock truly broken) must still raise, not loop forever
+    def always_1021(method, url, timeout):
+        calls["req"] += 1
+        return _Resp(400, {"code": -1021, "msg": "still outside"})
+
+    monkeypatch.setattr(client.session, "request", always_1021)
+    with pytest.raises(RuntimeError, match="-1021"):
+        client._signed("GET", "/api/v3/account", {})
+
+
 # ---------- cross-margin client (REAL leverage, no network in tests) ----------
 
 def _margin_client(monkeypatch, responses: dict | None = None):
