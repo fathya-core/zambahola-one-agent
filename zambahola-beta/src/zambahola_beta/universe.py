@@ -194,6 +194,65 @@ def smart_score(s: dict, dd_penalty: float = 0.0) -> float:
     return base
 
 
+def suggest_leverage(
+    vol_ann: float,
+    score: float,
+    best_score: float,
+    consensus: float,
+    regime: float,
+    dd_high: float,
+    ret1d: float,
+    *,
+    lev_target_vol: float = 0.9,
+    max_lev: float = 10.0,
+    liq_sigmas: float = 3.0,
+    spike_1x: float = 0.15,
+    periods_per_year: float = 365.0,
+) -> float:
+    """Per-coin leverage suggestion (x1..x`max_lev`) from a PRECISE risk read —
+    the multiplier a futures position could carry so that:
+
+    1. VOL BUDGET — the levered position's annualised vol ~= `lev_target_vol`:
+       raw = lev_target_vol / vol_ann. A calm 30%-vol trend can carry ~3x; a
+       150%-vol coin gets 0.6 -> floored to 1x. Same math as the spot vol-target,
+       extended above 1.
+    2. CONVICTION TILT — scaled by score relative to the book's best pick
+       (0.6 + 0.4 * score/best): the strongest signal keeps the full budget,
+       marginal picks get ~60% of it. "This one is very strong -> take more."
+    3. REGIME — multiplied by the market risk-on scale [0.4..1]: no max leverage
+       in a weak market even for a pretty chart.
+    4. LIQUIDATION SAFETY (hard cap) — an isolated futures position at L
+       liquidates ~1/L below entry; require that distance to be >= `liq_sigmas`
+       daily standard deviations: L <= 1 / (liq_sigmas * daily_vol). A coin
+       moving 8%/day can NEVER carry 10x (one normal day = wipeout).
+    5. NEVER LEVER A SPIKE — if the last day already jumped >= `spike_1x` the
+       entry is chase-risk: hard 1x regardless of score (DODO-type protection).
+    6. TREND QUALITY — consensus below ~0.9 shaves the budget linearly (a 0.75
+       consensus trend is not "very strong" evidence).
+
+    Returns a value rounded to 0.1, clamped to [1.0, max_lev]. This is the
+    ADVISOR: spot execution ignores it (spot cannot lever); futures execution
+    (when enabled) uses it per position.
+    """
+    if max_lev <= 1.0 or vol_ann <= 0 or best_score <= 0 or score <= 0:
+        return 1.0
+    if ret1d >= spike_1x:
+        return 1.0  # fresh vertical candle -> no leverage, ever
+    raw = (lev_target_vol / vol_ann)
+    raw *= 0.6 + 0.4 * min(1.0, score / best_score)          # conviction tilt
+    # market regime: SOFT here (sqrt) — full market caution is applied once at the
+    # PORTFOLIO level (gross notional <= lev_gross_cap * regime). Cutting per-coin by
+    # the full regime too would double-count it and choke leverage to ~1x in any
+    # non-euphoric market, hiding the coin's real risk-capacity from the advisor.
+    raw *= max(0.6, min(1.0, regime ** 0.5))
+    raw *= max(0.5, min(1.0, consensus / 0.9))               # trend quality
+    raw *= max(0.5, 1.0 + dd_high / 0.24)                    # freshness: -12% dd -> x0.5
+    daily_vol = vol_ann / (periods_per_year ** 0.5)
+    if daily_vol > 0:
+        raw = min(raw, 1.0 / (liq_sigmas * daily_vol))       # liquidation safety cap
+    return float(max(1.0, min(max_lev, round(raw, 1))))
+
+
 def market_regime(frames: dict[str, pd.DataFrame], leader: str = "BTCUSDT") -> float:
     """Risk-on/off scale in [0.4, 1.0] from TWO factors, not just BTC:
 
@@ -254,6 +313,9 @@ def scan(
     max_spike_1d: float = 0.0,
     spike_base_max: float = 0.0,
     min_score_frac: float = 0.0,
+    max_lev: float = 0.0,
+    lev_target_vol: float = 0.9,
+    lev_gross_cap: float = 3.0,
 ) -> dict:
     """Rank coins by a smart composite score, allocate to the strongest
     uptrends (vol-targeted, conviction-tilted), scaled by market regime, with a
@@ -407,6 +469,27 @@ def scan(
                 if targets[sym] > c:
                     targets[sym] = round(c, 4)
 
+    # PER-COIN LEVERAGE ADVISOR (x1..x`max_lev`): how much a futures position in each
+    # pick could carry, from vol budget + conviction + regime + liquidation safety
+    # (see suggest_leverage). Portfolio guard: total levered notional (sum w*lev)
+    # is capped at lev_gross_cap * regime — the book can't quietly become 10x gross.
+    # ADVISORY on spot (execution stays 1x); futures execution consumes it directly.
+    leverage: dict[str, float] = {}
+    if picks:
+        best = max(s["score"] for s in picks)
+        for s in picks:
+            leverage[s["symbol"]] = suggest_leverage(
+                s["vol"], s["score"], best, s["consensus"], regime,
+                s["dd_high"], s.get("ret1d", 0.0),
+                lev_target_vol=lev_target_vol, max_lev=max_lev,
+            ) if not s.get("_starter") else 1.0  # starters are probes: never levered
+        gross = sum(targets.get(sym, 0.0) * leverage.get(sym, 1.0) for sym in targets)
+        cap_gross = lev_gross_cap * regime
+        if max_lev > 1.0 and lev_gross_cap > 0 and gross > cap_gross > 0:
+            scale = cap_gross / gross
+            for sym in leverage:
+                leverage[sym] = max(1.0, round(leverage[sym] * scale, 1))
+
     ranked = []
     for s in sorted(scored, key=lambda s: s["score"], reverse=True):
         if s["symbol"] in targets:
@@ -429,6 +512,7 @@ def scan(
             "dd_high": s["dd_high"],
             "realized_vol_ann": s["vol"],
             "target_weight": targets.get(s["symbol"], 0.0),
+            "lev": leverage.get(s["symbol"], 0.0),
             "action": action,
         })
 
@@ -439,6 +523,9 @@ def scan(
         "regime": regime,
         "picks": list(targets.keys()),
         "targets": targets,
+        "leverage": leverage,
+        "gross_exposure": round(sum(
+            targets.get(sym, 0.0) * leverage.get(sym, 1.0) for sym in targets), 4),
         "cash_weight": cash,
         "ranked": ranked,
     }

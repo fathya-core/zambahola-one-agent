@@ -412,3 +412,39 @@ def test_scan_conviction_floor_drops_marginal_full_picks():
               min_vol=0.0, min_score_frac=frac)
     assert hi in on["targets"]
     assert lo not in on["targets"]  # floored out -> capital stays cash
+
+
+def test_suggest_leverage_precise_risk_read():
+    from zambahola_beta.universe import suggest_leverage
+    # calm strong trend near its high in a risk-on market -> multi-x leverage
+    hi = suggest_leverage(0.30, 3.0, 3.0, 1.0, 1.0, 0.0, 0.02,
+                          lev_target_vol=0.9, max_lev=10.0)
+    assert hi >= 2.5
+    # hyper-volatile coin -> vol budget refuses leverage (floored to 1x)
+    assert suggest_leverage(1.8, 3.0, 3.0, 1.0, 1.0, 0.0, 0.02) == 1.0
+    # fresh vertical candle (+20% in a day) -> NEVER levered regardless of score
+    assert suggest_leverage(0.30, 3.0, 3.0, 1.0, 1.0, 0.0, 0.20) == 1.0
+    # weak regime cuts the multiplier for the same coin
+    weak = suggest_leverage(0.30, 3.0, 3.0, 1.0, 0.45, 0.0, 0.02)
+    assert weak < hi
+    # liquidation-safety cap binds even with a huge vol budget:
+    # daily sigma = 0.9/sqrt(365) ~ 4.7% -> cap ~ 1/(3*0.047) ~ 7.1x
+    capped = suggest_leverage(0.9, 3.0, 3.0, 1.0, 1.0, 0.0, 0.0,
+                              lev_target_vol=20.0, max_lev=10.0)
+    assert capped <= 7.2
+    # marginal pick (10% of best score) gets less than the conviction leader
+    lead = suggest_leverage(0.30, 3.0, 3.0, 1.0, 1.0, 0.0, 0.02)
+    marginal = suggest_leverage(0.30, 0.3, 3.0, 1.0, 1.0, 0.0, 0.02)
+    assert marginal < lead
+
+
+def test_scan_leverage_advisor_and_gross_cap():
+    f = _frames()
+    res = scan(f, top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0,
+               min_vol=0.0, max_lev=10.0, lev_target_vol=0.9, lev_gross_cap=2.0)
+    assert set(res["leverage"]) == set(res["targets"])  # advisor covers every pick
+    assert all(v >= 1.0 for v in res["leverage"].values())
+    # portfolio guard: total levered notional <= cap x regime (+rounding slack)
+    gross = sum(res["targets"][s] * res["leverage"][s] for s in res["targets"])
+    assert gross <= 2.0 * res["regime"] + 0.06
+    assert abs(res["gross_exposure"] - gross) < 0.05

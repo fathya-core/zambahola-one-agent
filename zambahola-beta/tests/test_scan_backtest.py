@@ -37,3 +37,28 @@ def test_backtest_runs_and_returns_metrics():
 def test_backtest_needs_enough_coins():
     res = backtest_scan({"AUSDT": _frame(100 * np.ones(400))}, min_bars=300)
     assert res["ok"] is False
+
+
+def test_backtest_leverage_simulation_metrics():
+    """max_lev > 1: same walk-forward but with per-coin levered notionals; the run
+    must report gross exposure/liquidation stats and gross must respect the cap."""
+    rng = np.random.default_rng(2)
+    n = 360
+
+    def series(drift: float) -> np.ndarray:
+        return 100 * np.cumprod(1 + rng.normal(drift, 0.02, n))
+
+    frames = {
+        "BTCUSDT": _frame(series(0.002)),
+        "AUSDT": _frame(series(0.004)),
+        "BUSDT": _frame(series(0.003)),
+        "CUSDT": _frame(series(0.0035)),
+    }
+    base = backtest_scan(frames, top_n=2, warmup=210, min_bars=300, max_lev=0.0)
+    lev = backtest_scan(frames, top_n=2, warmup=210, min_bars=300,
+                        max_lev=10.0, lev_target_vol=0.9, lev_gross_cap=2.0)
+    assert base["ok"] and lev["ok"]
+    assert "liq_events" in lev and "avg_gross" in lev
+    # leverage deploys MORE notional than the unlevered run, but never above the cap
+    assert lev["avg_gross"] >= base["avg_gross"] - 1e-9
+    assert lev["avg_gross"] <= 2.0 + 0.1

@@ -165,6 +165,7 @@ _PERSIST_FIELDS = (
     "starter_frac", "starter_max_vol", "starter_min_mom30", "starter_regime_min",
     "max_entry_gap_pct", "entry_quality_dd_penalty", "entry_max_dd",
     "max_spike_1d", "spike_base_max", "min_score_frac",
+    "max_lev", "lev_target_vol", "lev_gross_cap",
 )
 
 
@@ -362,12 +363,13 @@ function render(s){
  {let sc=s.scanned!=null?("مُسح "+s.scanned+" عملة"):"";if(s.regime!=null){const rp=Math.round(s.regime*100);sc+=" · وضع السوق: "+rp+"% "+(rp>=80?"🟢":(rp>=55?"🟡":"🔴 خطر"));}$("scanned").textContent=sc;}
  // market scan table (smart score = risk-adjusted momentum + acceleration + relative strength)
  const ranked=s.ranked||s.signal?.ranked;
- if(ranked&&ranked.length){let h='<table><tr><th>#</th><th>العملة</th><th>السعر</th><th>قوة الترند</th><th>زخم 90ي</th><th>عائد/مخاطرة</th><th>الوزن</th><th>الحالة</th></tr>';
-  ranked.forEach((r,i)=>{const inv=r.action==="INVEST";h+=`<tr><td>${i+1}</td><td><b>${r.symbol}</b></td><td>${r.price}</td>
-   <td>${Math.round((r.trend_consensus||0)*100)}%</td><td style="color:${r.momentum>=0?'var(--up)':'var(--down)'}">${(r.momentum*100).toFixed(1)}%</td>
-   <td style="color:${(r.risk_adj||0)>=0?'var(--up)':'var(--down)'}">${(r.risk_adj!=null?r.risk_adj.toFixed(2):'—')}</td>
-   <td>${Math.round((r.target_weight||0)*100)}%</td><td>${inv?'<span class="badge b-up">استثمر</span>':(r.action==="STOP"?'<span class="badge b-down">وقف خسارة</span>':(r.action==="UPTREND"?'<span class="badge b-warn">صاعد</span>':'<span class="badge b-mut">—</span>'))}</td></tr>`;});
-  $("market").innerHTML=h+'</table>';}
+ if(ranked&&ranked.length){let h='<table><tr><th>#</th><th>العملة</th><th>السعر</th><th>قوة الترند</th><th>زخم 90ي</th><th>عائد/مخاطرة</th><th>الوزن</th><th>رافعة مقترحة</th><th>الحالة</th></tr>';
+ ranked.forEach((r,i)=>{const inv=r.action==="INVEST";const lv=(inv&&r.lev)?('×'+r.lev+(r.lev>=5?' 💪':'')):'—';h+=`<tr><td>${i+1}</td><td><b>${r.symbol}</b></td><td>${r.price}</td>
+  <td>${Math.round((r.trend_consensus||0)*100)}%</td><td style="color:${r.momentum>=0?'var(--up)':'var(--down)'}">${(r.momentum*100).toFixed(1)}%</td>
+  <td style="color:${(r.risk_adj||0)>=0?'var(--up)':'var(--down)'}">${(r.risk_adj!=null?r.risk_adj.toFixed(2):'—')}</td>
+  <td>${Math.round((r.target_weight||0)*100)}%</td><td style="color:${(r.lev||1)>1?'var(--up)':'var(--mut)'}"><b>${lv}</b></td><td>${inv?'<span class="badge b-up">استثمر</span>':(r.action==="STOP"?'<span class="badge b-down">وقف خسارة</span>':(r.action==="UPTREND"?'<span class="badge b-warn">صاعد</span>':'<span class="badge b-mut">—</span>'))}</td></tr>`;});
+ if(s.signal&&s.signal.gross_exposure!=null&&s.live)h+='<div class="k" style="margin-top:6px">الرافعة المقترحة تُحسب لكل عملة (تقلّب + قناعة + وضع السوق + أمان التصفية) — التنفيذ الحالي spot = ×1؛ تفعيلها الفعلي يتطلّب حساب فيوتشرز.</div>';
+ $("market").innerHTML=h+'</table>';}
  else $("market").textContent="السوق كله هابط الآن — البقاء نقداً هو القرار الصحيح (حماية من الخسارة).";
  const a=$("assets");a.innerHTML="";
  const rs=s.signal?s.signal.reasons:{};
@@ -375,7 +377,7 @@ function render(s){
   a.innerHTML+=`<div class="card"><div class="flex"><b>${sym}</b><span class="sw">${actionBadge(r.action)}</span></div>
   <div class="big">${r.price}</div><div class="k">السعر</div>
   <div style="margin-top:8px">قوة الترند: ${pct}%<div class="bar"><i style="width:${pct}%"></i></div></div>
-  <div class="k" style="margin-top:8px">الوزن الهدف: ${Math.round((r.target_weight||0)*100)}% · تقلّب: ${Math.round((r.realized_vol_ann||0)*100)}%</div></div>`;}
+  <div class="k" style="margin-top:8px">الوزن الهدف: ${Math.round((r.target_weight||0)*100)}% · تقلّب: ${Math.round((r.realized_vol_ann||0)*100)}%${(r.lev&&r.lev>1)?' · رافعة مقترحة: <b style="color:var(--up)">×'+r.lev+'</b>':''}</div></div>`;}
  if(s.cash_weight!=null&&s.cash_weight>0.001)a.innerHTML+=`<div class="card"><div class="flex"><b>نقد</b><span class="sw badge b-mut">${Math.round(s.cash_weight*100)}%</span></div><div class="k" style="margin-top:8px">غير مستثمر — حماية من الهبوط</div></div>`;
  $("acctstatus").innerHTML=s.account?.connected?'<span class="badge b-up">متصل</span>':'<span class="badge b-mut">غير متصل (أضف المفاتيح)</span>';
  $("equity").textContent=s.account?.equity_usd!=null?("$"+s.account.equity_usd):"—";
@@ -523,6 +525,17 @@ class AppConfig:
     # drawdown -41%->-40%, WFE ~2.0 — concentrates capital in real conviction and
     # (on a small live book) avoids sub-$10 slices that can never fill.
     min_score_frac: float = 0.30
+    # PER-COIN LEVERAGE ADVISOR (x1..x max_lev): computed per pick from vol budget x
+    # conviction x (soft) regime with a hard liquidation-safety cap (see
+    # suggest_leverage). Long-basket A/B (4.4y, 20bps + funding + liquidation sim):
+    # 179% -> 250% return at the SAME -40% drawdown, Sharpe 1.09 -> 1.17, 0
+    # liquidations; gross caps above x2 add nothing (the per-coin liquidation-safety
+    # math is the binding constraint, by design — that's what keeps drawdown flat).
+    # ADVISORY on spot (execution stays 1x — spot physically cannot lever); futures
+    # execution (when a futures account/keys exist) will consume it per position.
+    max_lev: float = 10.0
+    lev_target_vol: float = 0.9   # levered position's annualised-vol budget
+    lev_gross_cap: float = 2.0    # portfolio guard: sum(weight x lev) <= this x regime
     profit_lock_arm: float = 0.15  # arm the profit ratchet once a position is up this %
     profit_lock_giveback: float = 0.07  # FLOOR give-back; actual is vol-adaptive (7%-18%)
     min_hold_hours: float = 24.0  # anti-churn: hold a new position at least this long (rotation only)
@@ -694,7 +707,9 @@ def _scan_signal(cfg: AppConfig, *, exclude: set | None = None) -> tuple[dict, l
               dd_penalty=cfg.entry_quality_dd_penalty,
               entry_max_dd=cfg.entry_max_dd,
               max_spike_1d=cfg.max_spike_1d, spike_base_max=cfg.spike_base_max,
-              min_score_frac=cfg.min_score_frac)
+              min_score_frac=cfg.min_score_frac,
+              max_lev=cfg.max_lev, lev_target_vol=cfg.lev_target_vol,
+              lev_gross_cap=cfg.lev_gross_cap)
     as_of = ""
     first = next((s for s in symbols if s in frames), None)
     if first is not None:
@@ -718,6 +733,8 @@ def _scan_signal(cfg: AppConfig, *, exclude: set | None = None) -> tuple[dict, l
         "scanned": sc["scanned"],
         "regime": sc.get("regime", 1.0),
         "targets": sc["targets"],
+        "leverage": sc.get("leverage", {}),
+        "gross_exposure": sc.get("gross_exposure"),
         "cash_weight": sc["cash_weight"],
         "candle_close": closes,
         "ranked": ranked,
@@ -1531,7 +1548,11 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
                   dd_penalty=cfg.entry_quality_dd_penalty,
                   entry_max_dd=cfg.entry_max_dd,
                   max_spike_1d=cfg.max_spike_1d, spike_base_max=cfg.spike_base_max,
-                  min_score_frac=cfg.min_score_frac)
+                  min_score_frac=cfg.min_score_frac,
+                  # spot parity: the user-facing backtest simulates what EXECUTION does
+                  # today (1x). Leverage variants run via the A/B harness; flip to
+                  # cfg.max_lev when futures execution goes live.
+                  max_lev=0.0)
     res = backtest_scan(frames, **common)
     res["scope"] = "years" if long_history else "recent"
     res["interval"] = cfg.interval
@@ -1666,6 +1687,9 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "max_spike_1d": cfg.max_spike_1d,
                     "spike_base_max": cfg.spike_base_max,
                     "min_score_frac": cfg.min_score_frac,
+                    "max_lev": cfg.max_lev,
+                    "lev_target_vol": cfg.lev_target_vol,
+                    "lev_gross_cap": cfg.lev_gross_cap,
                     "pnl_peak_usd": round(state.pnl_peak_usd, 2),
                     "tp_cooldown_min": max(0, int((state.port_tp_cooldown_until - time.time()) / 60)),
                     "backtest": state.backtest,
@@ -1732,6 +1756,12 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.spike_base_max = max(-0.5, min(0.5, float(body["spike_base_max"])))
             if "min_score_frac" in body:
                 cfg.min_score_frac = max(0.0, min(0.9, float(body["min_score_frac"])))
+            if "max_lev" in body:
+                cfg.max_lev = max(0.0, min(20.0, float(body["max_lev"])))
+            if "lev_target_vol" in body:
+                cfg.lev_target_vol = max(0.1, min(3.0, float(body["lev_target_vol"])))
+            if "lev_gross_cap" in body:
+                cfg.lev_gross_cap = max(0.0, min(10.0, float(body["lev_gross_cap"])))
             if "take_profit_pct" in body:
                 cfg.take_profit_pct = max(1.0, float(body["take_profit_pct"]))
             if "take_profit_frac" in body:

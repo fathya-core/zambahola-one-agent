@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from .strategy import align_closes, realized_vol, trend_consensus
+from .universe import suggest_leverage
 
 
 def backtest_scan(
@@ -52,6 +53,10 @@ def backtest_scan(
     max_spike_1d: float = 0.0,
     spike_base_max: float = 0.0,
     min_score_frac: float = 0.0,
+    max_lev: float = 0.0,
+    lev_target_vol: float = 0.9,
+    lev_gross_cap: float = 3.0,
+    funding_daily: float = 0.0003,
 ) -> dict:
     frames = {s: df for s, df in frames.items() if len(df) >= min_bars}
     if len(frames) < 2:
@@ -89,8 +94,10 @@ def backtest_scan(
     port_ret: list[float] = []
     equity: list[float] = []
     eq = 1.0
-    prev_w: dict[str, float] = {n: 0.0 for n in names}
+    prev_wl: dict[str, float] = {n: 0.0 for n in names}  # previous NOTIONAL (w x lev)
     stop_until: dict[str, int] = {}  # anti-whipsaw: no re-entry until this bar index
+    gross_sum = 0.0
+    liq_events = 0  # coin-days where lev * ret <= -100% (isolated margin wiped)
 
     begin = max(warmup, start_index)  # start_index enables true out-of-sample windows
     for t in range(begin, last - 1):
@@ -212,15 +219,59 @@ def backtest_scan(
                     for n, rv in raw.items():
                         w[n] = w.get(n, 0.0) - rv / ssum * short_budget  # negative = short
 
-        turnover = sum(abs(w[n] - prev_w[n]) for n in names)
+        # PER-COIN LEVERAGE (futures simulation) — the same advisor as the live scan:
+        # vol budget x conviction x regime with a hard liquidation-safety cap; gross
+        # notional (sum w*lev) capped at lev_gross_cap * regime. Extra notional pays
+        # perpetual funding daily, and a coin-day where lev*ret <= -100% wipes that
+        # position's margin (isolated liquidation) instead of going more negative.
+        lev = {n: 1.0 for n in names}
+        if max_lev > 1.0 and picks:
+            best_sc = max(sc for _, sc, _, _ in picks)
+            for n, sc, v, st in picks:
+                if st:
+                    continue  # starters are probes: never levered
+                cn, d, r1 = cons[n].iloc[t], dd[n].iloc[t], ret1d[n].iloc[t]
+                lev[n] = suggest_leverage(
+                    float(v), float(sc), float(best_sc),
+                    0.0 if pd.isna(cn) else float(cn), regime,
+                    0.0 if pd.isna(d) else float(d),
+                    0.0 if pd.isna(r1) else float(r1),
+                    lev_target_vol=lev_target_vol, max_lev=max_lev,
+                    periods_per_year=periods_per_year,
+                )
+            gross = sum(w[n] * lev[n] for n in names if w[n] > 0)
+            cap_g = lev_gross_cap * regime
+            if lev_gross_cap > 0 and gross > cap_g > 0:
+                scale = cap_g / gross
+                for n in lev:
+                    lev[n] = max(1.0, round(lev[n] * scale, 1))
+
+        wl = {n: w[n] * (lev[n] if w[n] > 0 else 1.0) for n in names}
+        turnover = sum(abs(wl[n] - prev_wl[n]) for n in names)  # cost on real notional
         cost = turnover * cost_bps / 10000.0
+        funding = sum(w[n] * (lev[n] - 1.0) for n in names if w[n] > 0) * funding_daily
         nxt = rets.iloc[t + 1]
-        r = sum(w[n] * (0.0 if pd.isna(nxt[n]) else nxt[n]) for n in names)
-        net = r - cost
+        r = 0.0
+        for n in names:
+            wn = w[n]
+            if wn == 0.0:
+                continue
+            rn_ = nxt[n]
+            rn = 0.0 if pd.isna(rn_) else float(rn_)
+            ln = lev[n] if wn > 0 else 1.0
+            if ln > 1.0:
+                lr = ln * rn
+                if lr <= -1.0:
+                    liq_events += 1
+                r += wn * max(lr, -1.0)  # isolated: margin can't lose more than 100%
+            else:
+                r += wn * rn
+        net = r - cost - funding
+        gross_sum += sum(abs(x) for x in wl.values())
         eq *= (1 + net)
         port_ret.append(net)
         equity.append(eq)
-        prev_w = w
+        prev_wl = wl
 
     pr = np.array(port_ret)
     eqs = np.array(equity)
@@ -247,5 +298,8 @@ def backtest_scan(
         "max_drawdown": round(mdd, 4),
         "positive_days_pct": round(float((pr > 0).mean() * 100), 1),
         "btc_hodl_return": round(btc_hodl, 4) if btc_hodl is not None else None,
+        "max_lev": max_lev,
+        "avg_gross": round(gross_sum / days, 3),
+        "liq_events": liq_events,
         "equity_curve": [round(float(x), 4) for x in eqs[::max(1, days // 80)]],
     }
