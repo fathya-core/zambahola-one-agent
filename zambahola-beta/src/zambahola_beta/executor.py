@@ -381,6 +381,41 @@ class BinanceMargin(BinanceSpot):
         except Exception:  # noqa: BLE001
             return 0.0
 
+    def marginable_symbols(self) -> frozenset[str] | None:
+        """Symbols Binance allows BUYING on cross margin — NOT every spot pair is
+        marginable, and buying a spot-only symbol in a margin wallet is rejected.
+        The list barely changes, so it is cached process-wide for 12h; the read
+        endpoint works for Portfolio Margin accounts too (only orders need papi).
+        Returns the last known set on failure, or None if never fetched."""
+        global _MARGINABLE_CACHE
+        now = time.time()
+        if _MARGINABLE_CACHE and now - _MARGINABLE_CACHE[0] < 12 * 3600:
+            return _MARGINABLE_CACHE[1]
+        try:
+            rows = self._signed("GET", "/sapi/v1/margin/allPairs", {})
+            out = frozenset(r["symbol"] for r in rows if r.get("isBuyAllowed", True))
+            if out:
+                _MARGINABLE_CACHE = (now, out)
+            return out or None
+        except Exception:  # noqa: BLE001
+            return _MARGINABLE_CACHE[1] if _MARGINABLE_CACHE else None
+
+    def usdt_borrow_daily(self) -> float | None:
+        """Current daily interest rate for borrowing USDT (cost transparency;
+        cached 12h). E.g. 0.000106 = 0.0106%/day ≈ 3.9%/yr."""
+        global _BORROW_RATE_CACHE
+        now = time.time()
+        if _BORROW_RATE_CACHE and now - _BORROW_RATE_CACHE[0] < 12 * 3600:
+            return _BORROW_RATE_CACHE[1]
+        try:
+            rows = self._signed("GET", "/sapi/v1/margin/crossMarginData", {"coin": "USDT"})
+            rate = float(rows[0]["dailyInterest"]) if rows else None
+            if rate is not None:
+                _BORROW_RATE_CACHE = (now, rate)
+            return rate
+        except Exception:  # noqa: BLE001
+            return _BORROW_RATE_CACHE[1] if _BORROW_RATE_CACHE else None
+
     # -- orders ------------------------------------------------------------
     def market_order(self, symbol: str, side: str, *, quote_qty: float | None = None,
                      quantity: float | None = None) -> dict:
@@ -535,8 +570,12 @@ class BinancePortfolioMargin(BinanceMargin):
                               {"asset": asset, "amount": round(float(amount), 8)})
 
 
-# module-level cache: PM enrollment doesn't change mid-session, so probe once.
+# module-level caches (survive per-cycle client re-instantiation):
+# PM enrollment doesn't change mid-session; marginable pairs / borrow rates
+# barely move, so both are refreshed at most every 12h.
 _PM_DETECTED: bool | None = None
+_MARGINABLE_CACHE: tuple[float, frozenset[str]] | None = None
+_BORROW_RATE_CACHE: tuple[float, float] | None = None
 
 
 def make_margin_client(keys: Keys, *, recv_window: int = 10000) -> BinanceMargin:

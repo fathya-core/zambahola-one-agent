@@ -394,9 +394,23 @@ def test_platform_limit_error_matcher():
         "The max transfer in quantity is 0.")
     assert _is_platform_limit_error("Binance -3045: The system does not have enough asset now.")
     assert _is_platform_limit_error("borrow amount exceeds the limit")
+    # margin-untradeable pairs are permanent platform limits too
+    assert _is_platform_limit_error("Binance -3027: Not a valid margin asset.")
+    assert _is_platform_limit_error("Binance -11001: Isolated margin account does not exist.")
     # ordinary failures are NOT platform bans (insufficient balance, timeouts...)
     assert not _is_platform_limit_error("Binance -2010: Account has insufficient balance")
     assert not _is_platform_limit_error("HTTP 504: gateway timeout")
+
+
+def test_marginable_universe_fails_open_when_margin_off():
+    """Spot/testnet mode never filters the universe — the marginable list only
+    matters when orders actually go to the margin wallet."""
+    from zambahola_beta.webapp import AppConfig, _marginable_universe
+    cfg = AppConfig()
+    cfg.margin, cfg.live = False, True
+    assert _marginable_universe(cfg) is None
+    cfg.margin, cfg.live = True, False
+    assert _marginable_universe(cfg) is None
 
 
 def test_transfer_amount_floors_with_buffer():

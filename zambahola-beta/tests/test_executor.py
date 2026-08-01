@@ -348,6 +348,45 @@ def test_pm_transfer_falls_back_to_portfolio_types(monkeypatch):
     assert calls[1]["type"] == "MAIN_PORTFOLIO_MARGIN"  # then the PM-specific type
 
 
+def test_marginable_symbols_filters_buy_allowed_and_caches(monkeypatch):
+    """Only isBuyAllowed pairs count as marginable; the set is cached process-
+    wide so the next call (or the next cycle's client) does zero HTTP."""
+    import zambahola_beta.executor as ex
+    monkeypatch.setattr(ex, "_MARGINABLE_CACHE", None)
+    pairs = [
+        {"symbol": "BTCUSDT", "isBuyAllowed": True},
+        {"symbol": "ONDOUSDT", "isBuyAllowed": True},
+        {"symbol": "TONUSDT", "isBuyAllowed": False},  # spot-only for margin buys
+    ]
+    client, calls = _margin_client(monkeypatch, {"/sapi/v1/margin/allPairs": pairs})
+    out = client.marginable_symbols()
+    assert out == frozenset({"BTCUSDT", "ONDOUSDT"})
+    # cache hit: same result, no extra HTTP call — even from a NEW client
+    client2, calls2 = _margin_client(monkeypatch)
+    assert client2.marginable_symbols() == out
+    assert calls2 == []
+
+
+def test_marginable_symbols_keeps_last_set_on_failure(monkeypatch):
+    import zambahola_beta.executor as ex
+    monkeypatch.setattr(ex, "_MARGINABLE_CACHE", (0.0, frozenset({"BTCUSDT"})))
+
+    def boom(method, path, params):
+        raise RuntimeError("network down")
+
+    client, _ = _margin_client(monkeypatch)
+    monkeypatch.setattr(client, "_signed", boom)
+    assert client.marginable_symbols() == frozenset({"BTCUSDT"})  # stale > nothing
+
+
+def test_usdt_borrow_daily_reads_cross_margin_data(monkeypatch):
+    import zambahola_beta.executor as ex
+    monkeypatch.setattr(ex, "_BORROW_RATE_CACHE", None)
+    client, _ = _margin_client(
+        monkeypatch, {"/sapi/v1/margin/crossMarginData": [{"dailyInterest": "0.00010582"}]})
+    assert client.usdt_borrow_daily() == 0.00010582
+
+
 def test_make_margin_client_detects_pm_accounts(monkeypatch):
     import zambahola_beta.executor as ex
     keys = Keys("K" * 64, "S" * 64)

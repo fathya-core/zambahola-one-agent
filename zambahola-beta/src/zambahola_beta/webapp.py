@@ -57,15 +57,29 @@ MARGIN_LEVEL_TARGET = 2.0
 
 # Exchange-side PER-TOKEN limits that no retry can fix (Binance margin/PM):
 # 51169 = token reached the platform-wide max pledged collateral, -3045/51070..
-# = borrow pool exhausted. The buy is refused for HOURS regardless of our
-# account, so the symbol is temp-banned and the budget rotates to the next pick.
+# = borrow pool exhausted, -3027/-11001 = pair isn't margin-tradeable at all.
+# The buy is refused for HOURS (or forever) regardless of our account, so the
+# symbol is temp-banned and the budget rotates to the next pick.
 PLATFORM_LIMIT_BAN_HOURS = 6.0
 _PLATFORM_LIMIT_PAT = re.compile(
-    r"51169|max pledged collateral|-3045|51070|borrow.{0,20}(limit|exceed)", re.I)
+    r"51169|max pledged collateral|-3045|51070|borrow.{0,20}(limit|exceed)"
+    r"|-3027|-11001|not a valid margin|margin (asset|pair|symbol).{0,20}not", re.I)
 
 
 def _is_platform_limit_error(msg: str) -> bool:
     return bool(_PLATFORM_LIMIT_PAT.search(msg))
+
+
+def _marginable_universe(cfg) -> frozenset[str] | None:
+    """Margin-buyable symbols when trading on margin (12h-cached in executor,
+    so this is virtually free between refreshes). None = no filtering (spot
+    mode, testnet, or the list is unavailable — fail open)."""
+    if not (cfg.margin and cfg.live):
+        return None
+    try:
+        return make_margin_client(load_keys(testnet=False)).marginable_symbols()
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _margin_deleverage_usd(gross_assets: float, debt: float,
@@ -429,7 +443,8 @@ function render(s){
   let mt="";
   if(MARGIN&&ms){const pm=!!ms.pm;const bb=pm?2.0:1.8;const dl=pm?1.5:1.4;
    const lv=ms.margin_level>=999?"∞":Number(ms.margin_level).toFixed(2);const lc=(ms.margin_level<bb&&ms.margin_level<999)?"var(--warn)":"var(--up)";
-   mt=(pm?'<b>مارجن موحّد (Portfolio Margin)</b> · uniMMR ':'مستوى الهامش ')+'<b style="color:'+lc+'">'+lv+'</b> · قرض $'+(ms.debt_usdt||0)+' · صافي $'+(ms.net_equity_usd!=null?ms.net_equity_usd:"—")+' · حارس تصفية: حظر شراء &lt;'+bb+'، تخفيض &lt;'+dl;}
+   const br=(ms.borrow_daily!=null)?' · فائدة الاقتراض '+(ms.borrow_daily*100).toFixed(3)+'%/يوم':'';
+   mt=(pm?'<b>مارجن موحّد (Portfolio Margin)</b> · uniMMR ':'مستوى الهامش ')+'<b style="color:'+lc+'">'+lv+'</b> · قرض $'+(ms.debt_usdt||0)+' · صافي $'+(ms.net_equity_usd!=null?ms.net_equity_usd:"—")+br+' · حارس تصفية: حظر شراء &lt;'+bb+'، تخفيض &lt;'+dl;}
   else if(MARGIN)mt="مفعّل — بانتظار قراءة الحساب";
   else mt=s.live?"مطفأ — الشراء نقدي فقط. التفعيل: بيع سبوت → تحويل USDT ضمان → اقتراض فعلي":"يتطلّب الوضع الحقيقي (live)";
   $("mgstats").innerHTML=mt;}
@@ -798,6 +813,14 @@ def _scan_signal(cfg: AppConfig, *, exclude: set | None = None) -> tuple[dict, l
     symbols = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd,
                                 adaptive=cfg.adaptive_liquidity,
                                 gainers_extra=cfg.gainers_extra)
+    # MARGIN AWARENESS: not every spot pair is margin-buyable (e.g. TON/UTK are
+    # spot-only) — with margin ON those orders would be rejected every cycle, so
+    # they are dropped from the universe up-front and the budget goes to coins
+    # the venue will actually fill. Fail-open on fetch problems (order-level
+    # platform bans still catch stragglers).
+    mset = _marginable_universe(cfg)
+    if mset:
+        symbols = [s for s in symbols if s in mset]
     frames = fetch_frames(symbols, interval=cfg.interval, total=max(cfg.bars, 400))
     held = {s for s, p in load_ledger().positions.items() if p.qty > 1e-9}
     sc = scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total,
@@ -892,6 +915,7 @@ def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -
             if isinstance(client, BinanceMargin):
                 # equity must be NET of the loan (free coins include borrowed money)
                 ms = client.margin_stats()
+                ms["borrow_daily"] = client.usdt_borrow_daily()  # cost transparency
                 account["margin"] = ms
                 account["equity_usd"] = round(
                     account.get("equity_usd", 0.0) - ms.get("debt_usdt", 0.0), 2)
