@@ -1624,6 +1624,12 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
             save_ledger(led)
             return {"ok": True, "orders": forced, "buys": 0, "sells": forced,
                     "rotated": False}
+        # visibility: this silent return spooked the operator ("did it even run?").
+        # Log the gate decision, throttled to ~once/hour so the ring buffer survives.
+        now_gate = time.time()
+        if now_gate - getattr(state, "_gate_log_ts", 0.0) > 3500:
+            state._gate_log_ts = now_gate
+            state.log("⏳ لا تدوير — بانتظار إغلاق شمعة يومية جديدة (الوقف/قفل الربح شغال كل 5د)")
         return {"ok": True, "orders": 0, "buys": 0, "sells": 0, "rotated": False}
     # committed to rotating on THIS candle -> record it now so any subsequent same-candle
     # cycle (even one that ends with "no orders") skips rotation until a new candle closes.
@@ -2130,7 +2136,14 @@ def _auto_loop(cfg: AppConfig, state: AppState) -> None:
             with state.lock:
                 halted = state.halted
             if execute and not halted:
-                do_execute(cfg, state)
+                res = do_execute(cfg, state)
+                if res.get("skipped") == "busy":
+                    # collided with the 5-min fast guard — the guard finishes in
+                    # seconds, so retry once instead of silently losing the hour
+                    time.sleep(15)
+                    res = do_execute(cfg, state)
+                    if res.get("skipped") == "busy":
+                        state.log("⚠️ التنفيذ الساعي مشغول (تصادم مع الحارس) — سيُعاد في الدورة القادمة")
         except Exception as exc:  # noqa: BLE001
             state.log(f"خطأ تلقائي: {exc}")
 
