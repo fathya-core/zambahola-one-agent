@@ -402,6 +402,105 @@ def test_platform_limit_error_matcher():
     assert not _is_platform_limit_error("HTTP 504: gateway timeout")
 
 
+class _GuardClient:
+    """Minimal client for do_fast_guard: prices + balances + full-fill sells."""
+
+    def __init__(self, prices, balances):
+        self._prices = prices
+        self.balances_map = balances
+        self.sells: list[str] = []
+
+    def sync_time(self):
+        pass
+
+    def all_prices(self):
+        return dict(self._prices)
+
+    def balances(self):
+        return dict(self.balances_map)
+
+    def market_sell_all(self, symbol, wallet_qty):
+        self.sells.append(symbol)
+        px = self._prices[symbol]
+        return {"executedQty": str(wallet_qty),
+                "cummulativeQuoteQty": str(wallet_qty * px), "status": "FILLED"}
+
+
+def _fast_guard_env(tmp_path, monkeypatch, client):
+    import zambahola_beta.webapp as wa
+    monkeypatch.setenv("ZAMBAHOLA_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(wa, "_connect", lambda live, margin=False: client)
+    return wa
+
+
+def test_fast_guard_sells_hard_stopped_coin_and_bans_rebuy(tmp_path, monkeypatch):
+    """A coin 15% underwater must be cut by the 5-min guard (not wait for the
+    hourly cycle) and re-entry banned for the stop cooldown."""
+    from zambahola_beta.ledger import Ledger, save_ledger, load_ledger
+    client = _GuardClient({"SYNUSDT": 85.0}, {"SYN": 10.0, "USDT": 50.0})
+    wa = _fast_guard_env(tmp_path, monkeypatch, client)
+    led = Ledger()
+    led.record("BUY", "SYNUSDT", usd=1000.0, price=100.0, fee_bps=0)  # now -15%
+    save_ledger(led)
+    cfg = AppConfig()
+    state = AppState()
+    res = wa.do_fast_guard(cfg, state)
+    assert res["ok"] and res["sold"] == 1
+    assert client.sells == ["SYNUSDT"]
+    assert load_ledger().positions["SYNUSDT"].qty <= 1e-9
+    assert state.sell_ban_until.get("SYNUSDT", 0) > time.time()  # anti-whipsaw
+
+
+def test_fast_guard_locks_profit_with_vol_adaptive_giveback(tmp_path, monkeypatch):
+    """+30% winner that pulled back 8% from its peak: locks with the DEFAULT
+    floor (7%), but a wild coin (high realized vol in the last scan) gets the
+    wider adaptive band and is left to run — same maths as the hourly cycle."""
+    from zambahola_beta.ledger import Ledger, save_ledger
+    prices = {"CALMUSDT": 130.0 * 0.92, "WILDUSDT": 130.0 * 0.92}
+    client = _GuardClient(prices, {"CALM": 10.0, "WILD": 10.0})
+    wa = _fast_guard_env(tmp_path, monkeypatch, client)
+    led = Ledger()
+    for sym in ("CALMUSDT", "WILDUSDT"):
+        led.record("BUY", sym, usd=1000.0, price=100.0, fee_bps=0)
+        led.positions[sym].peak = 130.0  # ran to +30%, now gave back 8%
+    save_ledger(led)
+    cfg = AppConfig()
+    state = AppState()
+    # last scan snapshot: WILD is hyper-volatile -> adaptive giveback ≈ 16% > 8%
+    state.signal = {"ranked": [{"symbol": "WILDUSDT", "realized_vol_ann": 1.25}]}
+    res = wa.do_fast_guard(cfg, state)
+    assert res["ok"] and res["sold"] == 1
+    assert client.sells == ["CALMUSDT"]  # wild coin keeps running
+
+
+def test_fast_guard_idle_book_makes_no_network_calls(tmp_path, monkeypatch):
+    from zambahola_beta.ledger import Ledger, save_ledger
+
+    class _Boom:
+        def __getattr__(self, name):
+            raise AssertionError("no client calls expected with a flat book")
+
+    wa = _fast_guard_env(tmp_path, monkeypatch, _Boom())
+    save_ledger(Ledger())
+    res = wa.do_fast_guard(AppConfig(), AppState())
+    assert res == {"ok": True, "sold": 0}
+
+
+def test_exec_mutex_makes_overlapping_order_paths_skip(tmp_path, monkeypatch):
+    """If the hourly cycle is mid-flight, the fast guard skips instead of
+    double-selling the same coin (and vice versa)."""
+    import zambahola_beta.webapp as wa
+    monkeypatch.setenv("ZAMBAHOLA_DATA_DIR", str(tmp_path))
+    assert wa._EXEC_MUTEX.acquire(blocking=False)
+    try:
+        res = wa.do_fast_guard(AppConfig(), AppState())
+        assert res.get("skipped") == "busy"
+        res2 = wa.do_execute(AppConfig(), AppState())
+        assert res2.get("skipped") == "busy"
+    finally:
+        wa._EXEC_MUTEX.release()
+
+
 def test_net_external_flow_signs_values_and_watermark():
     """ROLL_IN adds, ROLL_OUT subtracts, non-USDT rows are valued at the live
     price, and the watermark advances even for rows we can't value — the exact

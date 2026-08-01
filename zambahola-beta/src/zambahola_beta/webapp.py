@@ -13,6 +13,7 @@ never shown (only masked).
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -1234,6 +1235,26 @@ def _reconcile_ledger(led, balances: dict, allp: dict, state: AppState,
     return changed
 
 
+# Order paths must never overlap: the hourly auto cycle, the dashboard button,
+# the portfolio-TP quick reaction and the 5-min fast guard all place orders, and
+# two of them selling the same coin concurrently would double-book fills. One
+# non-blocking mutex — whoever is second simply skips (the next tick retries).
+_EXEC_MUTEX = threading.Lock()
+
+
+def _serialized(fn):
+    @functools.wraps(fn)
+    def wrap(*a, **k):
+        if not _EXEC_MUTEX.acquire(blocking=False):
+            return {"ok": False, "skipped": "busy"}
+        try:
+            return fn(*a, **k)
+        finally:
+            _EXEC_MUTEX.release()
+    return wrap
+
+
+@_serialized
 def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False) -> dict:
     try:
         safety_gate(live=cfg.live)
@@ -1738,6 +1759,72 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
     save_ledger(led)
     return {"ok": True, "orders": placed, "buys": buys, "sells": sells + forced,
             "rotated": True}
+
+
+@_serialized
+def do_fast_guard(cfg: AppConfig, state: AppState) -> dict:
+    """FAST protective sweep (every ~5 min): hard-stop / trailing-stop /
+    profit-lock exits only, from ONE bulk price call — no scan, no rebalance,
+    no entries. Cuts crash-reaction time from the hourly cycle to minutes; the
+    hourly cycle still owns the finer logic (vol-adaptive give-backs, book-drop
+    cleanup, stablecoin dust). Exits here use the same _force_sell_symbols path,
+    so fills are booked from the real exchange response and margin sells
+    AUTO_REPAY the loan."""
+    led = load_ledger()
+    if not any(p.qty > 1e-12 for p in led.positions.values()):
+        return {"ok": True, "sold": 0}
+    try:
+        client = _connect(cfg.live, cfg.margin)
+        if client is None:
+            return {"ok": False, "error": "no keys"}
+        client.sync_time()
+        allp = client.all_prices()
+        balances = client.balances()
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+    led.update_peaks(allp)
+    from .universe import _STABLES
+    tiers = _TRAIL_TIERS if cfg.progressive_trail else None
+    exits = led.risk_exits(allp, cfg.hard_stop_pct, cfg.stop_pct, stables=_STABLES,
+                           trail_tiers=tiers)
+    reasons: dict[str, str] = {}
+    stop_syms: set[str] = set()
+    for s, (code, val) in exits.items():
+        if code == "hard_stop":
+            reasons[s] = f"وقف خسارة {val * 100:.0f}%"
+            stop_syms.add(s)
+        elif code == "trail_stop":
+            reasons[s] = f"وقف متحرّك ({val * 100:.0f}% عن القمّة)"
+            stop_syms.add(s)
+        # "stable" dead-weight cleanup stays with the hourly cycle (not urgent)
+    # profit-lock with the SAME vol-adaptive give-back bands as the hourly cycle
+    # (wild coins get room, calm coins lock tight) — the vol map comes from the
+    # last scan snapshot, which do_check refreshes every 5 min anyway.
+    with state.lock:
+        ranked = list(((state.signal or {}).get("ranked")) or [])
+    ranked_vol = {r["symbol"]: r.get("realized_vol_ann", 0.0) for r in ranked}
+    giveback_map = {}
+    for s, p in led.positions.items():
+        if p.qty > 1e-12:
+            daily_vol = (ranked_vol.get(s, 0.0) or 0.0) / (365 ** 0.5)
+            giveback_map[s] = max(cfg.profit_lock_giveback, min(0.18, 2.5 * daily_vol))
+    for s in led.profit_lock_exits(allp, cfg.profit_lock_arm, cfg.profit_lock_giveback,
+                                   giveback_map=giveback_map):
+        g = led.unrealized_gain_pct(s, allp.get(s, 0.0)) or 0.0
+        reasons.setdefault(s, f"قفل ربح +{g:.0f}% (تراجع عن القمّة)")
+    if not reasons:
+        save_ledger(led)  # persist the refreshed peaks for the next pass
+        return {"ok": True, "sold": 0}
+    for s, why in reasons.items():
+        state.log(f"⚡ حارس سريع (5د): {why} {s} → بيع فوري")
+    placed, sold = _force_sell_symbols(client, set(reasons), balances, allp, led,
+                                       cfg, state, why="حارس سريع (5د)")
+    banned = stop_syms & set(sold)
+    if banned and cfg.stop_cooldown_hours > 0:
+        _ban_symbols(state, banned, cfg.stop_cooldown_hours)
+        state.log(f"🚫 منع إعادة شراء بعد الوقف السريع: {', '.join(sorted(banned))}")
+    save_ledger(led)
+    return {"ok": True, "sold": placed}
 
 
 def _breaker_drawdown(hist: list) -> float | None:
@@ -2370,6 +2457,11 @@ def _refresh_loop(cfg: AppConfig, state: AppState) -> None:
             do_check(cfg, state)
             refresh_readiness(state)  # keep READINESS.json + GO/NO-GO fresh, hands-off
             refresh_benchmark()  # local vs BTC/EW — no third-party platform needed
+            with state.lock:
+                guard_on = state.auto_enabled and state.auto_execute and not state.halted
+            if guard_on:
+                # per-coin stops/locks react in ~5 min instead of the hourly cycle
+                do_fast_guard(cfg, state)
             with state.lock:
                 ready = (state.auto_enabled and state.auto_execute and not state.halted
                          and time.time() >= state.port_tp_cooldown_until)
