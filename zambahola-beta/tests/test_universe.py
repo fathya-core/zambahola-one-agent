@@ -397,6 +397,29 @@ def test_adaptive_floor_uses_dust_guard_not_fixed_floor():
     assert adaptive == ["BTCUSDT", "MIDUSDT"]
 
 
+def test_fetch_top_symbols_gainers_union_appends_hot_movers():
+    """gainers_extra: a mid-cap up +38% today (above the liquidity floor but
+    outside the top-N by volume) is APPENDED so the scanner at least sees it —
+    exactly the 'top gainers' the user watches on the Binance app."""
+    payload = [
+        {"symbol": "BTCUSDT", "quoteVolume": "900", "priceChangePercent": "1.0"},
+        {"symbol": "ETHUSDT", "quoteVolume": "800", "priceChangePercent": "-2.0"},
+        {"symbol": "SOLUSDT", "quoteVolume": "700", "priceChangePercent": "3.0"},
+        {"symbol": "HOTUSDT", "quoteVolume": "100", "priceChangePercent": "38.0"},   # gainer
+        {"symbol": "WARMUSDT", "quoteVolume": "90", "priceChangePercent": "12.0"},   # gainer
+        {"symbol": "COLDUSDT", "quoteVolume": "80", "priceChangePercent": "-9.0"},   # loser -> never appended
+    ]
+    # without the union the top-3 by volume misses every mover
+    base = fetch_top_symbols(3, min_quote_volume=0.0, session=_Sess(payload))
+    assert base == ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    # with it, the strongest gainers are appended (best first), losers are not
+    out = fetch_top_symbols(3, min_quote_volume=0.0, gainers_extra=2, session=_Sess(payload))
+    assert out == ["BTCUSDT", "ETHUSDT", "SOLUSDT", "HOTUSDT", "WARMUSDT"]
+    # a gainer already inside the volume top-N is not duplicated
+    out2 = fetch_top_symbols(4, min_quote_volume=0.0, gainers_extra=2, session=_Sess(payload))
+    assert out2.count("HOTUSDT") == 1
+
+
 def test_scan_conviction_floor_drops_marginal_full_picks():
     """min_score_frac: the lower-conviction pick is dropped (hold cash) once the
     floor sits between the two scores; both are funded when the floor is off."""

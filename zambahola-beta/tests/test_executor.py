@@ -185,6 +185,129 @@ def test_margin_transfer_and_repay_params(monkeypatch):
     assert calls[2][2]["type"] == "REPAY"
 
 
+# ---------- Portfolio Margin client (papi; -3055 accounts) ----------
+
+def _pm_client(monkeypatch, papi: dict | None = None, sapi: dict | None = None):
+    from zambahola_beta.executor import BinancePortfolioMargin
+    client = BinancePortfolioMargin(Keys("K" * 64, "S" * 64))
+    papi_calls: list[tuple[str, str, dict]] = []
+    sapi_calls: list[tuple[str, str, dict]] = []
+
+    def fake_papi(method, path, params):
+        papi_calls.append((method, path, dict(params)))
+        out = (papi or {}).get(path)
+        if isinstance(out, Exception):
+            raise out
+        return out or {}
+
+    def fake_signed(method, path, params):
+        sapi_calls.append((method, path, dict(params)))
+        out = (sapi or {}).get(path)
+        if isinstance(out, Exception):
+            raise out
+        return out or {}
+
+    monkeypatch.setattr(client, "_papi", fake_papi)
+    monkeypatch.setattr(client, "_signed", fake_signed)
+    return client, papi_calls, sapi_calls
+
+
+def test_pm_orders_route_via_papi_with_side_effects(monkeypatch):
+    """PM accounts reject /sapi margin orders with -3055 — orders MUST go to
+    /papi/v1/margin/order with the same auto-borrow/auto-repay semantics."""
+    client, papi_calls, sapi_calls = _pm_client(monkeypatch)
+    client.market_order("UNIUSDT", "BUY", quote_qty=50)
+    client.market_order("UNIUSDT", "SELL", quote_qty=25)
+    assert not sapi_calls  # nothing touches the classic sapi order endpoint
+    (_, p1, a1), (_, p2, a2) = papi_calls
+    assert p1 == p2 == "/papi/v1/margin/order"
+    assert a1["sideEffectType"] == "MARGIN_BUY"
+    assert a2["sideEffectType"] == "AUTO_REPAY"
+    assert a1["newOrderRespType"] == "FULL"  # fills always present for the ledger
+
+
+def test_pm_margin_stats_map_unimmr_and_debt(monkeypatch):
+    papi = {
+        "/papi/v1/account": {"uniMMR": "99999999", "accountEquity": "168.39",
+                             "accountStatus": "NORMAL"},
+        "/papi/v1/balance": {"asset": "USDT", "crossMarginFree": "168.56",
+                             "crossMarginBorrowed": "40", "crossMarginInterest": "0.5"},
+    }
+    client, _, _ = _pm_client(monkeypatch, papi)
+    st = client.margin_stats()
+    assert st["margin_level"] == 999.0  # no-debt sentinel clamped for display/guards
+    assert st["net_equity_usd"] == 168.39
+    assert st["debt_usdt"] == 40.5
+    assert st["gross_assets_usd"] == round(168.39 + 40.5, 2)
+    assert st["pm"] is True and st["account_status"] == "NORMAL"
+
+
+def test_pm_balances_read_cross_margin_free(monkeypatch):
+    papi = {"/papi/v1/balance": [
+        {"asset": "USDT", "crossMarginFree": "100.5"},
+        {"asset": "UNI", "crossMarginFree": "7"},
+        {"asset": "DOGE", "crossMarginFree": "0"},
+    ]}
+    client, _, _ = _pm_client(monkeypatch, papi)
+    assert client.balances() == {"USDT": 100.5, "UNI": 7.0}
+
+
+def test_pm_deleverage_math_uses_unimmr_ratio():
+    from zambahola_beta.executor import BinancePortfolioMargin
+    client = BinancePortfolioMargin(Keys("K" * 64, "S" * 64))
+    # uniMMR 1.25 with $100 debt, target 2.5 -> repay 100*(1-1.25/2.5) = $50
+    st = {"margin_level": 1.25, "debt_usdt": 100.0, "gross_assets_usd": 500.0}
+    assert client.deleverage_usd(st) == 50.0
+    # healthy level or no debt -> nothing to sell
+    assert client.deleverage_usd({"margin_level": 5.0, "debt_usdt": 100.0}) == 0.0
+    assert client.deleverage_usd({"margin_level": 1.2, "debt_usdt": 0.0}) == 0.0
+
+
+def test_classic_margin_deleverage_method_matches_module_helper():
+    from zambahola_beta.executor import BinanceMargin
+    from zambahola_beta.webapp import _margin_deleverage_usd
+    client = BinanceMargin(Keys("K" * 64, "S" * 64))
+    st = {"gross_assets_usd": 300.0, "debt_usdt": 200.0}
+    assert client.deleverage_usd(st) == _margin_deleverage_usd(300.0, 200.0, 2.0) == 100.0
+
+
+def test_pm_transfer_falls_back_to_portfolio_types(monkeypatch):
+    """MAIN_MARGIN works on PM accounts (proven live); if Binance ever refuses it
+    the client retries with the explicit PORTFOLIO_MARGIN transfer types."""
+    from zambahola_beta.executor import BinancePortfolioMargin
+    client = BinancePortfolioMargin(Keys("K" * 64, "S" * 64))
+    calls: list[dict] = []
+
+    def fake_signed(method, path, params):
+        calls.append(dict(params))
+        if params.get("type") == "MAIN_MARGIN":
+            raise RuntimeError("Binance -3055: Invalid requests for Portfolio Margin user.")
+        return {"tranId": 1}
+
+    monkeypatch.setattr(client, "_signed", fake_signed)
+    client.transfer("USDT", 100.0, to_margin=True)
+    assert calls[0]["type"] == "MAIN_MARGIN"            # tried the proven path first
+    assert calls[1]["type"] == "MAIN_PORTFOLIO_MARGIN"  # then the PM-specific type
+
+
+def test_make_margin_client_detects_pm_accounts(monkeypatch):
+    import zambahola_beta.executor as ex
+    keys = Keys("K" * 64, "S" * 64)
+    monkeypatch.setattr(ex.BinancePortfolioMargin, "sync_time", lambda self: 0)
+    # papi reachable -> PM client
+    monkeypatch.setattr(ex, "_PM_DETECTED", None)
+    monkeypatch.setattr(ex.BinancePortfolioMargin, "pm_account", lambda self: {"uniMMR": "9"})
+    assert isinstance(ex.make_margin_client(keys), ex.BinancePortfolioMargin)
+    # papi rejected -> classic cross-margin client
+    def _boom(self):
+        raise RuntimeError("Binance -2015: Invalid API-key")
+    monkeypatch.setattr(ex, "_PM_DETECTED", None)
+    monkeypatch.setattr(ex.BinancePortfolioMargin, "pm_account", _boom)
+    c = ex.make_margin_client(keys)
+    assert isinstance(c, ex.BinanceMargin) and not isinstance(c, ex.BinancePortfolioMargin)
+    monkeypatch.setattr(ex, "_PM_DETECTED", None)  # don't leak the cache to other tests
+
+
 def test_plan_rebalance_margin_borrows_beyond_cash_and_nets_debt():
     # margin book: $100 free USDT with a $50 loan -> NET equity $50; borrowable
     # $100 lets the BUY exceed cash; per-coin levered target 1.6 allowed (>1).

@@ -58,6 +58,7 @@ def fetch_top_symbols(
     quote: str = "USDT",
     min_quote_volume: float = 50_000_000.0,
     adaptive: bool = False,
+    gainers_extra: int = 0,
     session: requests.Session | None = None,
 ) -> list[str]:
     """Top `n` `quote` markets by 24h quote volume (excludes leveraged/stables).
@@ -72,6 +73,13 @@ def fetch_top_symbols(
       when the whole market is quiet — so the agent always has a workable universe
       of the most-liquid coins AVAILABLE, while order-sizing (participation cap)
       separately protects each fill against slippage on the thinner names.
+
+    `gainers_extra` > 0 additionally APPENDS the strongest 24h GAINERS (by
+    priceChangePercent, still above the liquidity floor) that didn't make the
+    volume cut — the exact coins a user sees on the Binance "top gainers" screen.
+    Ranking by volume alone can miss a mid-cap coin up 30% today; appending it
+    here only means the SCANNER sees and scores it — every entry filter (trend,
+    pump, drawdown, conviction) still applies before any buy.
 
     Symbols must be pure-ASCII tickers (real Binance uses Latin symbols; anything
     else is filtered defensively). The 24h volume map is cached in _LAST_VOLUMES.
@@ -94,11 +102,21 @@ def fetch_top_symbols(
             continue
         if vol < floor:
             continue
-        cand.append((sym, vol))
+        try:
+            pct = float(t.get("priceChangePercent", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            pct = 0.0
+        cand.append((sym, vol, pct))
     cand.sort(key=lambda x: x[1], reverse=True)
     _LAST_VOLUMES.clear()
-    _LAST_VOLUMES.update({s: v for s, v in cand})
-    return [s for s, _ in cand[:n]]
+    _LAST_VOLUMES.update({s: v for s, v, _ in cand})
+    out = [s for s, _, _ in cand[:n]]
+    if gainers_extra > 0:
+        chosen = set(out)
+        gainers = sorted((c for c in cand[n:] if c[0] not in chosen and c[2] > 0),
+                         key=lambda x: x[2], reverse=True)
+        out.extend(s for s, _, _ in gainers[:gainers_extra])
+    return out
 
 
 def fetch_frames(

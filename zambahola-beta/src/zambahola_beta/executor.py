@@ -33,6 +33,7 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9]{50,72}")
 
 TESTNET_BASE = "https://testnet.binance.vision"
 LIVE_BASE = "https://api.binance.com"
+PAPI_BASE = "https://papi.binance.com"  # Portfolio Margin (unified account) API
 
 
 # ---------- keys (never logged) ----------
@@ -217,12 +218,14 @@ class BinanceSpot:
             return qty
         return math.floor(qty / step) * step
 
-    def _signed(self, method: str, path: str, params: dict) -> dict:
+    def _signed_at(self, base: str, method: str, path: str, params: dict) -> dict:
+        """Signed request against an explicit host (api / papi share the same
+        HMAC scheme and API key — only the base URL differs)."""
         ts = int(time.time() * 1000) + self._time_offset_ms
         params = {**params, "timestamp": ts, "recvWindow": self.recv_window}
         query = urllib.parse.urlencode(params)
         query += "&signature=" + sign_query(query, self.keys.api_secret)
-        url = f"{self.base}{path}?{query}"
+        url = f"{base}{path}?{query}"
         resp = self.session.request(method, url, timeout=15)
         if resp.status_code >= 400:
             # surface Binance's {code, msg} instead of a bare HTTP error
@@ -232,6 +235,9 @@ class BinanceSpot:
             except ValueError:
                 raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
         return resp.json()
+
+    def _signed(self, method: str, path: str, params: dict) -> dict:
+        return self._signed_at(self.base, method, path, params)
 
     def price(self, symbol: str) -> float:
         r = self.session.get(f"{self.base}/api/v3/ticker/price", params={"symbol": symbol}, timeout=15)
@@ -295,8 +301,26 @@ class BinanceMargin(BinanceSpot):
     safety gate (ZAMBAHOLA_I_ACCEPT_REAL_TRADING=RISK) still applies on top.
     """
 
+    # Liquidation-guard thresholds for the CLASSIC margin level (assets/debt).
+    # Binance margin-calls at 1.3 and force-liquidates at 1.1 — we act far above.
+    LEVEL_BLOCK_BUYS = 1.8
+    LEVEL_DELEVERAGE = 1.4
+    LEVEL_TARGET = 2.0
+
     def __init__(self, keys: Keys, *, recv_window: int = 5000):
         super().__init__(keys, testnet=False, recv_window=recv_window)
+
+    def deleverage_usd(self, stats: dict) -> float:
+        """USD of positions to sell (AUTO_REPAY) so the level recovers to
+        LEVEL_TARGET. Classic level = assets/debt; selling x repays x of debt:
+        (A-x)/(D-x) = T  ->  x = (T*D - A)/(T - 1)."""
+        assets = float(stats.get("gross_assets_usd", 0) or 0)
+        debt = float(stats.get("debt_usdt", 0) or 0)
+        t = self.LEVEL_TARGET
+        if debt <= 0 or t <= 1.0:
+            return 0.0
+        x = (t * debt - assets) / (t - 1.0)
+        return round(max(0.0, min(x, assets)), 2)
 
     # -- account ----------------------------------------------------------
     def margin_account(self) -> dict:
@@ -369,6 +393,153 @@ class BinanceMargin(BinanceSpot):
         return self._signed("POST", "/sapi/v1/margin/borrow-repay",
                             {"asset": asset, "isIsolated": "FALSE",
                              "type": "REPAY", "amount": round(float(amount), 8)})
+
+
+class BinancePortfolioMargin(BinanceMargin):
+    """PORTFOLIO MARGIN (unified account) executor — same real borrowing, via papi.
+
+    Accounts enrolled in Binance Portfolio Margin REJECT the classic /sapi margin
+    endpoints with error -3055 ("Invalid requests for Portfolio Margin user"):
+    orders, borrows and account reads must use https://papi.binance.com instead.
+    Same symbols, same sideEffectType semantics (MARGIN_BUY auto-borrows,
+    AUTO_REPAY settles debt from proceeds) — only the endpoints and the risk
+    metric differ:
+
+    - Risk metric is uniMMR (adjusted equity / maintenance margin), NOT
+      assets/debt. Binance: healthy > 1.5, margin-call 1.2..1.5, REDUCE-ONLY
+      (new orders refused) 1.05..1.2, liquidation <= 1.05. Our guards act above
+      all of these. With no debt Binance reports uniMMR=99999999 (clamped 999).
+    - Market data (prices/klines/filters) still comes from api.binance.com via
+      the inherited spot methods.
+    """
+
+    LEVEL_BLOCK_BUYS = 2.0   # stay above Binance's 1.5 margin-call band
+    LEVEL_DELEVERAGE = 1.5   # act at the margin-call line, far above 1.05 liq
+    LEVEL_TARGET = 2.5
+
+    def _papi(self, method: str, path: str, params: dict) -> dict:
+        return self._signed_at(PAPI_BASE, method, path, params)
+
+    # -- account ----------------------------------------------------------
+    def pm_account(self) -> dict:
+        return self._papi("GET", "/papi/v1/account", {})
+
+    def balances(self) -> dict[str, float]:
+        """Sellable (free) assets in the PM cross-margin wallet."""
+        rows = self._papi("GET", "/papi/v1/balance", {})
+        if isinstance(rows, dict):  # single-asset response shape
+            rows = [rows]
+        return {r["asset"]: float(r.get("crossMarginFree", 0) or 0)
+                for r in rows if float(r.get("crossMarginFree", 0) or 0) > 0}
+
+    def margin_stats(self, btc_price: float | None = None) -> dict:
+        """Liquidation-guard view of the PM account (uniMMR as the level)."""
+        acct = self.pm_account()
+        try:
+            lvl = float(acct.get("uniMMR", 999) or 999)
+        except (TypeError, ValueError):
+            lvl = 999.0
+        lvl = min(lvl, 999.0)  # Binance reports 99999999 when there is no debt
+        eq = float(acct.get("accountEquity", 0) or 0)
+        debts: dict[str, dict] = {}
+        debt_usdt = 0.0
+        try:
+            u = self._papi("GET", "/papi/v1/balance", {"asset": "USDT"})
+            b = float(u.get("crossMarginBorrowed", 0) or 0)
+            i = float(u.get("crossMarginInterest", 0) or 0)
+            debt_usdt = b + i
+            if debt_usdt > 0:
+                debts["USDT"] = {"borrowed": b, "interest": i}
+        except Exception:  # noqa: BLE001
+            pass
+        return {
+            "margin_level": lvl,
+            "net_equity_usd": round(eq, 2),
+            "gross_assets_usd": round(eq + debt_usdt, 2),
+            "debt_usdt": round(debt_usdt, 2),
+            "debts": debts,
+            "borrow_enabled": True,
+            "pm": True,
+            "account_status": acct.get("accountStatus"),
+        }
+
+    def max_borrowable(self, asset: str = "USDT") -> float:
+        try:
+            r = self._papi("GET", "/papi/v1/margin/maxBorrowable", {"asset": asset})
+            return float(r.get("amount", 0) or 0)
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    def deleverage_usd(self, stats: dict) -> float:
+        """PM: uniMMR = equity / maintMargin and maintMargin scales with debt, so
+        selling x (AUTO_REPAY) moves the level from L to L*D/(D-x). Recovering to
+        LEVEL_TARGET needs x = D * (1 - L/T); equity is unchanged by the swap."""
+        debt = float(stats.get("debt_usdt", 0) or 0)
+        lvl = float(stats.get("margin_level", 999) or 999)
+        t = self.LEVEL_TARGET
+        if debt <= 0 or lvl >= t or t <= 0:
+            return 0.0
+        x = debt * (1.0 - lvl / t)
+        cap = float(stats.get("gross_assets_usd", 0) or 0)
+        return round(max(0.0, min(x, cap if cap > 0 else x)), 2)
+
+    # -- orders ------------------------------------------------------------
+    def market_order(self, symbol: str, side: str, *, quote_qty: float | None = None,
+                     quantity: float | None = None) -> dict:
+        params: dict = {"symbol": symbol, "side": side, "type": "MARKET",
+                        "newOrderRespType": "FULL",  # guarantee executedQty/fills
+                        "sideEffectType": "MARGIN_BUY" if side == "BUY" else "AUTO_REPAY"}
+        if quantity is not None:
+            params["quantity"] = quantity
+        elif quote_qty is not None:
+            params["quoteOrderQty"] = round(quote_qty, 2)
+        else:
+            raise ValueError("need quote_qty or quantity")
+        return self._papi("POST", "/papi/v1/margin/order", params)
+
+    # -- wallet plumbing ----------------------------------------------------
+    def transfer(self, asset: str, amount: float, *, to_margin: bool) -> dict:
+        """SPOT <-> PM margin wallet. MAIN_MARGIN works for PM accounts (the PM
+        account contains the cross-margin wallet); fall back to the explicit
+        PORTFOLIO_MARGIN universal-transfer types if Binance refuses it."""
+        try:
+            return super().transfer(asset, amount, to_margin=to_margin)
+        except RuntimeError:
+            t = "MAIN_PORTFOLIO_MARGIN" if to_margin else "PORTFOLIO_MARGIN_MAIN"
+            return self._signed("POST", "/sapi/v1/asset/transfer",
+                                {"type": t, "asset": asset,
+                                 "amount": round(float(amount), 8)})
+
+    def repay(self, asset: str, amount: float) -> dict:
+        """Explicit PM loan repayment (papi); falls back to repay-debt."""
+        try:
+            return self._papi("POST", "/papi/v1/repayLoan",
+                              {"asset": asset, "amount": round(float(amount), 8)})
+        except RuntimeError:
+            return self._papi("POST", "/papi/v1/margin/repay-debt",
+                              {"asset": asset, "amount": round(float(amount), 8)})
+
+
+# module-level cache: PM enrollment doesn't change mid-session, so probe once.
+_PM_DETECTED: bool | None = None
+
+
+def make_margin_client(keys: Keys, *, recv_window: int = 5000) -> BinanceMargin:
+    """Return the RIGHT margin executor for this account: Portfolio Margin
+    accounts (papi reachable) get BinancePortfolioMargin — classic /sapi margin
+    orders would fail for them with -3055; everyone else gets BinanceMargin."""
+    global _PM_DETECTED
+    if _PM_DETECTED is None:
+        probe = BinancePortfolioMargin(keys, recv_window=recv_window)
+        probe.sync_time()
+        try:
+            probe.pm_account()
+            _PM_DETECTED = True
+        except Exception:  # noqa: BLE001 — not a PM account (or papi unreachable)
+            _PM_DETECTED = False
+    if _PM_DETECTED:
+        return BinancePortfolioMargin(keys, recv_window=recv_window)
+    return BinanceMargin(keys, recv_window=recv_window)
 
 
 # ---------- rebalance planning (pure) ----------

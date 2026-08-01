@@ -26,9 +26,11 @@ from .data import fetch_many
 from .executor import (
     SELL_MARGIN,
     BinanceMargin,
+    BinancePortfolioMargin,
     BinanceSpot,
     RiskLimits,
     load_keys,
+    make_margin_client,
     plan_rebalance,
     safety_gate,
 )
@@ -189,7 +191,7 @@ _PERSIST_FIELDS = (
     "min_hold_hours", "hard_stop_pct",
     "port_tp_arm_usd", "port_tp_giveback", "port_tp_sell_frac", "port_tp_cooldown_h",
     "max_weight", "reentry_ban_hours", "stop_cooldown_hours", "participation_cap",
-    "adaptive_liquidity", "progressive_trail",
+    "adaptive_liquidity", "gainers_extra", "progressive_trail",
     "starter_frac", "starter_max_vol", "starter_min_mom30", "starter_regime_min",
     "max_entry_gap_pct", "entry_quality_dd_penalty", "entry_max_dd",
     "max_spike_1d", "spike_base_max", "min_score_frac",
@@ -546,6 +548,7 @@ class AppConfig:
     universe_size: int = 75  # how many top coins to scan (wide = catch uptrends beyond the mega-caps)
     min_quote_volume_usd: float = 50_000_000.0  # fixed LIQUIDITY FLOOR (used only when adaptive off)
     adaptive_liquidity: bool = True  # dynamic floor: top-N above the $5M dust guard, adapts to market
+    gainers_extra: int = 15  # ALSO scan the top-15 24h gainers above the floor (what the user sees on Binance)
     top_n: int = 5  # MAX strongest uptrends (5 spreads risk + generalises better than 3 in walk-forward)
     max_weight: float = 0.35  # concentration cap: no single coin above 35% of the book (lower = safer)
     max_order_usd: float = 1000.0  # per-order slippage cap (high = don't throttle deployment)
@@ -738,9 +741,11 @@ def _connect(live: bool, margin: bool = False) -> BinanceSpot | None:
         keys = load_keys(testnet=not live)
     except RuntimeError:
         return None
-    # margin exists on live only; on testnet the flag is ignored (spot client)
+    # margin exists on live only; on testnet the flag is ignored (spot client).
+    # make_margin_client auto-detects Portfolio Margin accounts (papi) — classic
+    # /sapi margin orders fail for them with -3055.
     if live and margin:
-        client: BinanceSpot = BinanceMargin(keys)
+        client: BinanceSpot = make_margin_client(keys)
     else:
         client = BinanceSpot(keys, testnet=not live)
     client.sync_time()  # align to server clock -> avoid -1021 on signed orders
@@ -777,7 +782,8 @@ def _scan_signal(cfg: AppConfig, *, exclude: set | None = None) -> tuple[dict, l
     from .universe import fetch_frames, fetch_top_symbols, scan
 
     symbols = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd,
-                                adaptive=cfg.adaptive_liquidity)
+                                adaptive=cfg.adaptive_liquidity,
+                                gainers_extra=cfg.gainers_extra)
     frames = fetch_frames(symbols, interval=cfg.interval, total=max(cfg.bars, 400))
     held = {s for s, p in load_ledger().positions.items() if p.qty > 1e-9}
     sc = scan(frames, top_n=cfg.top_n, target_vol=cfg.target_vol, max_total=cfg.max_total,
@@ -1204,10 +1210,14 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
     # level fell into the danger band, sell down positions (AUTO_REPAY shrinks the
     # loan) until the level recovers to TARGET. Never candle-gated.
     if use_margin and mstats:
+        # thresholds live on the client: classic margin level (assets/debt,
+        # deleverage < 1.4) vs Portfolio-Margin uniMMR (deleverage < 1.5) — the
+        # same guard code serves both account types.
         _lvl = float(mstats.get("margin_level", 999) or 999)
-        if _lvl < MARGIN_LEVEL_DELEVERAGE:
-            need = _margin_deleverage_usd(float(mstats.get("gross_assets_usd", 0) or 0),
-                                          float(mstats.get("debt_usdt", 0) or 0))
+        if _lvl < getattr(client, "LEVEL_DELEVERAGE", MARGIN_LEVEL_DELEVERAGE):
+            need = (client.deleverage_usd(mstats) if hasattr(client, "deleverage_usd")
+                    else _margin_deleverage_usd(float(mstats.get("gross_assets_usd", 0) or 0),
+                                                float(mstats.get("debt_usdt", 0) or 0)))
             if need > 0:
                 state.log(f"⛑️ مستوى الهامش {_lvl:.2f} — تخفيض رافعة إجباري: بيع ~${need:.0f} لسداد القرض")
                 remaining = need
@@ -1537,11 +1547,12 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
     # keep selling/dealing with risk but do NOT add exposure.
     if use_margin and mstats:
         _lvl2 = float(mstats.get("margin_level", 999) or 999)
-        if _lvl2 < MARGIN_LEVEL_BLOCK_BUYS:
+        _block_at = getattr(client, "LEVEL_BLOCK_BUYS", MARGIN_LEVEL_BLOCK_BUYS)
+        if _lvl2 < _block_at:
             dropped_m = [o for o in plan.orders if o.side == "BUY"]
             plan.orders[:] = [o for o in plan.orders if o.side != "BUY"]
             if dropped_m:
-                state.log(f"🛡️ مستوى الهامش {_lvl2:.2f} < {MARGIN_LEVEL_BLOCK_BUYS} — إيقاف الشراء حتى يتعافى")
+                state.log(f"🛡️ مستوى الهامش {_lvl2:.2f} < {_block_at} — إيقاف الشراء حتى يتعافى")
     # forced exits already sold via market — don't let plan_rebalance SELL again (-2010)
     if force_syms:
         dup = [o for o in plan.orders if o.side == "SELL" and o.symbol in force_syms]
@@ -1660,7 +1671,8 @@ def do_flatten(cfg: AppConfig, state: AppState, *, full: bool = False, cap: int 
             try:
                 from .universe import fetch_top_symbols
                 universe = fetch_top_symbols(cfg.universe_size, min_quote_volume=cfg.min_quote_volume_usd,
-                                             adaptive=cfg.adaptive_liquidity)
+                                             adaptive=cfg.adaptive_liquidity,
+                                             gainers_extra=cfg.gainers_extra)
             except Exception:  # noqa: BLE001
                 universe = None
         else:
@@ -1737,7 +1749,7 @@ def do_margin_switch(cfg: AppConfig, state: AppState, *, on: bool) -> dict:
         keys = load_keys(testnet=False)
     except RuntimeError:
         return {"ok": False, "error": "لا مفاتيح حقيقية"}
-    mc = BinanceMargin(keys)
+    mc = make_margin_client(keys)  # PM accounts get the papi executor (-3055 fix)
     mc.sync_time()
 
     if on:
@@ -1766,8 +1778,9 @@ def do_margin_switch(cfg: AppConfig, state: AppState, *, on: bool) -> dict:
                     "error": "محفظة المارجن شبه فارغة — حوّل USDT إليها (سبوت→مارجن متقاطع) ثم أعد المحاولة"}
         cfg.margin = True
         _save_config(cfg)
-        state.log(f"✅ المارجن مفعّل — ضمان ${net:.2f} · الشراء يقترض فعلياً (MARGIN_BUY) "
-                  f"بسقف إجمالي {cfg.lev_gross_cap:g}x وحارس تصفية عند مستوى {MARGIN_LEVEL_DELEVERAGE}")
+        kind = "مارجن موحّد (Portfolio Margin)" if isinstance(mc, BinancePortfolioMargin) else "مارجن متقاطع"
+        state.log(f"✅ المارجن مفعّل [{kind}] — ضمان ${net:.2f} · الشراء يقترض فعلياً (MARGIN_BUY) "
+                  f"بسقف إجمالي {cfg.lev_gross_cap:g}x وحارس تصفية عند مستوى {mc.LEVEL_DELEVERAGE}")
         return {"ok": True, "margin": True, "net_equity": net, "moved": moved}
 
     if not cfg.margin:
