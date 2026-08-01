@@ -253,6 +253,7 @@ def scan(
     entry_max_dd: float = 0.12,
     max_spike_1d: float = 0.0,
     spike_base_max: float = 0.0,
+    min_score_frac: float = 0.0,
 ) -> dict:
     """Rank coins by a smart composite score, allocate to the strongest
     uptrends (vol-targeted, conviction-tilted), scaled by market regime, with a
@@ -308,6 +309,14 @@ def scan(
     # entries (ZEC -24%, TLM -23% bled on stale 90d momentum; DODO was a 1-day spike).
     full = [s for s in scored if _core_ok(s) and s["mom30"] > 0
             and s["dd_high"] > -abs(entry_max_dd) and _not_pump(s)]
+    # relative CONVICTION FLOOR: in a weak market only a couple of coins score well;
+    # funding a marginal-score pick next to a conviction pick just bleeds (and on a
+    # small live book its slice can't even fill). Drop full picks scoring below
+    # min_score_frac x the best full score — hold cash instead. Long-basket A/B
+    # (4.4y, 20 coins): +173%->+179% return, dd -41%->-40%, WFE ~2.0 at 0.30.
+    if min_score_frac > 0 and full:
+        floor = min_score_frac * max(s["score"] for s in full)
+        full = [s for s in full if s["score"] >= floor]
     for s in full:
         s["_starter"] = False
 

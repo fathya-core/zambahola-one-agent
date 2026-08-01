@@ -164,7 +164,7 @@ _PERSIST_FIELDS = (
     "adaptive_liquidity", "progressive_trail",
     "starter_frac", "starter_max_vol", "starter_min_mom30", "starter_regime_min",
     "max_entry_gap_pct", "entry_quality_dd_penalty", "entry_max_dd",
-    "max_spike_1d", "spike_base_max",
+    "max_spike_1d", "spike_base_max", "min_score_frac",
 )
 
 
@@ -189,6 +189,11 @@ def _load_config(cfg: AppConfig) -> None:
                 setattr(cfg, k, type(getattr(cfg, k))(data[k]))
             except Exception:  # noqa: BLE001
                 pass
+    # live spot cannot lever: a persisted UI "leverage" >1 only inflates the target
+    # weights and silently disables the regime cash-scaling (Aug 1: 3x deployed 100%
+    # of the real book in a 0.50 regime that called for ~50% cash).
+    if cfg.live and cfg.max_total > 1.0:
+        cfg.max_total = 1.0
 
 
 def compute_pnl(hist: list) -> dict | None:
@@ -352,7 +357,7 @@ function render(s){
  document.querySelectorAll(".lv").forEach(b=>b.className=(parseFloat(b.dataset.v)===s.max_total)?"lv":"sec lv");
  document.querySelectorAll(".tfb").forEach(b=>b.className=(b.dataset.v===s.interval)?"tfb":"sec tfb");
  $("tfnote").textContent="الإطار الحالي: "+(s.interval||"1d")+(s.interval&&s.interval!=="1d"?" — أسرع، صفقات أكثر ورسوم أكثر":" — موصى به (مُثبت)");
- $("levnote").textContent=(s.max_total>1)?"⚠ الرافعة >1 تتطلّب حساب فيوتشرز — على spot يُنفَّذ 1x كحد أقصى":"تعرّض على spot (بدون رافعة)";
+ $("levnote").textContent=s.live?"الرافعة مقفلة عند 1x في الوضع الحقيقي (spot) — حماية إدارة الكاش":((s.max_total>1)?"⚠ الرافعة >1 تتطلّب حساب فيوتشرز — على spot يُنفَّذ 1x كحد أقصى":"تعرّض على spot (بدون رافعة)");
  setIf("uni",s.universe_size);setIf("topn",s.top_n);setIf("ord",s.max_order_usd);setIf("tot",s.max_total_usd);
  {let sc=s.scanned!=null?("مُسح "+s.scanned+" عملة"):"";if(s.regime!=null){const rp=Math.round(s.regime*100);sc+=" · وضع السوق: "+rp+"% "+(rp>=80?"🟢":(rp>=55?"🟡":"🔴 خطر"));}$("scanned").textContent=sc;}
  // market scan table (smart score = risk-adjusted momentum + acceleration + relative strength)
@@ -513,6 +518,11 @@ class AppConfig:
     # on established coins: identical return/Sharpe (never rejects a real winner).
     max_spike_1d: float = 0.20
     spike_base_max: float = 0.0
+    # relative CONVICTION FLOOR: drop full picks scoring < this fraction of the best
+    # full score (starters exempt). Long-basket A/B at 0.30: return +173%->+179%,
+    # drawdown -41%->-40%, WFE ~2.0 — concentrates capital in real conviction and
+    # (on a small live book) avoids sub-$10 slices that can never fill.
+    min_score_frac: float = 0.30
     profit_lock_arm: float = 0.15  # arm the profit ratchet once a position is up this %
     profit_lock_giveback: float = 0.07  # FLOOR give-back; actual is vol-adaptive (7%-18%)
     min_hold_hours: float = 24.0  # anti-churn: hold a new position at least this long (rotation only)
@@ -683,13 +693,18 @@ def _scan_signal(cfg: AppConfig, *, exclude: set | None = None) -> tuple[dict, l
               starter_regime_min=cfg.starter_regime_min,
               dd_penalty=cfg.entry_quality_dd_penalty,
               entry_max_dd=cfg.entry_max_dd,
-              max_spike_1d=cfg.max_spike_1d, spike_base_max=cfg.spike_base_max)
+              max_spike_1d=cfg.max_spike_1d, spike_base_max=cfg.spike_base_max,
+              min_score_frac=cfg.min_score_frac)
     as_of = ""
     first = next((s for s in symbols if s in frames), None)
     if first is not None:
         as_of = str(frames[first]["open_time"].iloc[-1])
     # overlay live prices for DISPLAY only (keeps signal math on closed candles)
     live = _live_prices([r["symbol"] for r in sc["ranked"]])
+    # full candle-close map (ALL scanned coins) for the falling-knife guard — the
+    # display list is truncated to 12, but a pick can enter from beyond that slice
+    # (correlation filter / hysteresis), and the guard must still see its reference.
+    closes = {r["symbol"]: r["price"] for r in sc["ranked"]}
     ranked = sc["ranked"][:12]
     for r in ranked:
         lp = live.get(r["symbol"])
@@ -704,6 +719,7 @@ def _scan_signal(cfg: AppConfig, *, exclude: set | None = None) -> tuple[dict, l
         "regime": sc.get("regime", 1.0),
         "targets": sc["targets"],
         "cash_weight": sc["cash_weight"],
+        "candle_close": closes,
         "ranked": ranked,
         "reasons": {r["symbol"]: r for r in ranked[:8]},
     }
@@ -873,6 +889,41 @@ def _falling_knife_skips(targets: dict, close_ref: dict, prices: dict,
             targets[sym] = 0.0
             knifed.append(f"{sym[:-4] if sym.endswith('USDT') else sym} ({gap:.0f}%)")
     return knifed
+
+
+def _consolidate_small_targets(targets: dict, equity_usd: float, min_usd: float,
+                               held: set, cap_w: float) -> list[str]:
+    """A NEW entry whose target $ sits below the exchange min-notional can never fill:
+    the weight silently rots as dead cash while the coin shows as 'picked' (COTI at
+    4.3% of a $178 book = $7.6 < $10 -> skipped every cycle). Drop such targets and
+    redistribute the freed weight across the remaining picks (proportionally, capped
+    per coin at ``cap_w``); whatever can't be absorbed stays cash. Held coins are left
+    alone — a small target there is a TRIM instruction, not an unfillable buy.
+    Mutates ``targets``; returns the dropped symbols."""
+    if equity_usd <= 0 or min_usd <= 0:
+        return []
+    drop = [s for s, w in targets.items()
+            if s not in held and w > 0 and w * equity_usd < min_usd]
+    if not drop:
+        return []
+    freed = 0.0
+    for s in drop:
+        freed += targets[s]
+        targets[s] = 0.0
+    for _ in range(3):  # a few passes in case per-coin caps bind
+        alive = {s: w for s, w in targets.items() if 0 < w < cap_w}
+        if freed <= 1e-9 or not alive:
+            break
+        ssum = sum(alive.values()) or 1.0
+        absorbed = 0.0
+        for s, w in alive.items():
+            new_w = min(cap_w, w + freed * (w / ssum))
+            absorbed += new_w - w
+            targets[s] = round(new_w, 4)
+        freed -= absorbed
+        if absorbed <= 1e-9:
+            break
+    return drop
 
 
 def _ban_symbols(state: AppState, symbols: set[str], hours: float) -> None:
@@ -1232,13 +1283,34 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
     # uptrend thesis is stale/broken; catching it is how EPIC lost -$921. Held positions
     # are untouched here (risk_exits/profit-lock manage them) — we only block fresh buys.
     if cfg.max_entry_gap_pct > 0 and targets:
-        close_ref = {r["symbol"]: r.get("candle_close")
-                     for r in sig.get("ranked", []) if r.get("candle_close")}
+        close_ref = dict(sig.get("candle_close") or {})
+        if not close_ref:  # non-scan modes: fall back to the display rows
+            close_ref = {r["symbol"]: r.get("candle_close")
+                         for r in sig.get("ranked", []) if r.get("candle_close")}
         held_now = {s for s, p in led.positions.items() if p.qty > 1e-9}
         knifed = _falling_knife_skips(targets, close_ref, prices, held_now,
                                       cfg.max_entry_gap_pct)
         if knifed:
             state.log("🔪 تجنّب سكين طايح — إلغاء دخول: " + " · ".join(knifed))
+
+    # SMALL-CAPITAL CONSOLIDATION: with a small live book, the weakest pick's target
+    # can fall below the exchange min-notional and would silently never fill — merge
+    # that weight into the fillable picks instead of leaving it as dead cash.
+    if rotate and not breaker and targets:
+        eq_now = balances.get("USDT", 0.0)
+        for s2 in whitelist:
+            base2 = s2[:-4] if s2.endswith("USDT") else s2
+            q2, px2 = balances.get(base2, 0.0), prices.get(s2, 0.0)
+            if q2 > 0 and px2 > 0:
+                eq_now += q2 * px2
+        held_pos = {s2 for s2, p2 in led.positions.items() if p2.qty > 1e-9}
+        cap_w = cfg.max_weight * min(1.0, cfg.max_total) * float(sig.get("regime") or 1.0)
+        small = _consolidate_small_targets(
+            targets, eq_now, MIN_NOTIONAL_USD * 1.1, held_pos, cap_w)
+        if small:
+            state.log("🧲 دمج أهداف أصغر من الحد الأدنى ($10): "
+                      + " · ".join(x[:-4] if x.endswith("USDT") else x for x in small)
+                      + " → توزيع الوزن على البقية")
 
     # ANTI-CHURN GATE: on the SAME candle, protection (stop-loss/profit-lock/breaker)
     # already ran above via forced sells — but skip ROTATION (new entries + rebalance
@@ -1458,7 +1530,8 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
                   starter_regime_min=cfg.starter_regime_min,
                   dd_penalty=cfg.entry_quality_dd_penalty,
                   entry_max_dd=cfg.entry_max_dd,
-                  max_spike_1d=cfg.max_spike_1d, spike_base_max=cfg.spike_base_max)
+                  max_spike_1d=cfg.max_spike_1d, spike_base_max=cfg.spike_base_max,
+                  min_score_frac=cfg.min_score_frac)
     res = backtest_scan(frames, **common)
     res["scope"] = "years" if long_history else "recent"
     res["interval"] = cfg.interval
@@ -1592,6 +1665,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "entry_max_dd": cfg.entry_max_dd,
                     "max_spike_1d": cfg.max_spike_1d,
                     "spike_base_max": cfg.spike_base_max,
+                    "min_score_frac": cfg.min_score_frac,
                     "pnl_peak_usd": round(state.pnl_peak_usd, 2),
                     "tp_cooldown_min": max(0, int((state.port_tp_cooldown_until - time.time()) / 60)),
                     "backtest": state.backtest,
@@ -1626,6 +1700,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.live = bool(body["live"])
             if "max_total" in body:
                 cfg.max_total = max(0.1, min(3.0, float(body["max_total"])))
+                if cfg.live:  # spot can't lever — >1 would break regime cash-scaling
+                    cfg.max_total = min(cfg.max_total, 1.0)
             if "universe_size" in body:
                 cfg.universe_size = int(max(5, min(120, int(body["universe_size"]))))
             if "top_n" in body:
@@ -1654,6 +1730,8 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.max_spike_1d = max(0.0, min(1.0, float(body["max_spike_1d"])))
             if "spike_base_max" in body:
                 cfg.spike_base_max = max(-0.5, min(0.5, float(body["spike_base_max"])))
+            if "min_score_frac" in body:
+                cfg.min_score_frac = max(0.0, min(0.9, float(body["min_score_frac"])))
             if "take_profit_pct" in body:
                 cfg.take_profit_pct = max(1.0, float(body["take_profit_pct"]))
             if "take_profit_frac" in body:

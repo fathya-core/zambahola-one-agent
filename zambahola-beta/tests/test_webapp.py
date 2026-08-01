@@ -270,3 +270,52 @@ def test_book_drop_exit_skips_coins_already_stopped():
     held = {"ATMUSDT", "ZECUSDT"}
     book = {"DEXEUSDT"}
     assert _book_drop_exits(held, book, exclude={"ZECUSDT"}) == {"ATMUSDT"}
+
+
+
+# ---------------------------------------------------------------- small-capital consolidation
+
+def test_consolidate_small_targets_merges_subnotional_into_fillable():
+    from zambahola_beta.webapp import _consolidate_small_targets
+    # COTI at 4% of a $180 book = $7.2 < $11 -> dropped, weight moved to A/B
+    targets = {"AUSDT": 0.30, "BUSDT": 0.15, "COTIUSDT": 0.04}
+    dropped = _consolidate_small_targets(targets, equity_usd=180.0, min_usd=11.0,
+                                         held=set(), cap_w=0.35)
+    assert dropped == ["COTIUSDT"]
+    assert targets["COTIUSDT"] == 0.0
+    assert targets["AUSDT"] > 0.30 and targets["BUSDT"] > 0.15
+    assert targets["AUSDT"] <= 0.35 + 1e-9
+    assert abs(sum(targets.values()) - 0.49) < 0.01  # freed weight redeployed, not lost
+
+
+def test_consolidate_small_targets_leaves_held_trims_alone():
+    from zambahola_beta.webapp import _consolidate_small_targets
+    # a HELD coin with a small target is a TRIM instruction - must not be zeroed
+    targets = {"AUSDT": 0.30, "HELDUSDT": 0.04}
+    dropped = _consolidate_small_targets(targets, 180.0, 11.0, {"HELDUSDT"}, 0.35)
+    assert dropped == []
+    assert targets["HELDUSDT"] == 0.04
+
+
+def test_consolidate_small_targets_respects_cap_leftover_to_cash():
+    from zambahola_beta.webapp import _consolidate_small_targets
+    # the only fillable pick is already at cap -> freed weight stays cash
+    targets = {"AUSDT": 0.35, "BUSDT": 0.05}
+    dropped = _consolidate_small_targets(targets, 100.0, 11.0, set(), 0.35)
+    assert dropped == ["BUSDT"]
+    assert targets["AUSDT"] == 0.35
+    assert targets["BUSDT"] == 0.0
+
+
+def test_live_load_config_clamps_leverage_to_1x(tmp_path, monkeypatch):
+    import json as _json
+    import zambahola_beta.webapp as wa
+    p = tmp_path / "config.json"
+    p.write_text(_json.dumps({"max_total": 3.0}), "utf-8")
+    monkeypatch.setattr(wa, "_config_path", lambda: p)
+    cfg = wa.AppConfig(live=True)
+    wa._load_config(cfg)
+    assert cfg.max_total == 1.0  # live spot: leverage neutralised
+    cfg2 = wa.AppConfig(live=False)
+    wa._load_config(cfg2)
+    assert cfg2.max_total == 3.0  # testnet keeps it (experiments allowed)

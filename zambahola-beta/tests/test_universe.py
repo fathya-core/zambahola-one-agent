@@ -395,3 +395,20 @@ def test_adaptive_floor_uses_dust_guard_not_fixed_floor():
     adaptive = fetch_top_symbols(10, min_quote_volume=50_000_000.0, adaptive=True,
                                  session=_Sess(payload))
     assert adaptive == ["BTCUSDT", "MIDUSDT"]
+
+
+def test_scan_conviction_floor_drops_marginal_full_picks():
+    """min_score_frac: the lower-conviction pick is dropped (hold cash) once the
+    floor sits between the two scores; both are funded when the floor is off."""
+    f = {k: v for k, v in _frames().items() if k != "DOWNUSDT_X"}
+    off = scan(f, top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0,
+               min_vol=0.0, min_score_frac=0.0)
+    scores = {r["symbol"]: r["score"] for r in off["ranked"] if r["score"] > 0}
+    hi = max(scores, key=scores.get)
+    lo = min(scores, key=scores.get)
+    assert hi != lo and {hi, lo} <= set(off["targets"])  # both funded when off
+    frac = (scores[lo] + scores[hi]) / 2 / scores[hi]  # floor midway between them
+    on = scan(f, top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0,
+              min_vol=0.0, min_score_frac=frac)
+    assert hi in on["targets"]
+    assert lo not in on["targets"]  # floored out -> capital stays cash
