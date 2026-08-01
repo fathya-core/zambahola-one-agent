@@ -25,6 +25,7 @@ from pathlib import Path
 from .data import fetch_many
 from .executor import (
     SELL_MARGIN,
+    BinanceMargin,
     BinanceSpot,
     RiskLimits,
     load_keys,
@@ -41,6 +42,33 @@ from .strategy import compare_portfolios, current_allocation
 # Binance spot min order notional. Balances worth less than this can't be sold
 # (the exchange rejects sub-$10 orders), so they are treated as unsellable dust.
 MIN_NOTIONAL_USD = 10.0
+
+# CROSS-MARGIN liquidation guard. Binance margin-calls at level 1.3 and force-
+# liquidates at 1.1 — we act FAR above both: stop opening new positions below
+# BLOCK_BUYS and actively sell down (AUTO_REPAY) below DELEVERAGE, back up to
+# TARGET. A book at our default gross cap 2x sits at level ≈2.0, so a healthy
+# portfolio never even approaches these thresholds; they are the backstop.
+MARGIN_LEVEL_BLOCK_BUYS = 1.8
+MARGIN_LEVEL_DELEVERAGE = 1.4
+MARGIN_LEVEL_TARGET = 2.0
+
+
+def _margin_deleverage_usd(gross_assets: float, debt: float,
+                           target_level: float = MARGIN_LEVEL_TARGET) -> float:
+    """USD of positions to sell (with AUTO_REPAY) so marginLevel recovers to
+    `target_level`. Selling x repays x of debt, moving the level from A/D to
+    (A-x)/(D-x) = target  ->  x = (target*D - A)/(target - 1)."""
+    if debt <= 0 or target_level <= 1.0:
+        return 0.0
+    x = (target_level * debt - gross_assets) / (target_level - 1.0)
+    return max(0.0, min(x, gross_assets))
+
+
+def _levered_targets(targets: dict, lev_map: dict) -> dict:
+    """Margin execution: a pick's target notional = weight x its per-coin leverage
+    (advisor or manual override, never below 1). Exit targets (<=0) untouched."""
+    return {s: (round(w * max(1.0, float(lev_map.get(s, 1.0))), 4) if w > 0 else w)
+            for s, w in targets.items()}
 
 
 def _perf_path() -> Path:
@@ -166,6 +194,7 @@ _PERSIST_FIELDS = (
     "max_entry_gap_pct", "entry_quality_dd_penalty", "entry_max_dd",
     "max_spike_1d", "spike_base_max", "min_score_frac",
     "max_lev", "lev_target_vol", "lev_gross_cap", "lev_overrides",
+    "margin",
 )
 
 
@@ -282,6 +311,11 @@ small{color:var(--mut)}
   <button class="sec lc" data-v="5">×5 ⚠</button>
   <button class="sec lc" data-v="10">×10 ⚠</button>
  </div><small id="levnote" style="color:var(--mut)"></small></div>
+<div style="margin-top:8px"><div class="k">رافعة حقيقية بالاقتراض (مارجن متقاطع — مفعّل على مفتاحك)</div>
+ <div class="flex">
+  <button id="mgbtn" class="sec">🏦 تفعيل المارجن (ترحيل تلقائي)</button>
+  <small id="mgstats" style="color:var(--mut)"></small>
+ </div></div>
 <div style="margin-top:8px"><div class="k">رافعة يدوية لعملة محددة (تجربة — تتجاوز اقتراح المحرك)</div>
  <div class="flex">
   <input id="lovsym" placeholder="مثال: UNI" style="width:110px;text-transform:uppercase">
@@ -351,10 +385,10 @@ const $=id=>document.getElementById(id);
 function actionBadge(a){if(a&&a.includes("INVEST"))return'<span class="badge b-up">استثمر</span>';
 if(a&&a.includes("PARTIAL"))return'<span class="badge b-warn">جزئي</span>';return'<span class="badge b-mut">نقد</span>';}
 async function api(path,method="GET",body){const r=await fetch(path,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});return r.json();}
-let LIVE=false,AUTO=false;
+let LIVE=false,AUTO=false,MARGIN=false;
 function setIf(id,v){const e=$(id);if(e&&document.activeElement!==e&&v!=null)e.value=v;}
 function render(s){
- LIVE=!!s.live;AUTO=!!s.auto_enabled;
+ LIVE=!!s.live;AUTO=!!s.auto_enabled;MARGIN=!!s.margin;
  $("sub").textContent="آخر تحديث: "+(s.updated||"—")+" · بيانات حتى "+(s.signal?.as_of||"—");
  $("mode").textContent="الوضع: "+(s.live?"حقيقي ⚠":"testnet")+" · أوامر حتى $"+s.max_order_usd+" / إجمالي $"+s.max_total_usd;
  $("autodot").className="dot "+(s.auto_enabled?"on":"off");
@@ -372,7 +406,17 @@ function render(s){
  document.querySelectorAll(".tfb").forEach(b=>b.className=(b.dataset.v===s.interval)?"tfb":"sec tfb");
  $("tfnote").textContent="الإطار الحالي: "+(s.interval||"1d")+(s.interval&&s.interval!=="1d"?" — أسرع، صفقات أكثر ورسوم أكثر":" — موصى به (مُثبت)");
  {const ge=s.signal&&s.signal.gross_exposure!=null?s.signal.gross_exposure:null;const eff=(s.lev_gross_cap!=null&&s.regime!=null)?(s.lev_gross_cap*s.regime).toFixed(2):"—";
-  $("levnote").innerHTML=(s.lev_gross_cap>1?("رافعة صريحة ×"+s.lev_gross_cap+" · السقف الفعّال الآن = ×"+s.lev_gross_cap+"×وضع السوق = <b>"+eff+"</b>"+(ge!=null?" · التعرّض الحالي <b>"+ge+"</b>":"")):"بدون رافعة (×1)")+(s.live?' · <span style="color:var(--warn)">التنفيذ spot=×1؛ الرافعة الفعلية تتطلّب حساب فيوتشرز — الأرقام استشارية</span>':"");}
+  const tail=s.live?(s.margin?' · <span style="color:var(--up)">التنفيذ فعلي بالاقتراض (مارجن) — MARGIN_BUY/AUTO_REPAY</span>':' · <span style="color:var(--warn)">التنفيذ spot=×1 — فعّل المارجن بالأسفل لرافعة حقيقية</span>'):"";
+  $("levnote").innerHTML=(s.lev_gross_cap>1?("رافعة صريحة ×"+s.lev_gross_cap+" · السقف الفعّال الآن = ×"+s.lev_gross_cap+"×وضع السوق = <b>"+eff+"</b>"+(ge!=null?" · التعرّض الحالي <b>"+ge+"</b>":"")):"بدون رافعة (×1)")+tail;}
+ {const ms=(s.account&&s.account.margin)||null;
+  $("mgbtn").textContent=MARGIN?"⛔ إيقاف المارجن والرجوع لسبوت":"🏦 تفعيل المارجن (ترحيل تلقائي)";
+  $("mgbtn").className=MARGIN?"":"sec";
+  let mt="";
+  if(MARGIN&&ms){const lv=ms.margin_level>=999?"∞":Number(ms.margin_level).toFixed(2);const lc=(ms.margin_level<1.8&&ms.margin_level<999)?"var(--warn)":"var(--up)";
+   mt='مستوى الهامش <b style="color:'+lc+'">'+lv+'</b> · قرض $'+(ms.debt_usdt||0)+' · صافي $'+(ms.net_equity_usd!=null?ms.net_equity_usd:"—")+' · حارس تصفية: حظر شراء &lt;1.8، تخفيض &lt;1.4';}
+  else if(MARGIN)mt="مفعّل — بانتظار قراءة الحساب";
+  else mt=s.live?"مطفأ — الشراء نقدي فقط. التفعيل: بيع سبوت → تحويل USDT ضمان → اقتراض فعلي":"يتطلّب الوضع الحقيقي (live)";
+  $("mgstats").innerHTML=mt;}
  {const ov=s.lev_overrides||{};const ks=Object.keys(ov);
   $("lovlist").innerHTML=ks.length?("رافعات يدوية: "+ks.map(k=>'<span style="display:inline-block;background:#12203a;padding:2px 8px;border-radius:10px;margin:2px">'+k.replace('USDT','')+' ×'+ov[k]+' <a href="#" data-rm="'+k+'" class="lovrm" style="color:var(--down);text-decoration:none">✕</a></span>').join(" ")):"لا رافعات يدوية — المحرك يقترح تلقائياً.";
   document.querySelectorAll(".lovrm").forEach(a=>a.onclick=async(e)=>{e.preventDefault();render(await api('/api/config','POST',{lev_overrides:{[a.dataset.rm]:0}}));});}
@@ -474,6 +518,12 @@ $("live").onclick=async()=>{const next=!LIVE;if(next&&!confirm("تفعيل ال�
 document.querySelectorAll(".lv").forEach(b=>b.onclick=async()=>{render(await api('/api/config','POST',{max_total:parseFloat(b.dataset.v)}));});
 document.querySelectorAll(".lc").forEach(b=>b.onclick=async()=>{const v=parseFloat(b.dataset.v);if(v>3&&!confirm("رافعة ×"+v+" تضخّم الربح والخسارة معاً وتضيف خطر تصفية. للتجربة — متأكد؟"))return;render(await api('/api/config','POST',{lev_gross_cap:v}));});
 $("lovadd").onclick=async()=>{let sym=($("lovsym").value||"").trim().toUpperCase();const val=parseFloat($("lovval").value);if(!sym||!(val>=1)){alert("اكتب رمز العملة ورافعة ≥ 1 (مثال: UNI و 5)");return;}if(val>3&&!confirm("رافعة يدوية ×"+val+" على "+sym+" — تتجاوز حماية المحرك للتجربة. متأكد؟"))return;render(await api('/api/config','POST',{lev_overrides:{[sym]:val}}));$("lovsym").value="";$("lovval").value="";};
+$("mgbtn").onclick=async()=>{const on=!MARGIN;
+ if(on){if(!confirm("تفعيل الرافعة الحقيقية (مارجن متقاطع): بيع مراكز سبوت الحالية، تحويل كل USDT لمحفظة المارجن كضمان، والشراء يقترض فعلياً (MARGIN_BUY) بفائدة ساعية وAUTO_REPAY عند البيع. فيه خطر تصفية إذا انهار السوق (حارس آلي عند مستوى 1.4). متأكد؟"))return;
+  if(!confirm("تأكيد أخير: اقتراض حقيقي بأموال حقيقية. نكمل؟"))return;}
+ else{if(!confirm("إيقاف المارجن: بيع مراكز المارجن + سداد القرض + إرجاع USDT لسبوت. متأكد؟"))return;}
+ $("mgbtn").disabled=true;$("mgbtn").textContent="⏳ جاري الترحيل…";
+ try{const r=await api('/api/margin','POST',{on});render(r);if(r.result&&r.result.error)alert(r.result.error);}finally{$("mgbtn").disabled=false;}};
 document.querySelectorAll(".tfb").forEach(b=>b.onclick=async()=>{if(b.dataset.v!=="1d"&&!confirm("إطار أسرع = صفقات ورسوم أكثر وضجيج أكثر. متأكد؟"))return;render(await api('/api/config','POST',{interval:b.dataset.v}));});
 $("save").onclick=async()=>{render(await api('/api/config','POST',{universe_size:+$("uni").value,top_n:+$("topn").value,max_order_usd:+$("ord").value,max_total_usd:+$("tot").value}));};
 $("perfreset").onclick=async()=>{if(!confirm("تصفير سجل الأداء والبدء من القيمة الحالية؟"))return;render(await api('/api/perf-reset','POST',{}));};
@@ -577,6 +627,12 @@ class AppConfig:
     # backtest enters AT the close so gap=0 and it never triggers there).
     max_entry_gap_pct: float = 0.10
     live: bool = False  # SAFE default; enable REAL trading via --live / watchdog -Live / dashboard toggle
+    # REAL leverage via CROSS-MARGIN borrowing (the user's key has enableMargin;
+    # futures is a separate permission that is off). Toggled ONLY through the
+    # /api/margin flow (liquidate spot -> transfer USDT -> switch), never by a
+    # bare config write — flipping it silently would strand positions in the
+    # other wallet. Requires live=True; ignored on testnet (no /sapi margin API).
+    margin: bool = False
     port: int = 8799
 
 
@@ -677,12 +733,16 @@ def account_snapshot(client: BinanceSpot, assets: tuple[str, ...], *, quote: str
 
 # ---------- actions ----------
 
-def _connect(live: bool) -> BinanceSpot | None:
+def _connect(live: bool, margin: bool = False) -> BinanceSpot | None:
     try:
         keys = load_keys(testnet=not live)
     except RuntimeError:
         return None
-    client = BinanceSpot(keys, testnet=not live)
+    # margin exists on live only; on testnet the flag is ignored (spot client)
+    if live and margin:
+        client: BinanceSpot = BinanceMargin(keys)
+    else:
+        client = BinanceSpot(keys, testnet=not live)
     client.sync_time()  # align to server clock -> avoid -1021 on signed orders
     return client
 
@@ -800,7 +860,7 @@ def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -
         frames = fetch_many(symbols, interval=cfg.interval, total=max(cfg.bars, 400))
         sig = compute_signal(frames, mode=cfg.mode, target_vol=cfg.target_vol)
 
-    client = _connect(cfg.live)
+    client = _connect(cfg.live, cfg.margin)
     if client is None:
         net = "الحقيقية" if cfg.live else "testnet"
         account = {"connected": False,
@@ -809,6 +869,12 @@ def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -
         try:
             assets = tuple(sig["targets"].keys()) or cfg.assets
             account = account_snapshot(client, assets or cfg.assets)
+            if isinstance(client, BinanceMargin):
+                # equity must be NET of the loan (free coins include borrowed money)
+                ms = client.margin_stats()
+                account["margin"] = ms
+                account["equity_usd"] = round(
+                    account.get("equity_usd", 0.0) - ms.get("debt_usdt", 0.0), 2)
         except Exception as exc:  # noqa: BLE001
             account = {"connected": False, "error": str(exc)}
     pf = _portfolio_records(frames, symbols, cfg) if with_portfolio else None
@@ -1071,10 +1137,11 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
     except RuntimeError as exc:
         state.log(f"تنفيذ محظور: {exc}")
         return {"ok": False, "error": str(exc)}
-    client = _connect(cfg.live)
+    client = _connect(cfg.live, cfg.margin)
     if client is None:
         state.log("لا مفاتيح — التنفيذ متعذّر")
         return {"ok": False, "error": "no keys"}
+    use_margin = bool(cfg.live and cfg.margin and isinstance(client, BinanceMargin))
 
     if cfg.mode == "scan":
         sig, universe, _ = _scan_signal(cfg, exclude=set(_active_sell_bans(state)))
@@ -1094,6 +1161,13 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
     rotate = _should_rotate(sig_as_of, state.last_rebalance_candle, force_rebalance)
 
     balances = client.balances()
+    mstats: dict = {}
+    if use_margin:
+        try:
+            mstats = client.margin_stats()
+        except Exception as exc:  # noqa: BLE001
+            state.log(f"⚠️ تعذّرت قراءة حساب المارجن ({exc}) — دورة بلا رافعة")
+            use_margin = False
     # manage: scan targets + held faucet coins in the universe + EVERY coin the
     # strategy actually bought (ledger), even if it has since left the universe —
     # so a stale held position still gets rotated out to cash, not abandoned.
@@ -1108,10 +1182,56 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
     whitelist = tuple(s for s in whitelist if s in prices)
 
     targets = {s: w for s, w in sig["targets"].items()}
+    if use_margin and targets:
+        # REAL leverage: each pick's target notional = weight x its advised (or
+        # manually overridden) leverage. The scan already caps the portfolio's
+        # gross at lev_gross_cap x regime, so the levered sum stays bounded.
+        targets = _levered_targets(targets, sig.get("leverage") or {})
     led = load_ledger()
     if _reconcile_ledger(led, balances, allp, state):
         save_ledger(led)
     led.update_peaks(allp)
+    # MARGIN LIQUIDATION GUARD — every cycle, before anything else: if the margin
+    # level fell into the danger band, sell down positions (AUTO_REPAY shrinks the
+    # loan) until the level recovers to TARGET. Never candle-gated.
+    if use_margin and mstats:
+        _lvl = float(mstats.get("margin_level", 999) or 999)
+        if _lvl < MARGIN_LEVEL_DELEVERAGE:
+            need = _margin_deleverage_usd(float(mstats.get("gross_assets_usd", 0) or 0),
+                                          float(mstats.get("debt_usdt", 0) or 0))
+            if need > 0:
+                state.log(f"⛑️ مستوى الهامش {_lvl:.2f} — تخفيض رافعة إجباري: بيع ~${need:.0f} لسداد القرض")
+                remaining = need
+                by_value = sorted(led.positions.items(),
+                                  key=lambda kv: -(kv[1].qty * allp.get(kv[0], 0.0)))
+                for s, p in by_value:
+                    if remaining <= 0:
+                        break
+                    px = allp.get(s, 0.0)
+                    val = p.qty * px
+                    if px <= 0 or val < MIN_NOTIONAL_USD:
+                        continue
+                    sell_usd = round(min(val * SELL_MARGIN, remaining), 2)
+                    if sell_usd < MIN_NOTIONAL_USD:
+                        continue
+                    try:
+                        res = client.market_order(s, "SELL", quote_qty=sell_usd)
+                        qe = float(res.get("executedQty", 0) or 0)
+                        qf = float(res.get("cummulativeQuoteQty", 0) or 0)
+                        if qe > 0 and qf > 0:
+                            rec = led.record("SELL", s, round(qf, 2), qf / qe)
+                            append_trade({**rec, "mode": "live", "why": "تخفيض رافعة (حماية من التصفية)"})
+                            remaining -= qf
+                            base_a = s[:-4] if s.endswith("USDT") else s
+                            balances[base_a] = max(0.0, balances.get(base_a, 0.0) - qe)
+                    except Exception as exc:  # noqa: BLE001
+                        state.log(f"✗ فشل تخفيض {s}: {exc}")
+                save_ledger(led)
+                try:
+                    balances = client.balances()
+                    mstats = client.margin_stats()
+                except Exception:  # noqa: BLE001
+                    pass
     # 1) circuit breaker on STRATEGY drawdown (not raw account equity): if the
     # strategy's own PnL gives back > breaker_pct of the budget from its peak,
     # flatten to cash + halt. This tracks the strategy's health directly instead
@@ -1262,6 +1382,8 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
             if q > 0 and px > 0:
                 hv[s] = q * px
         equity = usdt + sum(hv.values())
+        if use_margin:
+            equity -= float(mstats.get("debt_usdt", 0.0))  # net of the loan
         protected = []
         for s, p in led.positions.items():
             if (p.qty <= 1e-12 or p.age_hours() >= cfg.min_hold_hours
@@ -1346,6 +1468,12 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
                 eq_now += q2 * px2
         held_pos = {s2 for s2, p2 in led.positions.items() if p2.qty > 1e-9}
         cap_w = cfg.max_weight * min(1.0, cfg.max_total) * float(sig.get("regime") or 1.0)
+        if use_margin:
+            eq_now -= float(mstats.get("debt_usdt", 0.0))
+            # targets here are LEVERED weights — scale the per-coin cap accordingly
+            lev_map2 = sig.get("leverage") or {}
+            cap_w *= max([max(1.0, float(lev_map2.get(s2, 1.0)))
+                          for s2, w2 in targets.items() if w2 > 0], default=1.0)
         small = _consolidate_small_targets(
             targets, eq_now, MIN_NOTIONAL_USD * 1.1, held_pos, cap_w)
         if small:
@@ -1373,7 +1501,31 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
     limits = RiskLimits(max_order_usd=cfg.max_order_usd, max_total_usd=cfg.max_total_usd,
                         rebalance_band=cfg.rebalance_band, whitelist=whitelist,
                         participation=cfg.participation_cap, vol_usd=last_volumes())
+    if use_margin:
+        # let BUYs exceed cash via MARGIN_BUY — but never borrow past what the
+        # portfolio gross cap allows: extra debt <= (gross-1) x net equity.
+        debt_now = float(mstats.get("debt_usdt", 0.0))
+        net_eq = float(mstats.get("net_equity_usd") or 0.0)
+        allowed_gross = max(1.0, cfg.lev_gross_cap * float(sig.get("regime") or 1.0))
+        budget_eq = min(net_eq, cfg.max_total_usd) if net_eq > 0 else cfg.max_total_usd
+        max_extra_debt = max(0.0, (allowed_gross - 1.0) * budget_eq - debt_now)
+        try:
+            exch_borrowable = client.max_borrowable("USDT")
+        except Exception:  # noqa: BLE001
+            exch_borrowable = 0.0
+        limits.quote_debt = debt_now
+        limits.borrowable = round(min(exch_borrowable, max_extra_debt), 2)
+        limits.max_target_w = allowed_gross  # a single coin may exceed 100% when levered
     plan = plan_rebalance(targets, balances, prices, limits)
+    # margin safety: below BLOCK_BUYS the account is drifting toward a margin call —
+    # keep selling/dealing with risk but do NOT add exposure.
+    if use_margin and mstats:
+        _lvl2 = float(mstats.get("margin_level", 999) or 999)
+        if _lvl2 < MARGIN_LEVEL_BLOCK_BUYS:
+            dropped_m = [o for o in plan.orders if o.side == "BUY"]
+            plan.orders[:] = [o for o in plan.orders if o.side != "BUY"]
+            if dropped_m:
+                state.log(f"🛡️ مستوى الهامش {_lvl2:.2f} < {MARGIN_LEVEL_BLOCK_BUYS} — إيقاف الشراء حتى يتعافى")
     # forced exits already sold via market — don't let plan_rebalance SELL again (-2010)
     if force_syms:
         dup = [o for o in plan.orders if o.side == "SELL" and o.symbol in force_syms]
@@ -1477,7 +1629,7 @@ def do_flatten(cfg: AppConfig, state: AppState, *, full: bool = False, cap: int 
     except RuntimeError as exc:
         state.log(f"تصفية محظورة: {exc}")
         return {"ok": False, "error": str(exc)}
-    client = _connect(cfg.live)
+    client = _connect(cfg.live, cfg.margin)
     if client is None:
         return {"ok": False, "error": "no keys"}
     balances = client.balances()
@@ -1542,6 +1694,114 @@ def do_flatten(cfg: AppConfig, state: AppState, *, full: bool = False, cap: int 
     save_ledger(led)
     return {"ok": True, "sold": placed, "attempted": len(candidates),
             "remaining_value": round(remaining, 2)}
+
+
+def _transfer_amount(free: float) -> float:
+    """Transferable USDT: everything minus a 1-cent buffer, floored to cents."""
+    import math
+    return max(0.0, math.floor((free - 0.01) * 100) / 100)
+
+
+def do_margin_switch(cfg: AppConfig, state: AppState, *, on: bool) -> dict:
+    """One-click REAL-leverage switch: spot <-> cross-margin.
+
+    ON : flatten spot strategy coins -> move ALL free USDT into the cross-margin
+         wallet as collateral -> cfg.margin=True (orders switch to
+         MARGIN_BUY/AUTO_REPAY = actual borrowing, not just more cash).
+    OFF: sell margin positions (AUTO_REPAY settles the loan), clear residual
+         interest, move USDT back to spot -> cfg.margin=False.
+    Both directions book their sells in the ledger, so history stays honest."""
+    if not cfg.live:
+        return {"ok": False, "error": "المارجن للتداول الحقيقي فقط — شغّل اللايف أولاً (live.ps1)"}
+    try:
+        safety_gate(live=True)
+    except RuntimeError as exc:
+        return {"ok": False, "error": str(exc)}
+    try:
+        keys = load_keys(testnet=False)
+    except RuntimeError:
+        return {"ok": False, "error": "لا مفاتيح حقيقية"}
+    mc = BinanceMargin(keys)
+    mc.sync_time()
+
+    if on:
+        if cfg.margin:
+            return {"ok": True, "note": "المارجن مفعّل أصلاً"}
+        state.log("🏦 تفعيل الرافعة الحقيقية (مارجن): تصفية سبوت → تحويل الضمان → تشغيل")
+        do_flatten(cfg, state, full=True)  # cfg.margin still False -> sells run on SPOT
+        moved = 0.0
+        try:
+            spot = BinanceSpot(keys, testnet=False)
+            spot.sync_time()
+            amt = _transfer_amount(spot.balances().get("USDT", 0.0))
+            if amt >= 1.0:
+                mc.transfer("USDT", amt, to_margin=True)
+                moved = amt
+                state.log(f"💸 تحويل ${amt:.2f} USDT من سبوت إلى محفظة المارجن (ضمان)")
+        except Exception as exc:  # noqa: BLE001
+            state.log(f"⚠️ فشل التحويل التلقائي: {exc} — حوّل USDT لمحفظة المارجن من تطبيق بينانس")
+        try:
+            ms = mc.margin_stats()
+            net = float(ms.get("net_equity_usd") or 0.0)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"تعذّرت قراءة محفظة المارجن: {exc}"}
+        if net < MIN_NOTIONAL_USD:
+            return {"ok": False, "moved": moved,
+                    "error": "محفظة المارجن شبه فارغة — حوّل USDT إليها (سبوت→مارجن متقاطع) ثم أعد المحاولة"}
+        cfg.margin = True
+        _save_config(cfg)
+        state.log(f"✅ المارجن مفعّل — ضمان ${net:.2f} · الشراء يقترض فعلياً (MARGIN_BUY) "
+                  f"بسقف إجمالي {cfg.lev_gross_cap:g}x وحارس تصفية عند مستوى {MARGIN_LEVEL_DELEVERAGE}")
+        return {"ok": True, "margin": True, "net_equity": net, "moved": moved}
+
+    if not cfg.margin:
+        return {"ok": True, "note": "المارجن مطفأ أصلاً"}
+    state.log("🏦 إيقاف المارجن: بيع مراكز المارجن + سداد القرض + إرجاع USDT لسبوت")
+    led = load_ledger()
+    balances = mc.balances()
+    try:
+        allp = mc.all_prices()
+    except Exception:  # noqa: BLE001
+        allp = {}
+    sellable = sorted(
+        ((b, q) for b, q in balances.items() if b != "USDT" and q > 0),
+        key=lambda kv: -(kv[1] * allp.get(f"{kv[0]}USDT", 0.0)))
+    for base, qty in sellable:
+        sym = f"{base}USDT"
+        px = allp.get(sym, 0.0)
+        if px <= 0 or qty * px < MIN_NOTIONAL_USD:
+            continue
+        try:
+            res = mc.market_sell_all(sym, qty)
+            qe = float(res.get("executedQty", 0) or 0)
+            qf = float(res.get("cummulativeQuoteQty", 0) or 0)
+            if qe > 0 and qf > 0:
+                rec = led.record("SELL", sym, round(qf, 2), qf / qe)
+                append_trade({**rec, "mode": "live", "why": "إيقاف المارجن (تصفية)"})
+        except Exception as exc:  # noqa: BLE001
+            state.log(f"✗ فشل بيع {sym}: {exc}")
+        time.sleep(0.12)
+    save_ledger(led)
+    try:  # residual interest crumbs that AUTO_REPAY didn't cover
+        debt = float(mc.margin_stats().get("debt_usdt", 0.0))
+        free = mc.balances().get("USDT", 0.0)
+        if debt > 0.001 and free > 0:
+            mc.repay("USDT", min(debt, free))
+    except Exception as exc:  # noqa: BLE001
+        state.log(f"⚠️ سداد الفائدة المتبقية فشل: {exc}")
+    moved = 0.0
+    try:
+        amt = _transfer_amount(mc.balances().get("USDT", 0.0))
+        if amt >= 1.0:
+            mc.transfer("USDT", amt, to_margin=False)
+            moved = amt
+            state.log(f"💸 إرجاع ${amt:.2f} USDT إلى محفظة سبوت")
+    except Exception as exc:  # noqa: BLE001
+        state.log(f"⚠️ فشل إرجاع USDT لسبوت: {exc} — أرجعها من تطبيق بينانس")
+    cfg.margin = False
+    _save_config(cfg)
+    state.log("✅ المارجن مطفأ — التنفيذ رجع سبوت نقدي بدون اقتراض")
+    return {"ok": True, "margin": False, "moved": moved}
 
 
 def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) -> dict:
@@ -1687,6 +1947,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "regime": state.signal.get("regime") if state.signal else None,
                     "ranked": state.signal.get("ranked") if state.signal else None,
                     "live": cfg.live,
+                    "margin": cfg.margin,
                     "mode": cfg.mode,
                     "interval": cfg.interval,
                     "max_total": cfg.max_total,
@@ -1929,6 +2190,10 @@ def make_handler(cfg: AppConfig, state: AppState):
                 res = do_flatten(cfg, state, full=full)
                 do_check(cfg, state)
                 return self._send(200, {**self._state_dict(), "result": res})
+            if self.path == "/api/margin":
+                res = do_margin_switch(cfg, state, on=bool(self._read_json().get("on")))
+                do_check(cfg, state)
+                return self._send(200, {**self._state_dict(), "result": res})
             if self.path == "/api/clean-start":
                 res = do_flatten(cfg, state, full=True)
                 reset_ledger()
@@ -2012,6 +2277,11 @@ def main(cfg: AppConfig | None = None, *, open_browser: bool = True) -> None:
         # return could be held open by any stray import-time thread.
         print(f"[beta] ZAMBAHOLA already running on {url} — this instance will exit (no duplicate).")
         os._exit(0)
+    if cfg.margin and not cfg.live:
+        # margin persisted from a live session but this launch is testnet: funds sit in
+        # the LIVE margin wallet while orders would hit the testnet — trade nothing until
+        # the user relaunches live (live.ps1) or switches margin off from the dashboard.
+        state.log("⚠️ المارجن محفوظ لكن التشغيل الحالي testnet — أعد التشغيل بـ live.ps1 (الأموال في محفظة المارجن الحقيقية)")
     state.log("بدء اللوحة" + (" · استئناف التداول التلقائي" if state.auto_enabled else ""))
     threading.Thread(target=_auto_loop, args=(cfg, state), daemon=True).start()
     threading.Thread(target=_refresh_loop, args=(cfg, state), daemon=True).start()

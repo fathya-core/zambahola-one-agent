@@ -8,10 +8,13 @@ from zambahola_beta.webapp import (
     _apply_reentry_bans,
     _book_drop_exits,
     _falling_knife_skips,
+    _levered_targets,
+    _margin_deleverage_usd,
     _port_tp_should_bank,
     _reconcile_ledger,
     _resolve_whitelist,
     _should_rotate,
+    _transfer_amount,
     compute_pnl,
     compute_signal,
 )
@@ -319,3 +322,51 @@ def test_live_load_config_clamps_leverage_to_1x(tmp_path, monkeypatch):
     cfg2 = wa.AppConfig(live=False)
     wa._load_config(cfg2)
     assert cfg2.max_total == 3.0  # testnet keeps it (experiments allowed)
+
+
+# ---------- REAL leverage (cross-margin) ----------
+
+def test_margin_deleverage_usd_math():
+    # assets $300 vs debt $200 -> level 1.5; to recover level 2.0 sell
+    # x = (2*200 - 300)/(2-1) = $100 (each sold $ repays $1 of debt)
+    assert _margin_deleverage_usd(300.0, 200.0, 2.0) == 100.0
+    # healthy book (level 4.0) -> nothing to sell
+    assert _margin_deleverage_usd(400.0, 100.0, 2.0) == 0.0
+    # no debt -> no deleverage ever
+    assert _margin_deleverage_usd(100.0, 0.0) == 0.0
+
+
+def test_levered_targets_multiplies_only_positive_weights():
+    t = _levered_targets({"AUSDT": 0.3, "BUSDT": 0.2, "CUSDT": 0.0},
+                         {"AUSDT": 2.0, "BUSDT": 0.5})  # <1 clamps to 1
+    assert t == {"AUSDT": 0.6, "BUSDT": 0.2, "CUSDT": 0.0}
+
+
+def test_transfer_amount_floors_with_buffer():
+    assert _transfer_amount(178.567) == 178.55
+    assert _transfer_amount(0.5) == 0.49
+    assert _transfer_amount(0.0) == 0.0
+
+
+def test_dashboard_inline_js_has_valid_syntax(tmp_path):
+    """The dashboard went blank TWICE from a broken inline <script> (a stray
+    PowerShell line once, a Python-interpreted \\n inside a JS string once).
+    Gate the whole UI on `node --check` so that class of regression can't ship."""
+    import re
+    import shutil
+    import subprocess
+
+    import pytest
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not installed")
+    from zambahola_beta.webapp import DASHBOARD_HTML
+
+    scripts = re.findall(r"<script>(.*?)</script>", DASHBOARD_HTML, re.S)
+    assert scripts, "dashboard must contain an inline <script>"
+    for i, js in enumerate(scripts):
+        p = tmp_path / f"dash{i}.js"
+        p.write_text(js, encoding="utf-8")
+        r = subprocess.run([node, "--check", str(p)], capture_output=True, text=True)
+        assert r.returncode == 0, f"dashboard script #{i} syntax error:\n{r.stderr[:1200]}"

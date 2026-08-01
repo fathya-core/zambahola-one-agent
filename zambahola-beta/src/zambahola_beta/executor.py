@@ -279,6 +279,98 @@ class BinanceSpot:
         return self.market_order(symbol, "SELL", quantity=qty)
 
 
+class BinanceMargin(BinanceSpot):
+    """CROSS-MARGIN executor — REAL leverage by borrowing, on the same spot pairs.
+
+    The whole point vs `BinanceSpot`: buys can exceed the cash in the wallet.
+    - Orders go to /sapi/v1/margin/order with `sideEffectType`:
+        BUY  -> MARGIN_BUY  (Binance auto-borrows the missing USDT at fill time)
+        SELL -> AUTO_REPAY  (proceeds repay loan + accrued interest first)
+      so there is NO manual borrow/repay bookkeeping to get wrong.
+    - `balances()` reads the CROSS MARGIN wallet (what's actually sellable there).
+    - `margin_stats()` exposes marginLevel / debt / net equity for the liquidation
+      guard (Binance margin-calls at level 1.3 and force-liquidates at 1.1).
+    Margin exists on LIVE only — testnet.binance.vision has no /sapi margin API —
+    so this client is always constructed against the live base URL. The webapp
+    safety gate (ZAMBAHOLA_I_ACCEPT_REAL_TRADING=RISK) still applies on top.
+    """
+
+    def __init__(self, keys: Keys, *, recv_window: int = 5000):
+        super().__init__(keys, testnet=False, recv_window=recv_window)
+
+    # -- account ----------------------------------------------------------
+    def margin_account(self) -> dict:
+        return self._signed("GET", "/sapi/v1/margin/account", {})
+
+    def balances(self) -> dict[str, float]:
+        acct = self.margin_account()
+        return {a["asset"]: float(a["free"]) for a in acct.get("userAssets", [])
+                if float(a.get("free", 0) or 0) > 0}
+
+    def margin_stats(self, btc_price: float | None = None) -> dict:
+        """Liquidation-guard view of the cross-margin account (USD figures)."""
+        acct = self.margin_account()
+        try:
+            lvl = float(acct.get("marginLevel", 999) or 999)
+        except (TypeError, ValueError):
+            lvl = 999.0
+        if btc_price is None:
+            try:
+                btc_price = self.price("BTCUSDT")
+            except Exception:  # noqa: BLE001
+                btc_price = 0.0
+        debts: dict[str, dict] = {}
+        for a in acct.get("userAssets", []):
+            b = float(a.get("borrowed", 0) or 0)
+            i = float(a.get("interest", 0) or 0)
+            if b > 0 or i > 0:
+                debts[a["asset"]] = {"borrowed": b, "interest": i}
+        u = debts.get("USDT", {})
+        return {
+            "margin_level": lvl,
+            "net_equity_usd": round(float(acct.get("totalNetAssetOfBtc", 0) or 0) * btc_price, 2),
+            "gross_assets_usd": round(float(acct.get("totalAssetOfBtc", 0) or 0) * btc_price, 2),
+            "debt_usdt": round(u.get("borrowed", 0.0) + u.get("interest", 0.0), 2),
+            "debts": debts,
+            "borrow_enabled": bool(acct.get("borrowEnabled", False)),
+        }
+
+    def max_borrowable(self, asset: str = "USDT") -> float:
+        try:
+            r = self._signed("GET", "/sapi/v1/margin/maxBorrowable", {"asset": asset})
+            return float(r.get("amount", 0) or 0)
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    # -- orders ------------------------------------------------------------
+    def market_order(self, symbol: str, side: str, *, quote_qty: float | None = None,
+                     quantity: float | None = None) -> dict:
+        params: dict = {"symbol": symbol, "side": side, "type": "MARKET",
+                        "sideEffectType": "MARGIN_BUY" if side == "BUY" else "AUTO_REPAY"}
+        if quantity is not None:
+            params["quantity"] = quantity
+        elif quote_qty is not None:
+            params["quoteOrderQty"] = round(quote_qty, 2)
+        else:
+            raise ValueError("need quote_qty or quantity")
+        return self._signed("POST", "/sapi/v1/margin/order", params)
+
+    # -- wallet plumbing ----------------------------------------------------
+    def transfer(self, asset: str, amount: float, *, to_margin: bool) -> dict:
+        """Move funds SPOT <-> CROSS MARGIN (universal transfer; the key already
+        permits it). to_margin=True funds the margin wallet as collateral."""
+        return self._signed("POST", "/sapi/v1/asset/transfer",
+                            {"type": "MAIN_MARGIN" if to_margin else "MARGIN_MAIN",
+                             "asset": asset, "amount": round(float(amount), 8)})
+
+    def repay(self, asset: str, amount: float) -> dict:
+        """Explicit loan repayment (AUTO_REPAY on sells normally covers this; used
+        to clear residual interest when switching margin off)."""
+        return self._signed("POST", "/sapi/v1/margin/borrow-repay",
+                            {"asset": asset, "isIsolated": "FALSE",
+                             "type": "REPAY", "amount": round(float(amount), 8)})
+
+
 # ---------- rebalance planning (pure) ----------
 
 @dataclass
@@ -293,6 +385,10 @@ class RiskLimits:
     # quote volume so we never move a size the market can't absorb without slippage.
     participation: float = 0.0  # 0 disables the cap
     vol_usd: dict[str, float] = field(default_factory=dict)  # symbol -> 24h quote vol
+    # -- margin (real leverage) — all default to spot behaviour --------------
+    quote_debt: float = 0.0    # borrowed quote + interest -> subtracted for NET equity
+    borrowable: float = 0.0    # extra quote MARGIN_BUY may auto-borrow beyond cash
+    max_target_w: float = 1.0  # per-symbol target clamp (margin passes >1 = levered)
 
     def order_cap(self, sym: str) -> float:
         """Per-order USD ceiling: the smaller of the flat cap and a participation
@@ -330,18 +426,23 @@ def plan_rebalance(
     prices: dict[str, float],
     limits: RiskLimits,
 ) -> RebalancePlan:
-    """Compute spot orders to move toward target weights, within risk limits."""
+    """Compute orders to move toward target weights, within risk limits.
+
+    Works for both spot and cross-margin: with margin, `quote_debt` nets the loan
+    out of equity (so weights are % of REAL capital, not of borrowed cash),
+    `borrowable` lets total BUYs exceed cash on hand (MARGIN_BUY auto-borrows),
+    and `max_target_w` allows a single coin's levered target above 100%."""
     quote = limits.quote
     quote_bal = balances.get(quote, 0.0)
     holdings_usd = {}
     for sym in limits.whitelist:
         base = sym.replace(quote, "")
         holdings_usd[sym] = balances.get(base, 0.0) * prices.get(sym, 0.0)
-    equity = quote_bal + sum(holdings_usd.values())
+    equity = quote_bal - limits.quote_debt + sum(holdings_usd.values())
     deployable = min(equity, limits.max_total_usd)
 
     plan = RebalancePlan(equity_usd=round(equity, 2), deployable_usd=round(deployable, 2))
-    avail_quote = quote_bal  # track so total BUYs never exceed cash on hand
+    avail_quote = quote_bal + limits.borrowable  # cash + what MARGIN_BUY may borrow
     # SELL first (frees cash), then BUY — and do larger deltas first
     order_syms = sorted(
         limits.whitelist,
@@ -351,7 +452,7 @@ def plan_rebalance(
         if sym not in prices or prices[sym] <= 0:
             plan.notes.append(f"{sym}: no price, skipped")
             continue
-        target_w = max(0.0, min(1.0, targets.get(sym, 0.0)))
+        target_w = max(0.0, min(limits.max_target_w, targets.get(sym, 0.0)))
         target_usd = target_w * deployable
         delta = target_usd - holdings_usd[sym]
         # fee-aware: ignore small drifts (don't churn on noise); always allow full exits

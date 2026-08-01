@@ -128,3 +128,79 @@ def test_plan_rebalance_sell_clamped_to_holdings():
 def test_no_real_keys_in_env_by_default():
     # sanity: tests never accidentally pick up real creds
     assert not (os.environ.get("BINANCE_API_KEY") and os.environ.get("BINANCE_API_SECRET")) or True
+
+
+# ---------- cross-margin client (REAL leverage, no network in tests) ----------
+
+def _margin_client(monkeypatch, responses: dict | None = None):
+    from zambahola_beta.executor import BinanceMargin
+    client = BinanceMargin(Keys("K" * 64, "S" * 64))
+    calls: list[tuple[str, str, dict]] = []
+
+    def fake_signed(method, path, params):
+        calls.append((method, path, dict(params)))
+        return (responses or {}).get(path, {})
+
+    monkeypatch.setattr(client, "_signed", fake_signed)
+    return client, calls
+
+
+def test_margin_orders_auto_borrow_on_buy_and_auto_repay_on_sell(monkeypatch):
+    client, calls = _margin_client(monkeypatch)
+    client.market_order("UNIUSDT", "BUY", quote_qty=50)
+    client.market_order("UNIUSDT", "SELL", quote_qty=25)
+    (_, p1, a1), (_, p2, a2) = calls
+    assert p1 == p2 == "/sapi/v1/margin/order"
+    assert a1["sideEffectType"] == "MARGIN_BUY"   # borrows the missing USDT
+    assert a2["sideEffectType"] == "AUTO_REPAY"   # proceeds repay the loan first
+
+
+def test_margin_balances_and_stats_read_cross_wallet(monkeypatch):
+    acct = {"marginLevel": "2.5", "totalNetAssetOfBtc": "0.001",
+            "totalAssetOfBtc": "0.002", "borrowEnabled": True,
+            "userAssets": [
+                {"asset": "USDT", "free": "5", "borrowed": "100", "interest": "0.02"},
+                {"asset": "UNI", "free": "20", "borrowed": "0", "interest": "0"},
+                {"asset": "DOGE", "free": "0", "borrowed": "0", "interest": "0"},
+            ]}
+    client, _ = _margin_client(monkeypatch, {"/sapi/v1/margin/account": acct})
+    assert client.balances() == {"USDT": 5.0, "UNI": 20.0}  # free only, zeros dropped
+    st = client.margin_stats(btc_price=100_000.0)
+    assert st["margin_level"] == 2.5
+    assert st["net_equity_usd"] == 100.0   # 0.001 BTC x 100k
+    assert st["gross_assets_usd"] == 200.0
+    assert st["debt_usdt"] == 100.02       # borrowed + accrued interest
+    assert st["borrow_enabled"] is True
+
+
+def test_margin_transfer_and_repay_params(monkeypatch):
+    client, calls = _margin_client(monkeypatch)
+    client.transfer("USDT", 123.45, to_margin=True)
+    client.transfer("USDT", 50, to_margin=False)
+    client.repay("USDT", 10.5)
+    assert calls[0][1] == calls[1][1] == "/sapi/v1/asset/transfer"
+    assert calls[0][2]["type"] == "MAIN_MARGIN"   # spot -> margin (collateral in)
+    assert calls[1][2]["type"] == "MARGIN_MAIN"   # margin -> spot (cash out)
+    assert calls[2][1] == "/sapi/v1/margin/borrow-repay"
+    assert calls[2][2]["type"] == "REPAY"
+
+
+def test_plan_rebalance_margin_borrows_beyond_cash_and_nets_debt():
+    # margin book: $100 free USDT with a $50 loan -> NET equity $50; borrowable
+    # $100 lets the BUY exceed cash; per-coin levered target 1.6 allowed (>1).
+    limits = RiskLimits(max_order_usd=1000, max_total_usd=1000, min_notional_usd=10,
+                        whitelist=("BTCUSDT",), quote_debt=50.0, borrowable=100.0,
+                        max_target_w=2.0)
+    plan = plan_rebalance({"BTCUSDT": 1.6}, {"USDT": 100.0}, {"BTCUSDT": 100.0}, limits)
+    assert plan.equity_usd == 50.0  # net of the loan
+    assert len(plan.orders) == 1 and plan.orders[0].side == "BUY"
+    assert abs(plan.orders[0].usd - 80.0) < 1e-6  # 1.6 x $50 net equity
+
+
+def test_plan_rebalance_spot_defaults_still_clamp_target_to_1x():
+    # without margin params the old behaviour is intact: target capped at 100%
+    limits = RiskLimits(max_order_usd=1000, max_total_usd=1000, min_notional_usd=10,
+                        whitelist=("BTCUSDT",))
+    plan = plan_rebalance({"BTCUSDT": 1.6}, {"USDT": 100.0}, {"BTCUSDT": 100.0}, limits)
+    assert plan.orders and plan.orders[0].side == "BUY"
+    assert abs(plan.orders[0].usd - 99.0) < 1e-6  # min(target $100, cash x 0.99)
