@@ -427,8 +427,9 @@ function render(s){
   $("mgbtn").textContent=MARGIN?"⛔ إيقاف المارجن والرجوع لسبوت":"🏦 تفعيل المارجن (ترحيل تلقائي)";
   $("mgbtn").className=MARGIN?"":"sec";
   let mt="";
-  if(MARGIN&&ms){const lv=ms.margin_level>=999?"∞":Number(ms.margin_level).toFixed(2);const lc=(ms.margin_level<1.8&&ms.margin_level<999)?"var(--warn)":"var(--up)";
-   mt='مستوى الهامش <b style="color:'+lc+'">'+lv+'</b> · قرض $'+(ms.debt_usdt||0)+' · صافي $'+(ms.net_equity_usd!=null?ms.net_equity_usd:"—")+' · حارس تصفية: حظر شراء &lt;1.8، تخفيض &lt;1.4';}
+  if(MARGIN&&ms){const pm=!!ms.pm;const bb=pm?2.0:1.8;const dl=pm?1.5:1.4;
+   const lv=ms.margin_level>=999?"∞":Number(ms.margin_level).toFixed(2);const lc=(ms.margin_level<bb&&ms.margin_level<999)?"var(--warn)":"var(--up)";
+   mt=(pm?'<b>مارجن موحّد (Portfolio Margin)</b> · uniMMR ':'مستوى الهامش ')+'<b style="color:'+lc+'">'+lv+'</b> · قرض $'+(ms.debt_usdt||0)+' · صافي $'+(ms.net_equity_usd!=null?ms.net_equity_usd:"—")+' · حارس تصفية: حظر شراء &lt;'+bb+'، تخفيض &lt;'+dl;}
   else if(MARGIN)mt="مفعّل — بانتظار قراءة الحساب";
   else mt=s.live?"مطفأ — الشراء نقدي فقط. التفعيل: بيع سبوت → تحويل USDT ضمان → اقتراض فعلي":"يتطلّب الوضع الحقيقي (live)";
   $("mgstats").innerHTML=mt;}
