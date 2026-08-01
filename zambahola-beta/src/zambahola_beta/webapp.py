@@ -82,6 +82,52 @@ def _marginable_universe(cfg) -> frozenset[str] | None:
         return None
 
 
+def _net_external_flow(rows: list[dict], seen_ms: float, price_fn) -> tuple[float, float]:
+    """(net_usd, latest_ms) of margin-wallet transfers newer than seen_ms.
+    ROLL_IN = deposit (+), ROLL_OUT = withdrawal (−); non-USDT rows are valued
+    at the current price. Rows that fail to value are skipped, not guessed."""
+    net, latest = 0.0, seen_ms
+    for r in rows:
+        ts_ms = float(r.get("timestamp", 0) or 0)
+        if ts_ms <= seen_ms or str(r.get("status", "")).upper() != "CONFIRMED":
+            continue
+        latest = max(latest, ts_ms)
+        amt = float(r.get("amount", 0) or 0)
+        asset = str(r.get("asset", ""))
+        if asset != "USDT":
+            try:
+                amt *= float(price_fn(f"{asset}USDT") or 0.0)
+            except Exception:  # noqa: BLE001
+                continue
+        net += amt if str(r.get("type", "")).upper() == "ROLL_IN" else -amt
+    return net, latest
+
+
+def _detect_external_flows(client: BinanceMargin, state: AppState) -> None:
+    """Manual wallet moves from the Binance phone app look like PnL: a $29
+    manual withdrawal reads as a 17% strategy 'loss'. Detect margin-wallet
+    transfers the engine did not initiate, log them loudly and rebase the
+    equity baseline so the performance display stays honest. Ledger stats
+    (hit rate, readiness) are trade-based and were never affected."""
+    with state.lock:
+        seen = state.flow_seen_ms
+    if seen <= 0:  # first run ever — don't flag pre-existing history
+        with state.lock:
+            state.flow_seen_ms = time.time() * 1000
+        _save_auto(state)
+        return
+    rows = client.transfer_history(int(seen) + 1)
+    net, latest = _net_external_flow(rows, seen, client.price)
+    if latest > seen:
+        with state.lock:
+            state.flow_seen_ms = latest
+        _save_auto(state)
+    if abs(net) >= 1.0:
+        state.log(f"🚨 حركة أموال خارجية على محفظة المارجن: {net:+.2f}$ "
+                  f"(تحويل يدوي من تطبيق بينانس) — تصفير خط أساس الأداء ليبقى قياس العائد صادقاً")
+        state.reset_equity()
+
+
 def _margin_deleverage_usd(gross_assets: float, debt: float,
                            target_level: float = MARGIN_LEVEL_TARGET) -> float:
     """USD of positions to sell (with AUTO_REPAY) so marginLevel recovers to
@@ -190,6 +236,7 @@ def _save_auto(state: AppState) -> None:
             "pnl_peak_usd": state.pnl_peak_usd,
             "port_tp_cooldown_until": state.port_tp_cooldown_until,
             "sell_ban_until": state.sell_ban_until,
+            "flow_seen_ms": state.flow_seen_ms,
         }), "utf-8")
     except Exception:  # noqa: BLE001
         pass
@@ -204,6 +251,7 @@ def _load_auto(state: AppState) -> None:
         state.last_rebalance_candle = str(d.get("last_rebalance_candle", state.last_rebalance_candle))
         state.pnl_peak_usd = float(d.get("pnl_peak_usd", state.pnl_peak_usd))
         state.port_tp_cooldown_until = float(d.get("port_tp_cooldown_until", state.port_tp_cooldown_until))
+        state.flow_seen_ms = float(d.get("flow_seen_ms", state.flow_seen_ms))
         raw = d.get("sell_ban_until")
         if isinstance(raw, dict):
             state.sell_ban_until = {str(k): float(v) for k, v in raw.items()}
@@ -686,6 +734,7 @@ class AppState:
     pnl_peak_usd: float = 0.0  # high-water of strategy PnL in $ (stable; % distorts as cash grows)
     port_tp_cooldown_until: float = 0.0  # park banked profit in cash until this epoch
     sell_ban_until: dict = field(default_factory=dict)  # sym -> epoch; no re-buy after forced sell
+    flow_seen_ms: float = 0.0  # last processed margin-wallet transfer (external-flow detector)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def log(self, msg: str) -> None:
@@ -919,6 +968,7 @@ def do_check(cfg: AppConfig, state: AppState, *, with_portfolio: bool = False) -
                 account["margin"] = ms
                 account["equity_usd"] = round(
                     account.get("equity_usd", 0.0) - ms.get("debt_usdt", 0.0), 2)
+                _detect_external_flows(client, state)
         except Exception as exc:  # noqa: BLE001
             account = {"connected": False, "error": str(exc)}
     pf = _portfolio_records(frames, symbols, cfg) if with_portfolio else None
@@ -1817,6 +1867,9 @@ def do_margin_switch(cfg: AppConfig, state: AppState, *, on: bool) -> dict:
                 mc.transfer("USDT", amt, to_margin=True)
                 moved = amt
                 state.log(f"💸 تحويل ${amt:.2f} USDT من سبوت إلى محفظة المارجن (ضمان)")
+                with state.lock:  # our own transfer — not an external flow
+                    state.flow_seen_ms = time.time() * 1000
+                _save_auto(state)
         except Exception as exc:  # noqa: BLE001
             state.log(f"⚠️ فشل التحويل التلقائي: {exc} — حوّل USDT لمحفظة المارجن من تطبيق بينانس")
         try:
@@ -1876,6 +1929,9 @@ def do_margin_switch(cfg: AppConfig, state: AppState, *, on: bool) -> dict:
             mc.transfer("USDT", amt, to_margin=False)
             moved = amt
             state.log(f"💸 إرجاع ${amt:.2f} USDT إلى محفظة سبوت")
+            with state.lock:  # our own transfer — not an external flow
+                state.flow_seen_ms = time.time() * 1000
+            _save_auto(state)
     except Exception as exc:  # noqa: BLE001
         state.log(f"⚠️ فشل إرجاع USDT لسبوت: {exc} — أرجعها من تطبيق بينانس")
     cfg.margin = False

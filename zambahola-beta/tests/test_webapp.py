@@ -402,6 +402,32 @@ def test_platform_limit_error_matcher():
     assert not _is_platform_limit_error("HTTP 504: gateway timeout")
 
 
+def test_net_external_flow_signs_values_and_watermark():
+    """ROLL_IN adds, ROLL_OUT subtracts, non-USDT rows are valued at the live
+    price, and the watermark advances even for rows we can't value — the exact
+    incident: user pulled 76.52 ONDO + $28.93 out and pushed $36.45 back."""
+    from zambahola_beta.webapp import _net_external_flow
+    rows = [
+        {"timestamp": 900, "type": "ROLL_IN", "asset": "USDT", "amount": "999", "status": "CONFIRMED"},  # old
+        {"timestamp": 1_000, "type": "ROLL_OUT", "asset": "ONDO", "amount": "76.52", "status": "CONFIRMED"},
+        {"timestamp": 1_100, "type": "ROLL_IN", "asset": "USDT", "amount": "29.86", "status": "CONFIRMED"},
+        {"timestamp": 1_200, "type": "ROLL_IN", "asset": "USDT", "amount": "6.59", "status": "CONFIRMED"},
+        {"timestamp": 1_300, "type": "ROLL_OUT", "asset": "USDT", "amount": "28.93", "status": "CONFIRMED"},
+        {"timestamp": 1_400, "type": "ROLL_IN", "asset": "USDT", "amount": "50", "status": "PENDING"},  # not settled
+    ]
+    net, latest = _net_external_flow(rows, 950, lambda s: 0.39)
+    assert latest == 1_300
+    assert abs(net - (-76.52 * 0.39 + 29.86 + 6.59 - 28.93)) < 0.01
+
+    # unpriceable asset rows are skipped but still advance the watermark
+    def no_price(_s):
+        raise RuntimeError("no ticker")
+    net2, latest2 = _net_external_flow(
+        [{"timestamp": 2_000, "type": "ROLL_OUT", "asset": "XXX", "amount": "5", "status": "CONFIRMED"}],
+        1_500, no_price)
+    assert net2 == 0.0 and latest2 == 2_000
+
+
 def test_marginable_universe_fails_open_when_margin_off():
     """Spot/testnet mode never filters the universe — the marginable list only
     matters when orders actually go to the margin wallet."""

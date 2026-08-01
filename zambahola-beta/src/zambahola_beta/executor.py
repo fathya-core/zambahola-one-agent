@@ -437,6 +437,17 @@ class BinanceMargin(BinanceSpot):
                             {"type": "MAIN_MARGIN" if to_margin else "MARGIN_MAIN",
                              "asset": asset, "amount": round(float(amount), 8)})
 
+    def transfer_history(self, start_ms: int) -> list[dict]:
+        """Margin-wallet in/out movements since start_ms (ROLL_IN/ROLL_OUT rows).
+        This log catches MANUAL transfers made from the Binance app that the
+        universal-transfer query can miss — used to keep performance honest."""
+        try:
+            out = self._signed("GET", "/sapi/v1/margin/transfer",
+                               {"startTime": int(start_ms), "size": 20})
+            return out.get("rows", []) or []
+        except Exception:  # noqa: BLE001
+            return []
+
     def repay(self, asset: str, amount: float) -> dict:
         """Explicit loan repayment (AUTO_REPAY on sells normally covers this; used
         to clear residual interest when switching margin off)."""
