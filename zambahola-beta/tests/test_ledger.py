@@ -36,6 +36,17 @@ def test_fees_reduce_realized_pnl_on_both_sides():
     assert 195.0 < rec["realized"] < 200.0  # ~197.6 after round-trip fees
 
 
+def test_sell_fee_charged_on_executed_gross_not_requested_usd():
+    """A SELL request larger than the ledger position is clipped to what the ledger
+    holds — the booked fee must be on the EXECUTED gross, not the padded request."""
+    led = Ledger()
+    led.record("BUY", "BTCUSDT", usd=1000.0, price=100.0, fee_bps=0)  # 10 units
+    # request to sell $5000 (50 units) but only 10 are held -> executes 10 @ 110
+    rec = led.record("SELL", "BTCUSDT", usd=5000.0, price=110.0)
+    assert rec["fee"] == round(10 * 110.0 * 0.001, 4)  # fee on $1100, not $5000
+    assert 98.0 < rec["realized"] < 100.0  # (110-100)*10 minus the $1.1 fee
+
+
 def test_unrealized_gain_tracks_avg_cost():
     led = Ledger()
     led.record("BUY", "SOLUSDT", usd=500.0, price=50.0)   # 10 @ 50

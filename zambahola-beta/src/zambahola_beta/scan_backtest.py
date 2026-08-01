@@ -58,6 +58,8 @@ def backtest_scan(
     lev_gross_cap: float = 3.0,
     lev_overrides: dict | None = None,
     funding_daily: float = 0.0003,
+    regime_breadth: float = 0.4,
+    lev_spike_held_exempt: bool = True,
 ) -> dict:
     frames = {s: df for s, df in frames.items() if len(df) >= min_bars}
     if len(frames) < 2:
@@ -83,6 +85,12 @@ def backtest_scan(
     roll_min = {n: px[n].rolling(60).min() for n in names} if allow_short else {}
     btc_cons = trend_consensus(px[leader]) if leader in names else None
     btc_mom90 = px[leader].pct_change(90) if leader in names else None
+    # market BREADTH (live parity): fraction of the universe itself in an uptrend.
+    # The live regime is 0.6 x BTC-consensus + 0.4 x breadth — a strong BTC with
+    # collapsing breadth still de-risks. regime_breadth=0 reproduces BTC-only.
+    breadth_arr = None
+    if regime_breadth > 0:
+        breadth_arr = (pd.DataFrame(cons) >= 0.5).mean(axis=1).to_numpy()
 
     # align Fear & Greed (sentiment) to the trading dates if provided
     fng_arr = None
@@ -104,7 +112,11 @@ def backtest_scan(
     for t in range(begin, last - 1):
         regime = 1.0
         if btc_cons is not None and not pd.isna(btc_cons.iloc[t]):
-            regime = regime_floor + (1.0 - regime_floor) * float(btc_cons.iloc[t])
+            combined = float(btc_cons.iloc[t])
+            if breadth_arr is not None:
+                combined = ((1.0 - regime_breadth) * combined
+                            + regime_breadth * float(breadth_arr[t]))
+            regime = regime_floor + (1.0 - regime_floor) * combined
         eff_total = max_total * regime
         # sentiment overlay: trim exposure when the crowd is in extreme greed (froth)
         if fng_arr is not None:
@@ -244,6 +256,7 @@ def backtest_scan(
                     0.0 if pd.isna(r1) else float(r1),
                     lev_target_vol=lev_target_vol, max_lev=max_lev,
                     periods_per_year=periods_per_year,
+                    is_held=(lev_spike_held_exempt and prev_wl.get(n, 0.0) > 1e-12),
                 )
             gross = sum(w[n] * lev[n] for n in names if w[n] > 0)
             cap_g = lev_gross_cap * regime

@@ -62,3 +62,32 @@ def test_backtest_leverage_simulation_metrics():
     # leverage deploys MORE notional than the unlevered run, but never above the cap
     assert lev["avg_gross"] >= base["avg_gross"] - 1e-9
     assert lev["avg_gross"] <= 2.0 + 0.1
+
+
+def test_backtest_regime_breadth_derisk_when_market_internals_weak():
+    """LIVE PARITY: the live regime blends BTC consensus with market BREADTH.
+    With BTC strong but every alt in a downtrend (the classic BTC-only trap),
+    the breadth-aware regime must deploy LESS than the BTC-only regime."""
+    rng = np.random.default_rng(3)
+    n = 380
+
+    def up(drift: float) -> np.ndarray:
+        return 100 * np.cumprod(1 + rng.normal(drift, 0.015, n))
+
+    def down() -> np.ndarray:
+        return 100 * np.cumprod(1 + rng.normal(-0.004, 0.02, n))
+
+    frames = {
+        "BTCUSDT": _frame(up(0.003)),   # leader strong
+        "AUSDT": _frame(up(0.004)),     # one tradable uptrend
+        "BUSDT": _frame(down()),        # the rest of the market rolls over
+        "CUSDT": _frame(down()),
+        "DUSDT": _frame(down()),
+        "EUSDT": _frame(down()),
+    }
+    btc_only = backtest_scan(frames, top_n=2, warmup=210, min_bars=300,
+                             regime_breadth=0.0)
+    breadth = backtest_scan(frames, top_n=2, warmup=210, min_bars=300,
+                            regime_breadth=0.4)
+    assert btc_only["ok"] and breadth["ok"]
+    assert breadth["avg_gross"] < btc_only["avg_gross"]  # collapsing breadth de-risks

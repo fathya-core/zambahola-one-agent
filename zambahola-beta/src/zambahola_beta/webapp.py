@@ -1075,14 +1075,22 @@ def _force_sell_symbols(
             # FULL exit: sell the entire base qty (LOT_SIZE-floored) so nothing is
             # left behind. Falls back to a quote-qty sell if the qty route fails.
             try:
-                client.market_sell_all(sym, wallet_qty)
-                gross = round(wallet_usd, 2)
+                res = client.market_sell_all(sym, wallet_qty)
+                est_gross, est_qty = round(wallet_usd, 2), wallet_qty
             except Exception:  # noqa: BLE001
-                client.market_order(sym, "SELL", quote_qty=amt)
-                gross = amt
-            rec = led.record("SELL", sym, gross, px)
+                res = client.market_order(sym, "SELL", quote_qty=amt)
+                est_gross, est_qty = amt, amt / px
+            # Book the ACTUAL fill when the exchange reports it (keeps the ledger
+            # exactly in sync); fall back to the estimate if the response is bare.
+            exq = float((res or {}).get("executedQty", 0) or 0)
+            qf = float((res or {}).get("cummulativeQuoteQty", 0) or 0)
+            if exq > 0 and qf > 0:
+                gross, fill_px, sold_qty = round(qf, 2), qf / exq, exq
+            else:
+                gross, fill_px, sold_qty = est_gross, px, est_qty
+            rec = led.record("SELL", sym, gross, fill_px)
             append_trade({**rec, "mode": "live" if cfg.live else "testnet", "why": why})
-            balances[base] = 0.0
+            balances[base] = max(0.0, wallet_qty - sold_qty)
             placed += 1
             sold.append(sym)
             pnl = f" · ربح ${rec['realized']}" if rec["realized"] else ""
@@ -1092,7 +1100,8 @@ def _force_sell_symbols(
     return placed, sold
 
 
-def _reconcile_ledger(led, balances: dict, allp: dict, state: AppState) -> bool:
+def _reconcile_ledger(led, balances: dict, allp: dict, state: AppState,
+                      *, live: bool = False) -> bool:
     """Idempotency guard: make the ledger match the real wallet every cycle.
 
     If a failed/partial/out-of-band order left the ledger claiming MORE base units
@@ -1117,7 +1126,7 @@ def _reconcile_ledger(led, balances: dict, allp: dict, state: AppState) -> bool:
         # so risk/rebalance logic stops acting on a ghost, and it shows in the audit.
         if missing > p.qty * 0.05 and missing_usd > 25.0:
             rec = led.record("SELL", sym, missing_usd, px)
-            append_trade({**rec, "mode": "live" if state else "testnet",
+            append_trade({**rec, "mode": "live" if live else "testnet",
                           "why": "reconcile-phantom"})
             state.log(f"🔧 مطابقة {sym}: إغلاق {missing:.6g} وحدة وهمية "
                       f"(ربح/خسارة ${rec['realized']})")
@@ -1188,7 +1197,7 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
         # gross at lev_gross_cap x regime, so the levered sum stays bounded.
         targets = _levered_targets(targets, sig.get("leverage") or {})
     led = load_ledger()
-    if _reconcile_ledger(led, balances, allp, state):
+    if _reconcile_ledger(led, balances, allp, state, live=cfg.live):
         save_ledger(led)
     led.update_peaks(allp)
     # MARGIN LIQUIDATION GUARD — every cycle, before anything else: if the margin
@@ -1274,13 +1283,20 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
             if sell_usd < 10:
                 continue
             try:
-                client.market_order(s, "SELL", quote_qty=sell_usd)
-                rec = led.record("SELL", s, sell_usd, px)
+                res = client.market_order(s, "SELL", quote_qty=sell_usd)
+                exq = float((res or {}).get("executedQty", 0) or 0)
+                qf = float((res or {}).get("cummulativeQuoteQty", 0) or 0)
+                if exq > 0 and qf > 0:  # actual fill (estimate fallback if bare)
+                    rec = led.record("SELL", s, round(qf, 2), qf / exq)
+                    sold_q = exq
+                else:
+                    rec = led.record("SELL", s, sell_usd, px)
+                    sold_q = sell_usd / px
                 append_trade({**rec, "mode": "live" if cfg.live else "testnet",
                               "why": "جني ربح المحفظة (تراجع عن القمّة)"})
                 banked += rec["realized"]
                 banked_syms.add(s)
-                balances[base] = max(0.0, balances.get(base, 0.0) - sell_usd / px)
+                balances[base] = max(0.0, balances.get(base, 0.0) - sold_q)
                 g = (px / p.avg - 1) * 100
                 state.log(f"💰 بنك ربح {s}: +{g:.0f}% بيع {int(cfg.port_tp_sell_frac*100)}% (قفل ${rec['realized']})")
             except Exception as exc:  # noqa: BLE001
@@ -1833,10 +1849,13 @@ def do_backtest(cfg: AppConfig, state: AppState, *, long_history: bool = False) 
                   entry_max_dd=cfg.entry_max_dd,
                   max_spike_1d=cfg.max_spike_1d, spike_base_max=cfg.spike_base_max,
                   min_score_frac=cfg.min_score_frac,
-                  # spot parity: the user-facing backtest simulates what EXECUTION does
-                  # today (1x). Leverage variants run via the A/B harness; flip to
-                  # cfg.max_lev when futures execution goes live.
-                  max_lev=0.0)
+                  # EXECUTION PARITY: with margin ON the backtest simulates the same
+                  # levered execution (advisor + gross cap + borrow cost + liquidation);
+                  # margin OFF = pure spot 1x, exactly what do_execute places.
+                  max_lev=(cfg.max_lev if cfg.margin else 0.0),
+                  lev_target_vol=cfg.lev_target_vol,
+                  lev_gross_cap=cfg.lev_gross_cap,
+                  lev_overrides=cfg.lev_overrides)
     res = backtest_scan(frames, **common)
     res["scope"] = "years" if long_history else "recent"
     res["interval"] = cfg.interval

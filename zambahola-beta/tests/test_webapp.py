@@ -324,6 +324,49 @@ def test_live_load_config_clamps_leverage_to_1x(tmp_path, monkeypatch):
     assert cfg2.max_total == 3.0  # testnet keeps it (experiments allowed)
 
 
+def test_force_sell_books_actual_fill_from_exchange_response(tmp_path, monkeypatch):
+    """Forced exits must book the EXCHANGE fill (executedQty/cummulativeQuoteQty),
+    not the pre-trade estimate — partial fills / price drift stay in sync."""
+    monkeypatch.setenv("ZAMBAHOLA_DATA_DIR", str(tmp_path))
+    from zambahola_beta.webapp import _force_sell_symbols
+
+    class _Client:
+        def market_sell_all(self, symbol, wallet_qty):
+            # fills only 9.5 of 10 units, at VWAP 110 (not the stale $100 mark)
+            return {"executedQty": "9.5", "cummulativeQuoteQty": "1045.0",
+                    "status": "FILLED"}
+
+    led = Ledger()
+    led.record("BUY", "SYNUSDT", usd=1000.0, price=100.0, fee_bps=0)  # 10 @ 100
+    balances = {"SYN": 10.0}
+    placed, sold = _force_sell_symbols(
+        _Client(), {"SYNUSDT"}, balances, {"SYNUSDT": 100.0}, led,
+        AppConfig(), AppState(), why="test")
+    assert placed == 1 and sold == ["SYNUSDT"]
+    assert abs(led.positions["SYNUSDT"].qty - 0.5) < 1e-9  # 10 - 9.5 actually sold
+    assert abs(balances["SYN"] - 0.5) < 1e-9               # wallet mirrors the fill
+    assert led.realized > 90  # (110-100)*9.5 minus fee — PnL from the REAL fill
+
+
+def test_force_sell_falls_back_to_estimate_on_bare_response(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZAMBAHOLA_DATA_DIR", str(tmp_path))
+    from zambahola_beta.webapp import _force_sell_symbols
+
+    class _Bare:
+        def market_sell_all(self, symbol, wallet_qty):
+            return {}
+
+    led = Ledger()
+    led.record("BUY", "SYNUSDT", usd=1000.0, price=100.0, fee_bps=0)
+    balances = {"SYN": 10.0}
+    placed, _ = _force_sell_symbols(
+        _Bare(), {"SYNUSDT"}, balances, {"SYNUSDT": 100.0}, led,
+        AppConfig(), AppState(), why="test")
+    assert placed == 1
+    assert led.positions["SYNUSDT"].qty <= 1e-9  # estimate books the full wallet
+    assert balances["SYN"] == 0.0
+
+
 # ---------- REAL leverage (cross-margin) ----------
 
 def test_margin_deleverage_usd_math():

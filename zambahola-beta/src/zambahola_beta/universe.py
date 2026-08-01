@@ -208,6 +208,7 @@ def suggest_leverage(
     liq_sigmas: float = 3.0,
     spike_1x: float = 0.15,
     periods_per_year: float = 365.0,
+    is_held: bool = False,
 ) -> float:
     """Per-coin leverage suggestion (x1..x`max_lev`) from a PRECISE risk read —
     the multiplier a futures position could carry so that:
@@ -227,6 +228,10 @@ def suggest_leverage(
        moving 8%/day can NEVER carry 10x (one normal day = wipeout).
     5. NEVER LEVER A SPIKE — if the last day already jumped >= `spike_1x` the
        entry is chase-risk: hard 1x regardless of score (DODO-type protection).
+       Applies to NEW entries only (`is_held=False`): forcing an already-held
+       winner down to 1x on its best day is a forced sell into strength followed
+       by a re-lever the next day — pure churn (fees both ways). A held position
+       keeps its vol-budget leverage; rising vol shrinks it naturally.
     6. TREND QUALITY — consensus below ~0.9 shaves the budget linearly (a 0.75
        consensus trend is not "very strong" evidence).
 
@@ -236,8 +241,8 @@ def suggest_leverage(
     """
     if max_lev <= 1.0 or vol_ann <= 0 or best_score <= 0 or score <= 0:
         return 1.0
-    if ret1d >= spike_1x:
-        return 1.0  # fresh vertical candle -> no leverage, ever
+    if ret1d >= spike_1x and not is_held:
+        return 1.0  # fresh vertical candle -> never lever a NEW chase entry
     raw = (lev_target_vol / vol_ann)
     raw *= 0.6 + 0.4 * min(1.0, score / best_score)          # conviction tilt
     # market regime: SOFT here (sqrt) — full market caution is applied once at the
@@ -496,6 +501,7 @@ def scan(
                     s["vol"], s["score"], best, s["consensus"], regime,
                     s["dd_high"], s.get("ret1d", 0.0),
                     lev_target_vol=lev_target_vol, max_lev=max_lev,
+                    is_held=sym in held,  # spike guard is for NEW chase entries only
                 )
         cap_gross = lev_gross_cap * regime
         gross = sum(targets.get(sym, 0.0) * leverage.get(sym, 1.0) for sym in targets)

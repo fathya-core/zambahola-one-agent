@@ -438,6 +438,23 @@ def test_suggest_leverage_precise_risk_read():
     assert marginal < lead
 
 
+def test_suggest_leverage_spike_guard_is_for_new_entries_only():
+    """A +20% day forces a NEW entry to 1x (chase risk) but must NOT force an
+    already-HELD position down to 1x — that's a forced sell into strength followed
+    by a re-lever the next day (fees both ways, no risk gain: rising vol already
+    shrinks the vol-budget leverage naturally)."""
+    from zambahola_beta.universe import suggest_leverage
+    new = suggest_leverage(0.30, 3.0, 3.0, 1.0, 1.0, 0.0, 0.20, max_lev=10.0)
+    held = suggest_leverage(0.30, 3.0, 3.0, 1.0, 1.0, 0.0, 0.20, max_lev=10.0,
+                            is_held=True)
+    assert new == 1.0          # spike -> no leverage on a fresh chase
+    assert held > 1.0          # held keeps its vol-budget leverage
+    # and the liquidation-safety cap still binds for held positions
+    wild = suggest_leverage(2.0, 3.0, 3.0, 1.0, 1.0, 0.0, 0.20, max_lev=10.0,
+                            is_held=True)
+    assert wild == 1.0         # hyper-vol coin can't carry leverage, held or not
+
+
 def test_scan_leverage_advisor_and_gross_cap():
     f = _frames()
     res = scan(f, top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0,

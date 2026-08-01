@@ -84,6 +84,9 @@ class Ledger:
             avg = pos.avg
             if avg > 0 and sell_qty > 0:
                 gross = price * sell_qty
+                # fee on the EXECUTED gross, not the requested usd — when the request
+                # is clipped to the ledger qty the exchange only charges what filled.
+                fee = gross * f
                 realized = (gross - fee) - avg * sell_qty  # net of sell-side fee
                 gain_pct = round((price / avg - 1.0) * 100, 2)
                 pos.cost -= avg * sell_qty
