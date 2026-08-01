@@ -165,7 +165,7 @@ _PERSIST_FIELDS = (
     "starter_frac", "starter_max_vol", "starter_min_mom30", "starter_regime_min",
     "max_entry_gap_pct", "entry_quality_dd_penalty", "entry_max_dd",
     "max_spike_1d", "spike_base_max", "min_score_frac",
-    "max_lev", "lev_target_vol", "lev_gross_cap",
+    "max_lev", "lev_target_vol", "lev_gross_cap", "lev_overrides",
 )
 
 
@@ -268,14 +268,26 @@ small{color:var(--mut)}
  <div><div class="k">الوضع الحقيقي (Live)</div>
   <div class="flex"><button id="live" class="sec">⚪ testnet (آمن)</button>
   <small id="livewarn" style="color:var(--warn)"></small></div></div>
- <div><div class="k">التعرّض / الرافعة</div>
+ <div><div class="k">التعرّض على spot (بدون اقتراض)</div>
   <div class="flex" id="lev">
    <button class="sec lv" data-v="0.5">محافظ 0.5x</button>
    <button class="sec lv" data-v="1">كامل 1x</button>
-   <button class="sec lv" data-v="2">رافعة 2x ⚠</button>
-   <button class="sec lv" data-v="3">رافعة 3x ⚠</button>
-  </div><small id="levnote" style="color:var(--mut)"></small></div>
+  </div></div>
 </div>
+<div style="margin-top:8px"><div class="k">الرافعة القصوى للمحفظة (صريحة — فيوتشرز)</div>
+ <div class="flex" id="levcap">
+  <button class="sec lc" data-v="1">×1 (بدون)</button>
+  <button class="sec lc" data-v="2">×2</button>
+  <button class="sec lc" data-v="3">×3</button>
+  <button class="sec lc" data-v="5">×5 ⚠</button>
+  <button class="sec lc" data-v="10">×10 ⚠</button>
+ </div><small id="levnote" style="color:var(--mut)"></small></div>
+<div style="margin-top:8px"><div class="k">رافعة يدوية لعملة محددة (تجربة — تتجاوز اقتراح المحرك)</div>
+ <div class="flex">
+  <input id="lovsym" placeholder="مثال: UNI" style="width:110px;text-transform:uppercase">
+  <input id="lovval" type="number" min="1" max="10" step="0.5" placeholder="×الرافعة" style="width:100px">
+  <button id="lovadd" class="sec">➕ طبّق</button>
+ </div><div id="lovlist" class="k" style="margin-top:5px"></div></div>
 <div style="margin-top:8px"><div class="k">الإطار الزمني (أسرع = أنشط)</div>
  <div class="flex" id="tf">
   <button class="sec tfb" data-v="1d">يومي</button>
@@ -356,19 +368,24 @@ function render(s){
  $("live").className=s.live?"":"sec";
  $("livewarn").textContent=s.live?"تداول بأموال حقيقية — يتطلّب ZAMBAHOLA_I_ACCEPT_REAL_TRADING=RISK":"";
  document.querySelectorAll(".lv").forEach(b=>b.className=(parseFloat(b.dataset.v)===s.max_total)?"lv":"sec lv");
+ document.querySelectorAll(".lc").forEach(b=>b.className=(parseFloat(b.dataset.v)===s.lev_gross_cap)?"lc":"sec lc");
  document.querySelectorAll(".tfb").forEach(b=>b.className=(b.dataset.v===s.interval)?"tfb":"sec tfb");
  $("tfnote").textContent="الإطار الحالي: "+(s.interval||"1d")+(s.interval&&s.interval!=="1d"?" — أسرع، صفقات أكثر ورسوم أكثر":" — موصى به (مُثبت)");
- $("levnote").textContent=s.live?"الرافعة مقفلة عند 1x في الوضع الحقيقي (spot) — حماية إدارة الكاش":((s.max_total>1)?"⚠ الرافعة >1 تتطلّب حساب فيوتشرز — على spot يُنفَّذ 1x كحد أقصى":"تعرّض على spot (بدون رافعة)");
+ {const ge=s.signal&&s.signal.gross_exposure!=null?s.signal.gross_exposure:null;const eff=(s.lev_gross_cap!=null&&s.regime!=null)?(s.lev_gross_cap*s.regime).toFixed(2):"—";
+  $("levnote").innerHTML=(s.lev_gross_cap>1?("رافعة صريحة ×"+s.lev_gross_cap+" · السقف الفعّال الآن = ×"+s.lev_gross_cap+"×وضع السوق = <b>"+eff+"</b>"+(ge!=null?" · التعرّض الحالي <b>"+ge+"</b>":"")):"بدون رافعة (×1)")+(s.live?' · <span style="color:var(--warn)">التنفيذ spot=×1؛ الرافعة الفعلية تتطلّب حساب فيوتشرز — الأرقام استشارية</span>':"");}
+ {const ov=s.lev_overrides||{};const ks=Object.keys(ov);
+  $("lovlist").innerHTML=ks.length?("رافعات يدوية: "+ks.map(k=>'<span style="display:inline-block;background:#12203a;padding:2px 8px;border-radius:10px;margin:2px">'+k.replace('USDT','')+' ×'+ov[k]+' <a href="#" data-rm="'+k+'" class="lovrm" style="color:var(--down);text-decoration:none">✕</a></span>').join(" ")):"لا رافعات يدوية — المحرك يقترح تلقائياً.";
+  document.querySelectorAll(".lovrm").forEach(a=>a.onclick=async(e)=>{e.preventDefault();render(await api('/api/config','POST',{lev_overrides:{[a.dataset.rm]:0}}));});}
  setIf("uni",s.universe_size);setIf("topn",s.top_n);setIf("ord",s.max_order_usd);setIf("tot",s.max_total_usd);
  {let sc=s.scanned!=null?("مُسح "+s.scanned+" عملة"):"";if(s.regime!=null){const rp=Math.round(s.regime*100);sc+=" · وضع السوق: "+rp+"% "+(rp>=80?"🟢":(rp>=55?"🟡":"🔴 خطر"));}$("scanned").textContent=sc;}
  // market scan table (smart score = risk-adjusted momentum + acceleration + relative strength)
  const ranked=s.ranked||s.signal?.ranked;
  if(ranked&&ranked.length){let h='<table><tr><th>#</th><th>العملة</th><th>السعر</th><th>قوة الترند</th><th>زخم 90ي</th><th>عائد/مخاطرة</th><th>الوزن</th><th>رافعة مقترحة</th><th>الحالة</th></tr>';
- ranked.forEach((r,i)=>{const inv=r.action==="INVEST";const lv=(inv&&r.lev)?('×'+r.lev+(r.lev>=5?' 💪':'')):'—';h+=`<tr><td>${i+1}</td><td><b>${r.symbol}</b></td><td>${r.price}</td>
+ ranked.forEach((r,i)=>{const inv=r.action==="INVEST";const lv=(inv&&r.lev)?('×'+r.lev+(r.lev_manual?' ✋':(r.lev>=5?' 💪':''))):'—';h+=`<tr><td>${i+1}</td><td><b>${r.symbol}</b></td><td>${r.price}</td>
   <td>${Math.round((r.trend_consensus||0)*100)}%</td><td style="color:${r.momentum>=0?'var(--up)':'var(--down)'}">${(r.momentum*100).toFixed(1)}%</td>
   <td style="color:${(r.risk_adj||0)>=0?'var(--up)':'var(--down)'}">${(r.risk_adj!=null?r.risk_adj.toFixed(2):'—')}</td>
   <td>${Math.round((r.target_weight||0)*100)}%</td><td style="color:${(r.lev||1)>1?'var(--up)':'var(--mut)'}"><b>${lv}</b></td><td>${inv?'<span class="badge b-up">استثمر</span>':(r.action==="STOP"?'<span class="badge b-down">وقف خسارة</span>':(r.action==="UPTREND"?'<span class="badge b-warn">صاعد</span>':'<span class="badge b-mut">—</span>'))}</td></tr>`;});
- if(s.signal&&s.signal.gross_exposure!=null&&s.live)h+='<div class="k" style="margin-top:6px">الرافعة المقترحة تُحسب لكل عملة (تقلّب + قناعة + وضع السوق + أمان التصفية) — التنفيذ الحالي spot = ×1؛ تفعيلها الفعلي يتطلّب حساب فيوتشرز.</div>';
+ if(s.signal&&s.signal.gross_exposure!=null)h+='<div class="k" style="margin-top:6px">الرافعة: يقترحها المحرك لكل عملة (تقلّب + قناعة + وضع السوق + أمان التصفية)؛ ✋ = رافعة يدوية منك · 💪 = ≥×5. '+(s.live?'التنفيذ الحالي spot = ×1 (استشارية)؛ تفعيلها الفعلي يتطلّب حساب فيوتشرز.':'')+'</div>';
  $("market").innerHTML=h+'</table>';}
  else $("market").textContent="السوق كله هابط الآن — البقاء نقداً هو القرار الصحيح (حماية من الخسارة).";
  const a=$("assets");a.innerHTML="";
@@ -455,6 +472,8 @@ $("auto").onclick=async()=>{const willEnable=!AUTO;if(willEnable&&$("autoexec").
 $("autoexec").onchange=async()=>{render(await api('/api/auto','POST',{enabled:AUTO,execute:$("autoexec").checked,interval_hours:parseFloat($("autoiv").value)||6}));};
 $("live").onclick=async()=>{const next=!LIVE;if(next&&!confirm("تفعيل التداول الحقيقي بأموال فعلية؟ تأكد من المفاتيح وZAMBAHOLA_I_ACCEPT_REAL_TRADING=RISK"))return;render(await api('/api/config','POST',{live:next}));};
 document.querySelectorAll(".lv").forEach(b=>b.onclick=async()=>{render(await api('/api/config','POST',{max_total:parseFloat(b.dataset.v)}));});
+document.querySelectorAll(".lc").forEach(b=>b.onclick=async()=>{const v=parseFloat(b.dataset.v);if(v>3&&!confirm("رافعة ×"+v+" تضخّم الربح والخسارة معاً وتضيف خطر تصفية. للتجربة — متأكد؟"))return;render(await api('/api/config','POST',{lev_gross_cap:v}));});
+$("lovadd").onclick=async()=>{let sym=($("lovsym").value||"").trim().toUpperCase();const val=parseFloat($("lovval").value);if(!sym||!(val>=1)){alert("اكتب رمز العملة ورافعة ≥ 1 (مثال: UNI و 5)");return;}if(val>3&&!confirm("رافعة يدوية ×"+val+" على "+sym+" — تتجاوز حماية المحرك للتجربة. متأكد؟"))return;render(await api('/api/config','POST',{lev_overrides:{[sym]:val}}));$("lovsym").value="";$("lovval").value="";};
 document.querySelectorAll(".tfb").forEach(b=>b.onclick=async()=>{if(b.dataset.v!=="1d"&&!confirm("إطار أسرع = صفقات ورسوم أكثر وضجيج أكثر. متأكد؟"))return;render(await api('/api/config','POST',{interval:b.dataset.v}));});
 $("save").onclick=async()=>{render(await api('/api/config','POST',{universe_size:+$("uni").value,top_n:+$("topn").value,max_order_usd:+$("ord").value,max_total_usd:+$("tot").value}));};
 $("perfreset").onclick=async()=>{if(!confirm("تصفير سجل الأداء والبدء من القيمة الحالية؟"))return;render(await api('/api/perf-reset','POST',{}));};
@@ -536,6 +555,10 @@ class AppConfig:
     max_lev: float = 10.0
     lev_target_vol: float = 0.9   # levered position's annualised-vol budget
     lev_gross_cap: float = 2.0    # portfolio guard: sum(weight x lev) <= this x regime
+    # MANUAL per-coin leverage overrides (explicit, for experimentation): {SYM: x}.
+    # Replaces the advisor for that coin (clamped to [1, max_lev]); the portfolio
+    # gross cap protects overrides first and only trims them as a last resort.
+    lev_overrides: dict = field(default_factory=dict)
     profit_lock_arm: float = 0.15  # arm the profit ratchet once a position is up this %
     profit_lock_giveback: float = 0.07  # FLOOR give-back; actual is vol-adaptive (7%-18%)
     min_hold_hours: float = 24.0  # anti-churn: hold a new position at least this long (rotation only)
@@ -709,7 +732,7 @@ def _scan_signal(cfg: AppConfig, *, exclude: set | None = None) -> tuple[dict, l
               max_spike_1d=cfg.max_spike_1d, spike_base_max=cfg.spike_base_max,
               min_score_frac=cfg.min_score_frac,
               max_lev=cfg.max_lev, lev_target_vol=cfg.lev_target_vol,
-              lev_gross_cap=cfg.lev_gross_cap)
+              lev_gross_cap=cfg.lev_gross_cap, lev_overrides=cfg.lev_overrides)
     as_of = ""
     first = next((s for s in symbols if s in frames), None)
     if first is not None:
@@ -734,6 +757,7 @@ def _scan_signal(cfg: AppConfig, *, exclude: set | None = None) -> tuple[dict, l
         "regime": sc.get("regime", 1.0),
         "targets": sc["targets"],
         "leverage": sc.get("leverage", {}),
+        "lev_overridden": sc.get("lev_overridden", []),
         "gross_exposure": sc.get("gross_exposure"),
         "cash_weight": sc["cash_weight"],
         "candle_close": closes,
@@ -1690,6 +1714,7 @@ def make_handler(cfg: AppConfig, state: AppState):
                     "max_lev": cfg.max_lev,
                     "lev_target_vol": cfg.lev_target_vol,
                     "lev_gross_cap": cfg.lev_gross_cap,
+                    "lev_overrides": dict(cfg.lev_overrides),
                     "pnl_peak_usd": round(state.pnl_peak_usd, 2),
                     "tp_cooldown_min": max(0, int((state.port_tp_cooldown_until - time.time()) / 60)),
                     "backtest": state.backtest,
@@ -1762,6 +1787,23 @@ def make_handler(cfg: AppConfig, state: AppState):
                 cfg.lev_target_vol = max(0.1, min(3.0, float(body["lev_target_vol"])))
             if "lev_gross_cap" in body:
                 cfg.lev_gross_cap = max(0.0, min(10.0, float(body["lev_gross_cap"])))
+            if body.get("lev_overrides_clear"):
+                cfg.lev_overrides = {}
+            if "lev_overrides" in body and isinstance(body["lev_overrides"], dict):
+                ovs = dict(cfg.lev_overrides)
+                for sym, val in body["lev_overrides"].items():
+                    key = sym.upper()
+                    if not key.endswith("USDT"):
+                        key += "USDT"
+                    try:
+                        v = float(val)
+                    except (TypeError, ValueError):
+                        continue
+                    if v < 1.0:  # 0/blank removes the override
+                        ovs.pop(key, None)
+                    else:
+                        ovs[key] = min(cfg.max_lev, v)
+                cfg.lev_overrides = ovs
             if "take_profit_pct" in body:
                 cfg.take_profit_pct = max(1.0, float(body["take_profit_pct"]))
             if "take_profit_frac" in body:

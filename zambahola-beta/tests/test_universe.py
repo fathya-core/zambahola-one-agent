@@ -448,3 +448,48 @@ def test_scan_leverage_advisor_and_gross_cap():
     gross = sum(res["targets"][s] * res["leverage"][s] for s in res["targets"])
     assert gross <= 2.0 * res["regime"] + 0.06
     assert abs(res["gross_exposure"] - gross) < 0.05
+
+
+def test_scan_manual_leverage_override_replaces_advisor():
+    """A manual override forces a specific coin's leverage past what the advisor
+    would give (e.g. a volatile coin the advisor floors to x1), for experimentation."""
+    f = {k: v for k, v in _frames().items() if k != "DOWNUSDT_X"}
+    auto = scan(f, top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0,
+                min_vol=0.0, max_lev=10.0, lev_gross_cap=10.0)
+    sym = next(iter(auto["targets"]))
+    forced = scan(f, top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0,
+                  min_vol=0.0, max_lev=10.0, lev_gross_cap=10.0,
+                  lev_overrides={sym: 8.0})
+    assert forced["leverage"][sym] == 8.0          # explicit value honoured
+    assert sym in forced["lev_overridden"]
+    assert forced["leverage"][sym] > auto["leverage"][sym]  # overrode the advisor
+
+
+def test_scan_manual_override_clamped_to_max_lev():
+    f = {k: v for k, v in _frames().items() if k != "DOWNUSDT_X"}
+    sym = "UPUSDT_X"
+    r = scan(f, top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0,
+             min_vol=0.0, max_lev=5.0, lev_gross_cap=10.0, lev_overrides={sym: 20.0})
+    assert r["leverage"][sym] == 5.0  # clamped to max_lev ceiling
+
+
+def test_scan_gross_cap_protects_override_first():
+    """When the gross cap binds, advisor coins are trimmed before the manual override
+    (as long as the override alone fits under the cap)."""
+    f = {k: v for k, v in _frames().items() if k != "DOWNUSDT_X"}
+    sym = "MILDUSDT"  # smaller-weight pick -> its override fits comfortably under cap
+    r = scan(f, top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0,
+             min_vol=0.0, max_lev=10.0, lev_gross_cap=3.0, lev_overrides={sym: 6.0})
+    assert r["leverage"][sym] == 6.0  # override protected
+    gross = sum(r["targets"][x] * r["leverage"][x] for x in r["targets"])
+    assert gross <= 3.0 * r["regime"] + 0.06  # book still respects the cap
+
+
+def test_scan_gross_cap_backstop_trims_override_when_alone_over_cap():
+    """Safety backstop: if the override ALONE exceeds the cap, it is trimmed too so
+    the book can never blow past lev_gross_cap x regime."""
+    f = {k: v for k, v in _frames().items() if k != "DOWNUSDT_X"}
+    r = scan(f, top_n=5, target_vol=0.6, max_total=1.0, max_correlation=1.0,
+             min_vol=0.0, max_lev=10.0, lev_gross_cap=1.0, lev_overrides={"UPUSDT_X": 6.0})
+    gross = sum(r["targets"][x] * r["leverage"][x] for x in r["targets"])
+    assert gross <= 1.0 * r["regime"] + 0.06  # cap still honoured (safety wins)

@@ -56,6 +56,7 @@ def backtest_scan(
     max_lev: float = 0.0,
     lev_target_vol: float = 0.9,
     lev_gross_cap: float = 3.0,
+    lev_overrides: dict | None = None,
     funding_daily: float = 0.0003,
 ) -> dict:
     frames = {s: df for s, df in frames.items() if len(df) >= min_bars}
@@ -225,9 +226,14 @@ def backtest_scan(
         # perpetual funding daily, and a coin-day where lev*ret <= -100% wipes that
         # position's margin (isolated liquidation) instead of going more negative.
         lev = {n: 1.0 for n in names}
+        ov = {k: float(v) for k, v in (lev_overrides or {}).items() if float(v) >= 1.0}
         if max_lev > 1.0 and picks:
             best_sc = max(sc for _, sc, _, _ in picks)
+            ceil = max(max_lev, 1.0)
             for n, sc, v, st in picks:
+                if n in ov:
+                    lev[n] = max(1.0, min(ceil, ov[n]))  # explicit manual override
+                    continue
                 if st:
                     continue  # starters are probes: never levered
                 cn, d, r1 = cons[n].iloc[t], dd[n].iloc[t], ret1d[n].iloc[t]

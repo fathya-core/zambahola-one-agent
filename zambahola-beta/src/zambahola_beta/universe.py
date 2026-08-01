@@ -316,6 +316,7 @@ def scan(
     max_lev: float = 0.0,
     lev_target_vol: float = 0.9,
     lev_gross_cap: float = 3.0,
+    lev_overrides: dict | None = None,
 ) -> dict:
     """Rank coins by a smart composite score, allocate to the strongest
     uptrends (vol-targeted, conviction-tilted), scaled by market regime, with a
@@ -471,24 +472,47 @@ def scan(
 
     # PER-COIN LEVERAGE ADVISOR (x1..x`max_lev`): how much a futures position in each
     # pick could carry, from vol budget + conviction + regime + liquidation safety
-    # (see suggest_leverage). Portfolio guard: total levered notional (sum w*lev)
-    # is capped at lev_gross_cap * regime — the book can't quietly become 10x gross.
-    # ADVISORY on spot (execution stays 1x); futures execution consumes it directly.
+    # (see suggest_leverage). A MANUAL override (lev_overrides[SYM]) is EXPLICIT: it
+    # replaces the advisor for that coin (clamped to [1, max_lev]) for experimentation.
+    # Portfolio guard: total levered notional (sum w*lev) is capped at
+    # lev_gross_cap * regime; the scale-down protects manual overrides first and only
+    # trims them as a last resort. ADVISORY on spot (execution stays 1x); futures
+    # execution consumes it directly.
+    ov = {k: float(v) for k, v in (lev_overrides or {}).items() if float(v) >= 1.0}
     leverage: dict[str, float] = {}
+    overridden: set[str] = set()
     if picks:
         best = max(s["score"] for s in picks)
+        ceil = max(max_lev, 1.0)
         for s in picks:
-            leverage[s["symbol"]] = suggest_leverage(
-                s["vol"], s["score"], best, s["consensus"], regime,
-                s["dd_high"], s.get("ret1d", 0.0),
-                lev_target_vol=lev_target_vol, max_lev=max_lev,
-            ) if not s.get("_starter") else 1.0  # starters are probes: never levered
-        gross = sum(targets.get(sym, 0.0) * leverage.get(sym, 1.0) for sym in targets)
+            sym = s["symbol"]
+            if sym in ov:
+                leverage[sym] = max(1.0, min(ceil, ov[sym]))
+                overridden.add(sym)
+            elif s.get("_starter"):
+                leverage[sym] = 1.0  # starters are probes: never levered
+            else:
+                leverage[sym] = suggest_leverage(
+                    s["vol"], s["score"], best, s["consensus"], regime,
+                    s["dd_high"], s.get("ret1d", 0.0),
+                    lev_target_vol=lev_target_vol, max_lev=max_lev,
+                )
         cap_gross = lev_gross_cap * regime
+        gross = sum(targets.get(sym, 0.0) * leverage.get(sym, 1.0) for sym in targets)
         if max_lev > 1.0 and lev_gross_cap > 0 and gross > cap_gross > 0:
-            scale = cap_gross / gross
-            for sym in leverage:
-                leverage[sym] = max(1.0, round(leverage[sym] * scale, 1))
+            # protect overrides: scale advisor coins down first, trim overrides last
+            adv_syms = [s for s in targets if s not in overridden]
+            ov_gross = sum(targets.get(s, 0.0) * leverage.get(s, 1.0) for s in overridden)
+            adv_gross = sum(targets.get(s, 0.0) * leverage.get(s, 1.0) for s in adv_syms)
+            room = cap_gross - ov_gross
+            if room > 0 and adv_gross > room:
+                scale = room / adv_gross
+                for sym in adv_syms:
+                    leverage[sym] = max(1.0, round(leverage[sym] * scale, 1))
+            elif room <= 0:  # overrides alone exceed the cap -> trim everything (safety)
+                scale = cap_gross / gross
+                for sym in leverage:
+                    leverage[sym] = max(1.0, round(leverage[sym] * scale, 1))
 
     ranked = []
     for s in sorted(scored, key=lambda s: s["score"], reverse=True):
@@ -513,6 +537,7 @@ def scan(
             "realized_vol_ann": s["vol"],
             "target_weight": targets.get(s["symbol"], 0.0),
             "lev": leverage.get(s["symbol"], 0.0),
+            "lev_manual": s["symbol"] in overridden,
             "action": action,
         })
 
@@ -524,6 +549,7 @@ def scan(
         "picks": list(targets.keys()),
         "targets": targets,
         "leverage": leverage,
+        "lev_overridden": sorted(overridden),
         "gross_exposure": round(sum(
             targets.get(sym, 0.0) * leverage.get(sym, 1.0) for sym in targets), 4),
         "cash_weight": cash,
