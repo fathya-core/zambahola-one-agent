@@ -385,6 +385,20 @@ def test_levered_targets_multiplies_only_positive_weights():
     assert t == {"AUSDT": 0.6, "BUSDT": 0.2, "CUSDT": 0.0}
 
 
+def test_platform_limit_error_matcher():
+    """Binance per-token platform caps (collateral pool full / borrow pool empty)
+    must be recognised so the buy budget rotates instead of retrying forever."""
+    from zambahola_beta.webapp import _is_platform_limit_error
+    assert _is_platform_limit_error(
+        "Binance 51169: Token UNI reaches platform max pledged collateral amount. "
+        "The max transfer in quantity is 0.")
+    assert _is_platform_limit_error("Binance -3045: The system does not have enough asset now.")
+    assert _is_platform_limit_error("borrow amount exceeds the limit")
+    # ordinary failures are NOT platform bans (insufficient balance, timeouts...)
+    assert not _is_platform_limit_error("Binance -2010: Account has insufficient balance")
+    assert not _is_platform_limit_error("HTTP 504: gateway timeout")
+
+
 def test_transfer_amount_floors_with_buffer():
     assert _transfer_amount(178.567) == 178.55
     assert _transfer_amount(0.5) == 0.49

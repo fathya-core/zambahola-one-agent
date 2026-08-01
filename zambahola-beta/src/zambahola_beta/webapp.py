@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import webbrowser
@@ -53,6 +54,18 @@ MIN_NOTIONAL_USD = 10.0
 MARGIN_LEVEL_BLOCK_BUYS = 1.8
 MARGIN_LEVEL_DELEVERAGE = 1.4
 MARGIN_LEVEL_TARGET = 2.0
+
+# Exchange-side PER-TOKEN limits that no retry can fix (Binance margin/PM):
+# 51169 = token reached the platform-wide max pledged collateral, -3045/51070..
+# = borrow pool exhausted. The buy is refused for HOURS regardless of our
+# account, so the symbol is temp-banned and the budget rotates to the next pick.
+PLATFORM_LIMIT_BAN_HOURS = 6.0
+_PLATFORM_LIMIT_PAT = re.compile(
+    r"51169|max pledged collateral|-3045|51070|borrow.{0,20}(limit|exceed)", re.I)
+
+
+def _is_platform_limit_error(msg: str) -> bool:
+    return bool(_PLATFORM_LIMIT_PAT.search(msg))
 
 
 def _margin_deleverage_usd(gross_assets: float, debt: float,
@@ -1630,6 +1643,19 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
                 stop_banned.add(o.symbol)
         except Exception as exc:  # noqa: BLE001
             state.log(f"✗ فشل {o.side} {o.symbol}: {exc}")
+            # Binance PLATFORM limits (e.g. 51169 "max pledged collateral" — the
+            # exchange won't accept more of this token as margin collateral, or
+            # borrow caps): retrying every cycle is futile and parks the budget.
+            # Ban the symbol for a few hours so the scanner rotates the capital
+            # into the next-best pick, then retry naturally when the ban lapses.
+            pos_now = led.positions.get(o.symbol)
+            if (o.side == "BUY" and _is_platform_limit_error(str(exc))
+                    and not (pos_now and pos_now.qty * pos_now.avg > MIN_NOTIONAL_USD)):
+                # held positions are exempt: banning would drop them from the scan
+                # targets and force-sell a healthy position over a failed top-up.
+                _ban_symbols(state, {o.symbol}, PLATFORM_LIMIT_BAN_HOURS)
+                state.log(f"🚧 {o.symbol}: حد منصة بينانس (ضمان/اقتراض ممتلئ) — "
+                          f"استبعاد {PLATFORM_LIMIT_BAN_HOURS:g}س وتحويل الميزانية للبديل")
     if stop_banned:
         _ban_symbols(state, stop_banned, cfg.stop_cooldown_hours)
         days = cfg.stop_cooldown_hours / 24.0
