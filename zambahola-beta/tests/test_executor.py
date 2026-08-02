@@ -424,3 +424,17 @@ def test_plan_rebalance_spot_defaults_still_clamp_target_to_1x():
     plan = plan_rebalance({"BTCUSDT": 1.6}, {"USDT": 100.0}, {"BTCUSDT": 100.0}, limits)
     assert plan.orders and plan.orders[0].side == "BUY"
     assert abs(plan.orders[0].usd - 99.0) < 1e-6  # min(target $100, cash x 0.99)
+
+
+def test_round_step_kills_binary_float_artifacts():
+    from zambahola_beta.executor import BinanceSpot
+    # 671 * 0.1 == 67.10000000000001 in IEEE floats -> Binance -1111 precision
+    # reject. That silently downgraded full-quantity exits to the dust-leaving
+    # quote path. The step rounding must emit decimally-clean values.
+    assert repr(BinanceSpot._round_step(67.1328, 0.1)) == "67.1"
+    assert repr(BinanceSpot._round_step(5.4328, 0.1)) == "5.4"
+    assert repr(BinanceSpot._round_step(0.0512345, 0.001)) == "0.051"
+    assert BinanceSpot._round_step(123.7, 1.0) == 123.0
+    assert BinanceSpot._round_step(7.0, 0.0) == 7.0  # unknown step -> untouched
+    # floor semantics kept: never round UP past the wallet quantity
+    assert BinanceSpot._round_step(67.1999, 0.1) == 67.1

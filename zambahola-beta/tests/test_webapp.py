@@ -566,3 +566,16 @@ def test_dashboard_inline_js_has_valid_syntax(tmp_path):
         p.write_text(js, encoding="utf-8")
         r = subprocess.run([node, "--check", str(p)], capture_output=True, text=True)
         assert r.returncode == 0, f"dashboard script #{i} syntax error:\n{r.stderr[:1200]}"
+
+
+def test_rearm_rotation_only_when_all_buys_platform_refused():
+    from zambahola_beta.webapp import _should_rearm_rotation
+    # all planned buys refused by platform caps -> re-arm (retry alternates)
+    assert _should_rearm_rotation(2, 0, 2) is True
+    assert _should_rearm_rotation(1, 0, 1) is True
+    # partial deployment owns the day -> stay consumed
+    assert _should_rearm_rotation(2, 1, 1) is False
+    # failures for OTHER reasons (network etc.) -> no platform bans, no re-arm
+    assert _should_rearm_rotation(2, 0, 0) is False
+    # nothing was planned -> nothing to retry
+    assert _should_rearm_rotation(0, 0, 0) is False

@@ -219,10 +219,18 @@ class BinanceSpot:
 
     @staticmethod
     def _round_step(qty: float, step: float) -> float:
-        """Floor a base quantity to the symbol's LOT_SIZE step (avoids -1013)."""
+        """Floor a base quantity to the symbol's LOT_SIZE step (avoids -1013).
+
+        Binary-float artifacts must be snapped away: 671 * 0.1 in IEEE floats is
+        67.10000000000001, which Binance rejects with -1111 (precision over the
+        symbol's maximum) — that silently downgraded full-quantity exits to the
+        dust-leaving quote path. Quantize to the step's own decimal places."""
         if step <= 0:
             return qty
-        return math.floor(qty / step) * step
+        q = math.floor(qty / step + 1e-9) * step
+        step_txt = f"{step:.10f}".rstrip("0")
+        decs = len(step_txt.split(".")[1]) if "." in step_txt else 0
+        return round(q, decs)
 
     def _signed_at(self, base: str, method: str, path: str, params: dict,
                    *, _retry: bool = True) -> dict:

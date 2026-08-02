@@ -1074,6 +1074,15 @@ def _book_drop_exits(held_syms, book: set, exclude: set) -> set:
     return {s for s in held_syms if s not in book and s not in exclude}
 
 
+def _should_rearm_rotation(buys_planned: int, buy_fills: int, platform_fails: int) -> bool:
+    """True when the ENTIRE buy side of a rotation was refused by exchange platform
+    limits (e.g. 51169 collateral caps): nothing deployed, the refused symbols are
+    temp-banned, so the candle gate should re-arm and retry alternates next cycle
+    instead of leaving the account 100% cash until tomorrow's candle. Partial fills
+    (some buys landed) keep the gate consumed — the deployed part owns the day."""
+    return buys_planned > 0 and buy_fills == 0 and platform_fails > 0
+
+
 def _falling_knife_skips(targets: dict, close_ref: dict, prices: dict,
                          held: set, max_gap: float) -> list[str]:
     """Zero-out NEW buy targets whose live price is > max_gap below the closed candle
@@ -1633,6 +1642,10 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
         return {"ok": True, "orders": 0, "buys": 0, "sells": 0, "rotated": False}
     # committed to rotating on THIS candle -> record it now so any subsequent same-candle
     # cycle (even one that ends with "no orders") skips rotation until a new candle closes.
+    # (prev value kept: if the WHOLE buy side gets refused by platform limits below,
+    # the gate re-arms so the budget rotates into alternates instead of idling a day)
+    with state.lock:
+        prev_rotation_candle = state.last_rebalance_candle
     if sig_as_of:
         with state.lock:
             state.last_rebalance_candle = sig_as_of
@@ -1697,9 +1710,18 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
     if not plan.orders:
         return {"ok": True, "orders": forced, "buys": 0, "sells": forced}
     net = "خطة: " + (f"شراء {buys}" if buys else "") + (" · " if buys and sells else "") + (f"بيع {sells}" if sells else "")
-    state.log(f"{net} (ميزانية ${cfg.max_total_usd:g})")
+    # show the EFFECTIVE budget (config cap clipped to real net equity), not the raw
+    # config number — "$18000" on a $146 wallet reads like a malfunction
+    eff_budget = cfg.max_total_usd
+    if use_margin and mstats:
+        _ne = float(mstats.get("net_equity_usd") or 0.0)
+        if _ne > 0:
+            eff_budget = min(eff_budget, _ne)
+    state.log(f"{net} (ميزانية ${eff_budget:g})")
     ranked_map = {r["symbol"]: r for r in sig.get("ranked", [])}
     placed = forced
+    buy_fills = 0
+    platform_fails = 0
     stop_banned: set[str] = set()
     for o in plan.orders:
         why = _order_reason(o.symbol, o.side, targets, ranked_map)
@@ -1712,7 +1734,10 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
                 # clean full liquidation by base qty -> no 8% SELL_MARGIN dust left
                 try:
                     res = client.market_sell_all(o.symbol, balances.get(base, 0.0))
-                except Exception:  # noqa: BLE001 -- fall back to quote-qty sell
+                except Exception as exc_q:  # noqa: BLE001 -- fall back to quote-qty sell
+                    # visibility: a silent fallback here hid the -1111 float-precision
+                    # bug for a whole day (dust piled up with no trace of why)
+                    state.log(f"⚠️ {o.symbol}: بيع الكمية الكاملة تعذّر ({exc_q}) — بيع بالقيمة (قد يترك فتاتاً)")
                     res = client.market_order(o.symbol, o.side, quote_qty=o.usd)
             else:
                 res = client.market_order(o.symbol, o.side, quote_qty=o.usd)
@@ -1733,6 +1758,8 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
             fill_px = (quote_filled / exec_qty) if exec_qty > 0 else px
             usd = round(quote_filled, 2)
             placed += 1
+            if o.side == "BUY":
+                buy_fills += 1
             rec = led.record(o.side, o.symbol, usd, fill_px)
             append_trade({**rec, "mode": "live" if cfg.live else "testnet", "why": why})
             mark = "✓ تم" if status in ("FILLED", "PARTIALLY_FILLED") else f"({status})"
@@ -1755,9 +1782,19 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
                     and not (pos_now and pos_now.qty * pos_now.avg > MIN_NOTIONAL_USD)):
                 # held positions are exempt: banning would drop them from the scan
                 # targets and force-sell a healthy position over a failed top-up.
+                platform_fails += 1
                 _ban_symbols(state, {o.symbol}, PLATFORM_LIMIT_BAN_HOURS)
                 state.log(f"🚧 {o.symbol}: حد منصة بينانس (ضمان/اقتراض ممتلئ) — "
                           f"استبعاد {PLATFORM_LIMIT_BAN_HOURS:g}س وتحويل الميزانية للبديل")
+    if _should_rearm_rotation(buys, buy_fills, platform_fails):
+        # the ENTIRE buy side was refused by exchange platform caps: the day's
+        # rotation deployed nothing and the refused symbols are banned now.
+        # Re-arm the candle gate so the NEXT hourly cycle rotates the budget
+        # into alternates instead of sitting 100% cash until tomorrow.
+        with state.lock:
+            state.last_rebalance_candle = prev_rotation_candle
+        _save_auto(state)
+        state.log("🔁 كل مشتريات الدورة رفضتها حدود المنصة — سيُعاد التدوير بالبدائل في الدورة القادمة")
     if stop_banned:
         _ban_symbols(state, stop_banned, cfg.stop_cooldown_hours)
         days = cfg.stop_cooldown_hours / 24.0
