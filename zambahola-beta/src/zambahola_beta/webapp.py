@@ -1103,20 +1103,39 @@ def _falling_knife_skips(targets: dict, close_ref: dict, prices: dict,
 
 
 def _consolidate_small_targets(targets: dict, equity_usd: float, min_usd: float,
-                               held: set, cap_w: float) -> list[str]:
+                               held: set, cap_w: float) -> tuple[list[str], list[str]]:
     """A NEW entry whose target $ sits below the exchange min-notional can never fill:
     the weight silently rots as dead cash while the coin shows as 'picked' (COTI at
-    4.3% of a $178 book = $7.6 < $10 -> skipped every cycle). Drop such targets and
-    redistribute the freed weight across the remaining picks (proportionally, capped
-    per coin at ``cap_w``); whatever can't be absorbed stays cash. Held coins are left
-    alone — a small target there is a TRIM instruction, not an unfillable buy.
-    Mutates ``targets``; returns the dropped symbols."""
+    4.3% of a $178 book = $7.6 < $10 -> skipped every cycle).
+
+    A pick just UNDER the minimum is a real pick the vol-sizer shrank — dropping it
+    means missing the trade entirely (EPIC at $9.4 on a $145 book rallied +8% without
+    us). So: targets >= half the minimum are BUMPED UP to the minimum (+15% headroom),
+    funded from cash, bounded by ``cap_w`` and a 99% total. Only targets below half
+    the minimum (the sizer really didn't want them / equity too small) are dropped,
+    their weight redistributed across the remaining picks. Held coins are left alone —
+    a small target there is a TRIM instruction, not an unfillable buy.
+    Mutates ``targets``; returns (dropped, bumped) symbol lists."""
     if equity_usd <= 0 or min_usd <= 0:
-        return []
-    drop = [s for s, w in targets.items()
-            if s not in held and w > 0 and w * equity_usd < min_usd]
+        return [], []
+    small = [s for s, w in targets.items()
+             if s not in held and w > 0 and w * equity_usd < min_usd]
+    if not small:
+        return [], []
+    drop: list[str] = []
+    bumped: list[str] = []
+    for s in small:
+        w = targets[s]
+        bump_w = (min_usd * 1.15) / equity_usd
+        total_others = sum(v for k, v in targets.items() if k != s and v > 0)
+        if (w * equity_usd >= 0.5 * min_usd and bump_w <= cap_w
+                and total_others + bump_w <= 0.99):
+            targets[s] = round(bump_w, 4)
+            bumped.append(s)
+        else:
+            drop.append(s)
     if not drop:
-        return []
+        return [], bumped
     freed = 0.0
     for s in drop:
         freed += targets[s]
@@ -1134,7 +1153,7 @@ def _consolidate_small_targets(targets: dict, equity_usd: float, min_usd: float,
         freed -= absorbed
         if absorbed <= 1e-9:
             break
-    return drop
+    return drop, bumped
 
 
 def _ban_symbols(state: AppState, symbols: set[str], hours: float) -> None:
@@ -1618,8 +1637,11 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
             lev_map2 = sig.get("leverage") or {}
             cap_w *= max([max(1.0, float(lev_map2.get(s2, 1.0)))
                           for s2, w2 in targets.items() if w2 > 0], default=1.0)
-        small = _consolidate_small_targets(
+        small, bumped_up = _consolidate_small_targets(
             targets, eq_now, MIN_NOTIONAL_USD * 1.1, held_pos, cap_w)
+        if bumped_up:
+            state.log("📈 رفع أهداف صغيرة للحد الأدنى (بدل إسقاطها): "
+                      + " · ".join(x[:-4] if x.endswith("USDT") else x for x in bumped_up))
         if small:
             state.log("🧲 دمج أهداف أصغر من الحد الأدنى ($10): "
                       + " · ".join(x[:-4] if x.endswith("USDT") else x for x in small)
@@ -1717,6 +1739,12 @@ def do_execute(cfg: AppConfig, state: AppState, *, force_rebalance: bool = False
         _ne = float(mstats.get("net_equity_usd") or 0.0)
         if _ne > 0:
             eff_budget = min(eff_budget, _ne)
+    else:  # spot: cap the display at what the wallet actually holds
+        _eq = balances.get("USDT", 0.0) + sum(
+            balances.get(s[:-4] if s.endswith("USDT") else s, 0.0) * p
+            for s, p in prices.items() if p > 0)
+        if _eq > 0:
+            eff_budget = min(eff_budget, round(_eq, 2))
     state.log(f"{net} (ميزانية ${eff_budget:g})")
     ranked_map = {r["symbol"]: r for r in sig.get("ranked", [])}
     placed = forced

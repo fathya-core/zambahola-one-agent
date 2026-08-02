@@ -280,34 +280,56 @@ def test_book_drop_exit_skips_coins_already_stopped():
 
 def test_consolidate_small_targets_merges_subnotional_into_fillable():
     from zambahola_beta.webapp import _consolidate_small_targets
-    # COTI at 4% of a $180 book = $7.2 < $11 -> dropped, weight moved to A/B
-    targets = {"AUSDT": 0.30, "BUSDT": 0.15, "COTIUSDT": 0.04}
-    dropped = _consolidate_small_targets(targets, equity_usd=180.0, min_usd=11.0,
-                                         held=set(), cap_w=0.35)
-    assert dropped == ["COTIUSDT"]
+    # COTI at 2% of a $180 book = $3.6 < half of $11 -> dropped, weight moved to A/B
+    targets = {"AUSDT": 0.30, "BUSDT": 0.15, "COTIUSDT": 0.02}
+    dropped, bumped = _consolidate_small_targets(targets, equity_usd=180.0, min_usd=11.0,
+                                                 held=set(), cap_w=0.35)
+    assert dropped == ["COTIUSDT"] and bumped == []
     assert targets["COTIUSDT"] == 0.0
     assert targets["AUSDT"] > 0.30 and targets["BUSDT"] > 0.15
     assert targets["AUSDT"] <= 0.35 + 1e-9
-    assert abs(sum(targets.values()) - 0.49) < 0.01  # freed weight redeployed, not lost
+    assert abs(sum(targets.values()) - 0.47) < 0.01  # freed weight redeployed, not lost
 
 
 def test_consolidate_small_targets_leaves_held_trims_alone():
     from zambahola_beta.webapp import _consolidate_small_targets
     # a HELD coin with a small target is a TRIM instruction - must not be zeroed
     targets = {"AUSDT": 0.30, "HELDUSDT": 0.04}
-    dropped = _consolidate_small_targets(targets, 180.0, 11.0, {"HELDUSDT"}, 0.35)
-    assert dropped == []
+    dropped, bumped = _consolidate_small_targets(targets, 180.0, 11.0, {"HELDUSDT"}, 0.35)
+    assert dropped == [] and bumped == []
     assert targets["HELDUSDT"] == 0.04
 
 
 def test_consolidate_small_targets_respects_cap_leftover_to_cash():
     from zambahola_beta.webapp import _consolidate_small_targets
     # the only fillable pick is already at cap -> freed weight stays cash
-    targets = {"AUSDT": 0.35, "BUSDT": 0.05}
-    dropped = _consolidate_small_targets(targets, 100.0, 11.0, set(), 0.35)
-    assert dropped == ["BUSDT"]
+    # ($3 target on a $100 book is below half the $11 minimum -> true drop)
+    targets = {"AUSDT": 0.35, "BUSDT": 0.03}
+    dropped, bumped = _consolidate_small_targets(targets, 100.0, 11.0, set(), 0.35)
+    assert dropped == ["BUSDT"] and bumped == []
     assert targets["AUSDT"] == 0.35
     assert targets["BUSDT"] == 0.0
+
+
+def test_consolidate_bumps_near_minimum_pick_instead_of_dropping():
+    from zambahola_beta.webapp import _consolidate_small_targets
+    # EPIC case: vol-sizer gave 6.5% of a $145 book = $9.4 — a REAL pick just under
+    # the $11 minimum. It must be bumped TO the minimum (+15% headroom), not dropped
+    # (it rallied +8% the same day while we sat in cash).
+    targets = {"AUSDT": 0.17, "EPICUSDT": 0.065}
+    dropped, bumped = _consolidate_small_targets(targets, 145.0, 11.0, set(), 0.35)
+    assert dropped == [] and bumped == ["EPICUSDT"]
+    assert abs(targets["EPICUSDT"] * 145.0 - 11.0 * 1.15) < 0.2  # ≈ $12.65
+    assert targets["AUSDT"] == 0.17  # others untouched
+
+
+def test_consolidate_bump_respects_cap_and_total_budget():
+    from zambahola_beta.webapp import _consolidate_small_targets
+    # bump would push total above 99% -> not affordable, falls back to drop
+    targets = {"AUSDT": 0.60, "BUSDT": 0.33, "CUSDT": 0.062}
+    dropped, bumped = _consolidate_small_targets(targets, 145.0, 11.0, set(), 0.62)
+    assert "CUSDT" in dropped and bumped == []
+    assert targets["CUSDT"] == 0.0
 
 
 def test_live_load_config_clamps_leverage_to_1x(tmp_path, monkeypatch):

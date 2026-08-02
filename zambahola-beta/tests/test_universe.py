@@ -265,6 +265,24 @@ def test_scan_rejects_single_day_pump_keeps_real_trend():
     assert "REALUSDT" in on["targets"]       # the genuine trend is preserved
 
 
+def test_scan_rejects_bounce_inside_downtrend_at_tight_threshold():
+    """KAITO trap (2026-08-02): a +12.9% one-day BOUNCE on a -10% prior-6d base
+    slipped under the 20% spike threshold, we bought the dead-cat top and bled
+    -11.5% the same day. At the tightened 10% threshold the bounce is rejected;
+    a real trend with a strong day on a POSITIVE base still passes."""
+    n = 260
+    real = np.linspace(100.0, 300.0, n)              # sustained climb, positive base
+    kaito = np.full(n, 100.0)
+    kaito[:-9] = np.linspace(80.0, 129.0, n - 9)     # old run-up to the peak
+    # replicate the actual closes: chop down 118→107→126→111→107, then +12.9% bounce
+    kaito[-9:] = [129.0, 120.4, 125.6, 111.1, 106.5, 106.5, 106.5, 106.5, 120.2]
+    frames = {"REALUSDT": _frame(real), "KAITOUSDT": _frame(kaito)}
+    new = scan(frames, top_n=5, max_correlation=1.0, min_vol=0.0,
+               max_spike_1d=0.10, spike_base_max=0.0)
+    assert "KAITOUSDT" not in new["targets"]  # bounce-on-weak-base rejected
+    assert "REALUSDT" in new["targets"]       # genuine trend still funded
+
+
 def test_scan_diversification_skips_correlated():
     rng = np.random.default_rng(0)
     n = 260
